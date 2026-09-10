@@ -320,26 +320,31 @@ export default function KelolaFormSEL() {
                       </div>
                     ) : (
                       <div className="space-y-2.5">
-                        {inds.map(ind => (
+                        {inds.map((ind, idx) => (
                           <div key={ind.id} className="rounded-xl border border-border bg-bg/30 p-3.5 space-y-2 transition-all hover:border-primary/40 hover:bg-surface hover:shadow-xs relative group">
                             <div className="flex items-start justify-between gap-3">
-                              <div className="flex-1">
-                                <div className="flex flex-wrap items-center gap-1.5 mb-1">
-                                  <span className={`inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded ${ind.subjek === 'guru' ? 'bg-primary/10 text-primary' : 'bg-accent/10 text-accent'}`}>
-                                    {ind.subjek === 'guru' ? <GraduationCap className="h-3 w-3" /> : <Users className="h-3 w-3" />}
-                                    {ind.subjek === 'guru' ? 'Guru' : 'Murid'}
-                                  </span>
-                                  <span className="inline-flex items-center gap-1 text-[9px] text-text-secondary font-medium px-1.5 py-0.5 rounded bg-surface border border-border/50">
-                                    {ind.konteks === 'kelas' ? <Building2 className="h-3 w-3" /> : <Trees className="h-3 w-3" />}
-                                    {ind.konteks === 'kelas' ? 'Kelas' : 'Lingkungan'}
-                                  </span>
+                              <div className="flex items-start gap-3 flex-1">
+                                <div className="h-6 w-6 rounded-lg bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
+                                  {idx + 1}
                                 </div>
-                                <p className="text-xs font-semibold text-text-primary leading-relaxed">{ind.teks}</p>
-                                {ind.catatan && (
-                                  <p className="text-[10px] text-text-secondary italic mt-1 leading-relaxed flex items-start gap-1">
-                                    <AlertCircle className="h-3 w-3 text-text-secondary/70 shrink-0 mt-0.5" /> {ind.catatan}
-                                  </p>
-                                )}
+                                <div className="space-y-1">
+                                  <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                                    <span className={`inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded ${ind.subjek === 'guru' ? 'bg-primary/10 text-primary' : 'bg-accent/10 text-accent'}`}>
+                                      {ind.subjek === 'guru' ? <GraduationCap className="h-3 w-3" /> : <Users className="h-3 w-3" />}
+                                      {ind.subjek === 'guru' ? 'Guru' : 'Murid'}
+                                    </span>
+                                    <span className="inline-flex items-center gap-1 text-[9px] text-text-secondary font-medium px-1.5 py-0.5 rounded bg-surface border border-border/50">
+                                      {ind.konteks === 'kelas' ? <Building2 className="h-3 w-3" /> : <Trees className="h-3 w-3" />}
+                                      {ind.konteks === 'kelas' ? 'Kelas' : 'Lingkungan'}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs font-semibold text-text-primary leading-relaxed">{ind.teks}</p>
+                                  {ind.catatan && (
+                                    <p className="text-[10px] text-text-secondary italic mt-1 leading-relaxed flex items-start gap-1">
+                                      <AlertCircle className="h-3 w-3 text-text-secondary/70 shrink-0 mt-0.5" /> {ind.catatan}
+                                    </p>
+                                  )}
+                                </div>
                               </div>
                               <div className="flex items-center gap-1 shrink-0">
                                 <button
