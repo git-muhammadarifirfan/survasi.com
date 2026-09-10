@@ -63,6 +63,8 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
     setIsBulkMode(false);
   };
 
+  const perPage = 15;
+
   const { data: schools = [], isLoading } = useQuery({
     queryKey: ['schools', kabupatenFilter, activeKecamatan, statusFilter, searchTerm],
     queryFn: () => database.getSchools({
@@ -75,11 +77,6 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
 
   const totalPages = Math.max(1, Math.ceil(schools.length / perPage));
   const paged = schools.slice((currentPage - 1) * perPage, currentPage * perPage);
-
-  const showToast = (msg: string) => {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 3500);
-  };
 
   const statusBadge = (status: string) => {
     if (status === 'sudah') {
@@ -177,19 +174,15 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    showToast(`Jawaban survei ${sch.nama} berhasil diekspor!`);
+    notifyToast({
+      type: 'success',
+      title: 'Ekspor Berhasil',
+      message: `Jawaban survei ${sch.nama} berhasil diekspor!`,
+    });
   };
 
   return (
     <div className="space-y-6 animate-fade-in relative">
-      {/* Toast Notification di ATAS KANAN (top-6 right-6) */}
-      {toastMsg && (
-        <div className="fixed top-6 right-6 z-50 flex items-center gap-2.5 rounded-xl bg-slate-900 text-white px-4 py-3 shadow-2xl text-xs font-semibold animate-scale-in border border-slate-700">
-          <Check className="w-4 h-4 text-emerald-400" />
-          <span>{toastMsg}</span>
-        </div>
-      )}
-
       {/* Header Banner & Filters */}
       <div className="rounded-2xl bg-surface p-6 shadow-card border border-border">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">

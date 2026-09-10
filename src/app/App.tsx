@@ -8,7 +8,7 @@ import Sidebar from '../shared/components/Sidebar';
 import Topbar from '../shared/components/Topbar';
 import ThreeDotsLoader from '../shared/components/ThreeDotsLoader';
 import ThrottleToast from '../shared/components/ThrottleToast';
-import NotificationToastContainer from '../shared/components/NotificationToast';
+import NotificationToastContainer, { notifyToast } from '../shared/components/NotificationToast';
 
 // Lazy Loaded Feature Pages
 const Login = lazy(() => import('../features/auth/pages/LoginPage'));
