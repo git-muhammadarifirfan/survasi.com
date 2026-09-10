@@ -139,16 +139,16 @@ mysql -u root -p < database/schema.sql
 
 ### 2. Import Seed Data & Master File
 ```bash
-mysql -u root -p bsan_jatim_monitoring < database/seed.sql
-mysql -u root -p bsan_jatim_monitoring < database/seed-sel-indikator.sql
-mysql -u root -p bsan_jatim_monitoring < database/seed-pertanyaan.sql
-mysql -u root -p bsan_jatim_monitoring < database/import-sekolah.sql
-mysql -u root -p bsan_jatim_monitoring < database/import-responden.sql
+mysql -u root -p db_survasi < database/seed.sql
+mysql -u root -p db_survasi < database/seed-sel-indikator.sql
+mysql -u root -p db_survasi < database/seed-pertanyaan.sql
+mysql -u root -p db_survasi < database/import-sekolah.sql
+mysql -u root -p db_survasi < database/import-responden.sql
 ```
 
 ### 3. Jalankan Uji Verifikasi
 ```bash
-mysql -u root -p bsan_jatim_monitoring < database/verify.sql
+mysql -u root -p db_survasi < database/verify.sql
 ```
 *Pastikan seluruh indikator uji mengembalikan respon `✓ PASS`.*
 

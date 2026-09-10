@@ -391,11 +391,11 @@ File SQL lengkap berisi semua CREATE TABLE, indexes, foreign keys, dan triggers.
 -- ═══════════════════════════════════════════════════════════════
 
 -- Buat database
-CREATE DATABASE IF NOT EXISTS bsan_jatim_monitoring
+CREATE DATABASE IF NOT EXISTS db_survasi
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
-USE bsan_jatim_monitoring;
+USE db_survasi;
 
 -- ───────────────────────────────────────────
 -- 1. WILAYAH HIERARCHY
@@ -838,7 +838,7 @@ Seed data untuk initial setup (wilayah, modul BSAN, dimensi SEL, indikator, pert
 -- SEED DATA — BSAN JAWA TIMUR
 -- ═══════════════════════════════════════════════════════════════
 
-USE bsan_jatim_monitoring;
+USE db_survasi;
 
 -- ─── 1. WILAYAH ───────────────────────────────────────────────
 
@@ -1408,8 +1408,8 @@ mysql -u root -p < database/verify.sql
 ## Verification Plan
 
 ### Automated Tests
-- `mysql -u root -p -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'bsan_jatim_monitoring';"` → harus = 20
-- `mysql -u root -p bsan_jatim_monitoring < database/verify.sql` → semua foreign key valid
+- `mysql -u root -p -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'db_survasi';"` → harus = 20
+- `mysql -u root -p db_survasi < database/verify.sql` → semua foreign key valid
 - Jalankan setiap query di folder `database/queries/` untuk memastikan tidak ada error
 
 ### Manual Verification

@@ -24,7 +24,7 @@ LANGKAH 1 — BUAT DATABASE USER (Opsional, direkomendasikan)
   Jalankan perintah berikut (ganti 'password_aman' dengan password yang kuat):
   ┌──────────────────────────────────────────────────────────────────────────┐
   │  CREATE USER 'bsan_user'@'localhost' IDENTIFIED BY 'password_aman';     │
-  │  GRANT ALL PRIVILEGES ON bsan_jatim_monitoring.* TO 'bsan_user'@'%';   │
+  │  GRANT ALL PRIVILEGES ON db_survasi.* TO 'bsan_user'@'%';   │
   │  FLUSH PRIVILEGES;                                                       │
   │  EXIT;                                                                   │
   └──────────────────────────────────────────────────────────────────────────┘
@@ -38,7 +38,7 @@ LANGKAH 2 — INISIALISASI SCHEMA DATABASE
   │  mysql -u root -p < database/schema.sql                                 │
   └──────────────────────────────────────────────────────────────────────────┘
 
-  Ini akan membuat database 'bsan_jatim_monitoring' dengan:
+  Ini akan membuat database 'db_survasi' dengan:
     - 20 tabel utama (users, satuan_pendidikan, responden_survey, dll)
     - 3 views (v_kecamatan_stats, v_kabupaten_stats, v_sel_sesi_scores)
     - Trigger untuk update otomatis
@@ -50,9 +50,9 @@ LANGKAH 3 — IMPORT DATA AWAL (SEED)
 
   Jalankan berurutan:
   ┌──────────────────────────────────────────────────────────────────────────┐
-  │  mysql -u root -p bsan_jatim_monitoring < database/seed.sql             │
-  │  mysql -u root -p bsan_jatim_monitoring < database/seed-sel-indikator.sql │
-  │  mysql -u root -p bsan_jatim_monitoring < database/seed-pertanyaan.sql  │
+  │  mysql -u root -p db_survasi < database/seed.sql             │
+  │  mysql -u root -p db_survasi < database/seed-sel-indikator.sql │
+  │  mysql -u root -p db_survasi < database/seed-pertanyaan.sql  │
   └──────────────────────────────────────────────────────────────────────────┘
 
   seed.sql berisi:
@@ -66,8 +66,8 @@ LANGKAH 4 — IMPORT DATA SEKOLAH & RESPONDEN
 
   (File besar — mungkin butuh beberapa menit)
   ┌──────────────────────────────────────────────────────────────────────────┐
-  │  mysql -u root -p bsan_jatim_monitoring < database/import-sekolah.sql  │
-  │  mysql -u root -p bsan_jatim_monitoring < database/import-responden.sql│
+  │  mysql -u root -p db_survasi < database/import-sekolah.sql  │
+  │  mysql -u root -p db_survasi < database/import-responden.sql│
   └──────────────────────────────────────────────────────────────────────────┘
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -109,7 +109,7 @@ LANGKAH 6 — VERIFIKASI DATABASE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   ┌──────────────────────────────────────────────────────────────────────────┐
-  │  mysql -u root -p bsan_jatim_monitoring < database/verify.sql          │
+  │  mysql -u root -p db_survasi < database/verify.sql          │
   └──────────────────────────────────────────────────────────────────────────┘
 
   Semua baris harus menunjukkan ✓ PASS.
@@ -172,7 +172,7 @@ KONFIGURASI FILE .ENV
   │  DB_PORT=3306                                                             │
   │  DB_USER=bsan_user                                                        │
   │  DB_PASS=password_aman                                                   │
-  │  DB_NAME=bsan_jatim_monitoring                                            │
+  │  DB_NAME=db_survasi                                            │
   │  JWT_SECRET=random_64_chars_string                                        │
   │  JWT_EXPIRES_IN=8h                                                        │
   │  PORT=3001                                                                │
@@ -276,7 +276,7 @@ TROUBLESHOOTING
   Error "Access denied for user":
     → Periksa DB_USER dan DB_PASS di server/.env
 
-  Error "Unknown database bsan_jatim_monitoring":
+  Error "Unknown database db_survasi":
     → Jalankan dulu langkah 2 (schema.sql)
 
   Error "Table doesn't exist":

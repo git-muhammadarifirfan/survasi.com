@@ -7,13 +7,13 @@
 --   Berisi data referensi yang diperlukan untuk sistem berjalan.
 --
 -- @usage
---   mysql -u root -p bsan_jatim_monitoring < database/seed.sql
+--   mysql -u root -p db_survasi < database/seed.sql
 --
 -- @version 1.0.0
 -- @created 2026-09-09
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-USE bsan_jatim_monitoring;
+USE db_survasi;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 1. WILAYAH: Provinsi → Kabupaten → Kecamatan

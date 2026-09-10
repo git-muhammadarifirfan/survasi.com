@@ -18,10 +18,10 @@
 --   Jalankan setelah seed.sql (membutuhkan data modul_bsan)
 --
 -- @usage
---   mysql -u root -p bsan_jatim_monitoring < database/seed-pertanyaan.sql
+--   mysql -u root -p db_survasi < database/seed-pertanyaan.sql
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-USE bsan_jatim_monitoring;
+USE db_survasi;
 
 -- Clear previous data to prevent duplicates on re-seed
 DELETE FROM jawaban_survey;

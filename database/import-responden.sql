@@ -2,7 +2,7 @@
 -- IMPORT RESPONDEN SURVEY — BSAN JAWA TIMUR
 -- ═══════════════════════════════════════════════════════════════
 
-USE bsan_jatim_monitoring;
+USE db_survasi;
 
 INSERT INTO responden_survey (nama, jenis_kelamin, posisi, sekolah_id, npsn, kabupaten_id, kecamatan_id, penerima_modul, penyelenggara_pelatihan, status_implementasi, kelas_mengajar)
 VALUES

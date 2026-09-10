@@ -16,7 +16,7 @@
 --   - import-sekolah.sql sudah dijalankan (data sekolah sudah terisi)
 --
 -- @usage
---   mysql -u root -p bsan_jatim_monitoring < database/seed-pengawas.sql
+--   mysql -u root -p db_survasi < database/seed-pengawas.sql
 --
 -- @password_formula
 --   password = LOWER(SUBSTRING_INDEX(nama_sekolah, ' ', 1)) + RIGHT(npsn, 4)
@@ -30,7 +30,7 @@
 --   Gunakan generate-pengawas-accounts.js untuk generate hash sesungguhnya.
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-USE bsan_jatim_monitoring;
+USE db_survasi;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- CATATAN PENTING:

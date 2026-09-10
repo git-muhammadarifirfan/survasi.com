@@ -46,7 +46,7 @@ async function main() {
     port:     parseInt(process.env.DB_PORT || '3306'),
     user:     process.env.DB_USER     || 'root',
     password: process.env.DB_PASS     || '',
-    database: process.env.DB_NAME     || 'bsan_jatim_monitoring',
+    database: process.env.DB_NAME     || 'db_survasi',
   });
 
   console.log('🔗 Connected to MySQL:', process.env.DB_NAME);
