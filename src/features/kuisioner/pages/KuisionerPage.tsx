@@ -10,7 +10,7 @@ import { createPortal } from 'react-dom';
 import {
   BookOpen, ChevronLeft, ChevronRight, Check, Save, Send, HelpCircle,
   AlertCircle, PlayCircle, ShieldCheck, WifiOff, RefreshCw, Plus, Edit3,
-  Trash2, X, Eye, Layers, FileText, ArrowUp, ArrowDown, Move
+  Trash2, X, Eye, Layers, FileText, GripVertical
 } from 'lucide-react';
 import { apiClient } from '../../../shared/services/api-client';
 import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
@@ -207,6 +207,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
 
   // Drag and Drop State & Handler
   const [draggedQuestionId, setDraggedQuestionId] = useState<number | null>(null);
+  const [dragOverQuestionId, setDragOverQuestionId] = useState<number | null>(null);
 
   const handleDragStart = (e: React.DragEvent, id: number) => {
     setDraggedQuestionId(id);
@@ -214,12 +215,20 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     e.dataTransfer.setData('text/plain', String(id));
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragOver = (e: React.DragEvent, id: number) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+    if (dragOverQuestionId !== id) {
+      setDragOverQuestionId(id);
+    }
+  };
+
+  const handleDragLeave = () => {
+    setDragOverQuestionId(null);
   };
 
   const handleDropQuestion = async (targetId: number, currentSectionList: ApiQuestionItem[]) => {
+    setDragOverQuestionId(null);
     if (!draggedQuestionId || draggedQuestionId === targetId) return;
 
     const sourceIdx = currentSectionList.findIndex(q => q.id === draggedQuestionId);
@@ -631,36 +640,21 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                       key={q.id}
                       draggable
                       onDragStart={e => handleDragStart(e, q.id)}
-                      onDragOver={handleDragOver}
+                      onDragOver={e => handleDragOver(e, q.id)}
+                      onDragLeave={handleDragLeave}
                       onDrop={() => handleDropQuestion(q.id, secQuestions)}
-                      className={`p-4 rounded-xl bg-white border transition flex items-start justify-between gap-4 group cursor-grab active:cursor-grabbing ${
-                        draggedQuestionId === q.id ? 'border-indigo-500 bg-indigo-50/50 shadow-md opacity-60' : 'border-slate-200/60 hover:border-indigo-300 hover:shadow-xs'
+                      className={`p-4 rounded-xl bg-white border transition-all duration-200 flex items-start justify-between gap-4 group cursor-grab active:cursor-grabbing ${
+                        draggedQuestionId === q.id
+                          ? 'border-indigo-500 bg-indigo-50/60 shadow-lg scale-[0.99] opacity-40 border-dashed'
+                          : dragOverQuestionId === q.id
+                          ? 'border-indigo-600 bg-indigo-50/30 scale-[1.01] shadow-md border-t-2'
+                          : 'border-slate-200/60 hover:border-indigo-300 hover:shadow-xs'
                       }`}
                     >
                       <div className="flex items-start space-x-3">
-                        {/* Drag Handle Icon + Up-Down Controls */}
-                        <div className="flex items-center space-x-1 shrink-0 pt-0.5">
-                          <div className="p-1 text-slate-300 group-hover:text-slate-500 transition cursor-grab">
-                            <Move className="w-4 h-4" />
-                          </div>
-                          <div className="flex flex-col items-center justify-center space-y-0.5">
-                            <button
-                              disabled={qIdx === 0}
-                              onClick={(e) => { e.stopPropagation(); handleMoveQuestion(q.id, 'up', secQuestions); }}
-                              className={`p-0.5 rounded hover:bg-slate-100 cursor-pointer ${qIdx === 0 ? 'opacity-20 cursor-not-allowed' : 'text-slate-600'}`}
-                              title="Naikkan Urutan"
-                            >
-                              <ArrowUp className="w-3 h-3" />
-                            </button>
-                            <button
-                              disabled={qIdx === secQuestions.length - 1}
-                              onClick={(e) => { e.stopPropagation(); handleMoveQuestion(q.id, 'down', secQuestions); }}
-                              className={`p-0.5 rounded hover:bg-slate-100 cursor-pointer ${qIdx === secQuestions.length - 1 ? 'opacity-20 cursor-not-allowed' : 'text-slate-600'}`}
-                              title="Turunkan Urutan"
-                            >
-                              <ArrowDown className="w-3 h-3" />
-                            </button>
-                          </div>
+                        {/* 6-Dots Drag Handle Icon */}
+                        <div className="p-1.5 rounded-md text-slate-300 group-hover:text-indigo-600 group-hover:bg-indigo-50 transition cursor-grab shrink-0 mt-0.5" title="Tarik & Geser untuk mengubah urutan">
+                          <GripVertical className="w-5 h-5 stroke-[2.5]" />
                         </div>
 
                         <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">

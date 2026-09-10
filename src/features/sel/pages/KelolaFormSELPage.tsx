@@ -14,7 +14,7 @@ import {
   FileText, Plus, Edit3, Trash2, Search, Filter, Save, X, CheckCircle2,
   AlertCircle, GraduationCap, Users, Building2, Trees, Settings2, Eye,
   XCircle, Clock, CheckCircle, Sparkles, Brain, MapPin, ChevronRight,
-  School, ClipboardList, ArrowUp, ArrowDown, Move
+  School, ClipboardList, GripVertical
 } from 'lucide-react';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import { apiClient } from '../../../shared/services/api-client';
@@ -198,6 +198,7 @@ export default function KelolaFormSEL() {
 
   // Drag and Drop State & Handlers
   const [draggedIndikatorId, setDraggedIndikatorId] = useState<string | null>(null);
+  const [dragOverIndikatorId, setDragOverIndikatorId] = useState<string | null>(null);
 
   const handleDragStartIndikator = (e: React.DragEvent, id: string) => {
     setDraggedIndikatorId(id);
@@ -205,12 +206,20 @@ export default function KelolaFormSEL() {
     e.dataTransfer.setData('text/plain', id);
   };
 
-  const handleDragOverIndikator = (e: React.DragEvent) => {
+  const handleDragOverIndikator = (e: React.DragEvent, id: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+    if (dragOverIndikatorId !== id) {
+      setDragOverIndikatorId(id);
+    }
+  };
+
+  const handleDragLeaveIndikator = () => {
+    setDragOverIndikatorId(null);
   };
 
   const handleDropIndikator = async (targetId: string, groupList: SELIndikator[]) => {
+    setDragOverIndikatorId(null);
     if (!draggedIndikatorId || draggedIndikatorId === targetId) return;
 
     const sourceIdx = groupList.findIndex(i => i.id === draggedIndikatorId);
@@ -429,34 +438,21 @@ export default function KelolaFormSEL() {
                             key={ind.id}
                             draggable
                             onDragStart={e => handleDragStartIndikator(e, ind.id)}
-                            onDragOver={handleDragOverIndikator}
+                            onDragOver={e => handleDragOverIndikator(e, ind.id)}
+                            onDragLeave={handleDragLeaveIndikator}
                             onDrop={() => handleDropIndikator(ind.id, inds)}
-                            className={`rounded-xl border p-3.5 space-y-2 transition-all hover:border-primary/40 hover:bg-surface hover:shadow-xs relative group cursor-grab active:cursor-grabbing ${
-                              draggedIndikatorId === ind.id ? 'border-primary bg-primary/10 shadow-md opacity-60' : 'border-border bg-bg/30'
+                            className={`rounded-xl border p-3.5 space-y-2 transition-all duration-200 relative group cursor-grab active:cursor-grabbing ${
+                              draggedIndikatorId === ind.id 
+                                ? 'border-primary bg-primary/10 shadow-lg scale-[1.01] opacity-50' 
+                                : dragOverIndikatorId === ind.id
+                                ? 'border-primary bg-primary/5 shadow-md border-t-2 border-t-primary transform translate-y-0.5'
+                                : 'border-border bg-bg/30 hover:border-primary/40 hover:bg-surface hover:shadow-xs'
                             }`}
                           >
                             <div className="flex items-start justify-between gap-3">
-                              <div className="flex items-start gap-2 flex-1">
-                                <div className="p-1 text-text-secondary/40 group-hover:text-text-secondary transition cursor-grab shrink-0 pt-1">
-                                  <Move className="h-3.5 w-3.5" />
-                                </div>
-                                <div className="flex flex-col items-center justify-center space-y-0.5 shrink-0 pt-0.5">
-                                  <button
-                                    disabled={idx === 0}
-                                    onClick={(e) => { e.stopPropagation(); handleMoveIndikator(ind.id, 'up', inds); }}
-                                    className={`p-0.5 rounded hover:bg-border/60 cursor-pointer ${idx === 0 ? 'opacity-20 cursor-not-allowed' : 'text-text-secondary hover:text-primary'}`}
-                                    title="Naikkan Urutan"
-                                  >
-                                    <ArrowUp className="h-3 w-3" />
-                                  </button>
-                                  <button
-                                    disabled={idx === inds.length - 1}
-                                    onClick={(e) => { e.stopPropagation(); handleMoveIndikator(ind.id, 'down', inds); }}
-                                    className={`p-0.5 rounded hover:bg-border/60 cursor-pointer ${idx === inds.length - 1 ? 'opacity-20 cursor-not-allowed' : 'text-text-secondary hover:text-primary'}`}
-                                    title="Turunkan Urutan"
-                                  >
-                                    <ArrowDown className="h-3 w-3" />
-                                  </button>
+                              <div className="flex items-start gap-2.5 flex-1">
+                                <div className="p-1.5 text-text-secondary/40 group-hover:text-primary transition-colors cursor-grab shrink-0 pt-1 hover:bg-border/40 rounded-md">
+                                  <GripVertical className="h-4 w-4" />
                                 </div>
                                 <div className="h-6 w-6 rounded-lg bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
                                   {idx + 1}
