@@ -36,6 +36,18 @@ async function fetchJson<T>(endpoint: string, options?: RequestInit): Promise<T>
     throw new Error('Sesi berakhir. Silakan login kembali.');
   }
 
+  // Handle 429 Too Many Requests (Rate Limiting / Throttling)
+  if (response.status === 429) {
+    const errorData = await response.json().catch(() => ({ message: 'Terlalu banyak permintaan.' }));
+    const msg = errorData.message || 'Batas pengiriman server terlampaui. Mohon tunggu beberapa saat.';
+    window.dispatchEvent(
+      new CustomEvent('bsan_rate_limit_exceeded', {
+        detail: { message: msg },
+      })
+    );
+    throw new Error(msg);
+  }
+
   const data = await response.json().catch(() => ({ message: response.statusText }));
   if (!response.ok) {
     throw new Error((data as any).message || `HTTP ${response.status}`);

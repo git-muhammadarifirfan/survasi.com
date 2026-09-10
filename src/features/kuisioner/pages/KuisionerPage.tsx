@@ -14,6 +14,7 @@ import { apiClient } from '../../../shared/services/api-client';
 import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
 import SkeletonLoader from '../../../shared/components/SkeletonLoader';
 import { saveDraft, getDraft, clearDraft } from '../../../shared/utils/draftStorage';
+import { throttle } from '../../../shared/utils/throttle';
 
 interface KuisionerProps {
   userRole: 'admin' | 'pengawas';
@@ -169,8 +170,8 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     }
   };
 
-  // Submit Survey
-  const handleSubmitSurvey = async () => {
+  // Submit Survey (Throttled max 1 click per 2.5s)
+  const handleSubmitSurvey = throttle(async () => {
     if (!validateCurrentSection()) return;
 
     try {
@@ -225,7 +226,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     } finally {
       setSubmitting(false);
     }
-  };
+  }, 2500);
 
   if (loading) {
     return (
