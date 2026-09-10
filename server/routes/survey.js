@@ -42,6 +42,109 @@ router.get('/questions', async (req, res) => {
   }
 });
 
+// ─── POST /api/survey/questions (Add Question - Admin Only) ─────────────────
+router.post('/questions', async (req, res) => {
+  try {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Akses ditolak. Hanya Admin yang dapat mengelola pertanyaan.' });
+    }
+
+    const {
+      kode_pertanyaan, teks_pertanyaan, tipe, opsi_jawaban,
+      is_required, section, urutan
+    } = req.body;
+
+    if (!teks_pertanyaan || !section) {
+      return res.status(400).json({ success: false, message: 'Teks pertanyaan dan section wajib diisi.' });
+    }
+
+    const opsiJson = Array.isArray(opsi_jawaban) ? JSON.stringify(opsi_jawaban) : null;
+
+    const [result] = await pool.execute(`
+      INSERT INTO pertanyaan_survey (
+        kode_pertanyaan, teks_pertanyaan, tipe, opsi_jawaban,
+        urutan, is_required, section, is_active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+    `, [
+      kode_pertanyaan || 'Q_NEW',
+      teks_pertanyaan,
+      tipe || 'text',
+      opsiJson,
+      urutan || 99,
+      is_required ? 1 : 0,
+      section || 'identitas'
+    ]);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Pertanyaan berhasil ditambahkan.',
+      id: result.insertId
+    });
+  } catch (err) {
+    console.error('[SURVEY] create question error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal menambah pertanyaan survei.' });
+  }
+});
+
+// ─── PUT /api/survey/questions/:id (Update Question - Admin Only) ────────────
+router.put('/questions/:id', async (req, res) => {
+  try {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Akses ditolak. Hanya Admin yang dapat mengelola pertanyaan.' });
+    }
+
+    const questionId = parseInt(req.params.id);
+    const {
+      kode_pertanyaan, teks_pertanyaan, tipe, opsi_jawaban,
+      is_required, section
+    } = req.body;
+
+    const opsiJson = Array.isArray(opsi_jawaban) ? JSON.stringify(opsi_jawaban) : null;
+
+    await pool.execute(`
+      UPDATE pertanyaan_survey
+      SET 
+        kode_pertanyaan = COALESCE(?, kode_pertanyaan),
+        teks_pertanyaan = COALESCE(?, teks_pertanyaan),
+        tipe = COALESCE(?, tipe),
+        opsi_jawaban = COALESCE(?, opsi_jawaban),
+        is_required = COALESCE(?, is_required),
+        section = COALESCE(?, section)
+      WHERE id = ?
+    `, [
+      kode_pertanyaan || null,
+      teks_pertanyaan || null,
+      tipe || null,
+      opsiJson,
+      is_required !== undefined ? (is_required ? 1 : 0) : null,
+      section || null,
+      questionId
+    ]);
+
+    return res.json({ success: true, message: 'Pertanyaan berhasil diperbarui.' });
+  } catch (err) {
+    console.error('[SURVEY] update question error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal memperbarui pertanyaan.' });
+  }
+});
+
+// ─── DELETE /api/survey/questions/:id (Delete Question - Admin Only) ──────────
+router.delete('/questions/:id', async (req, res) => {
+  try {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Akses ditolak. Hanya Admin yang dapat mengelola pertanyaan.' });
+    }
+
+    const questionId = parseInt(req.params.id);
+    await pool.execute(`UPDATE pertanyaan_survey SET is_active = 0 WHERE id = ?`, [questionId]);
+
+    return res.json({ success: true, message: 'Pertanyaan berhasil dihapus.' });
+  } catch (err) {
+    console.error('[SURVEY] delete question error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal menghapus pertanyaan.' });
+  }
+});
+
 // ─── POST /api/survey/submit ─────────────────────────────────────────────────
 router.post('/submit', submitLimiter, async (req, res) => {
   const conn = await pool.getConnection();

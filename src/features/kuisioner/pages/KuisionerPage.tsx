@@ -6,15 +6,18 @@
  */
 
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   BookOpen, ChevronLeft, ChevronRight, Check, Save, Send, HelpCircle,
-  AlertCircle, PlayCircle, ShieldCheck, WifiOff, RefreshCw
+  AlertCircle, PlayCircle, ShieldCheck, WifiOff, RefreshCw, Plus, Edit3,
+  Trash2, X, Eye, Layers, FileText
 } from 'lucide-react';
 import { apiClient } from '../../../shared/services/api-client';
 import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
 import SkeletonLoader from '../../../shared/components/SkeletonLoader';
 import { saveDraft, getDraft, clearDraft } from '../../../shared/utils/draftStorage';
 import { throttle } from '../../../shared/utils/throttle';
+import { notifyToast } from '../../../shared/components/ThrottleToast';
 
 interface KuisionerProps {
   userRole: 'admin' | 'pengawas';
@@ -34,7 +37,7 @@ export interface ApiQuestionItem {
 }
 
 const SECTION_METADATA: Record<string, { title: string; desc: string }> = {
-  identitas: { title: 'Identitas Responden', desc: 'Informasi data dasar sekolah & pengisi' },
+  identitas: { title: 'Identitas Responden', desc: 'Kelola struktur pertanyaan, tipe isian (Esai/Pilihan), dan status kewajiban instrumen survei.' },
   pelatihan: { title: 'Pelatihan & Implementasi', desc: 'Identifikasi pelatihan & tingkat adopsi BSAN' },
   implementasi_awal: { title: 'Implementasi Modul Kelas Awal', desc: 'Evaluasi bagian mudah/sulit & media ajar kelas 1-3' },
   implementasi_tinggi: { title: 'Implementasi Modul Kelas Tinggi', desc: 'Evaluasi bagian mudah/sulit & media ajar kelas 4-6' },
@@ -44,11 +47,21 @@ const SECTION_METADATA: Record<string, { title: string; desc: string }> = {
 };
 
 export default function Kuisioner({ userRole }: KuisionerProps) {
-  void userRole;
   const [questions, setQuestions] = useState<ApiQuestionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Modal Admin CRUD State
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingQuestion, setEditingQuestion] = useState<ApiQuestionItem | null>(null);
+  const [formTeks, setFormTeks] = useState('');
+  const [formKode, setFormKode] = useState('');
+  const [formTipe, setFormTipe] = useState<'dropdown' | 'checkbox' | 'text' | 'radio' | 'scale'>('text');
+  const [formSection, setFormSection] = useState('identitas');
+  const [formOpsi, setFormOpsi] = useState('');
+  const [formIsRequired, setFormIsRequired] = useState(true);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   // Form state
   const [hasStarted, setHasStarted] = useState(false);
@@ -97,6 +110,100 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     }
     loadQuestions();
   }, []);
+
+  // Admin CRUD Actions
+  const handleOpenAddQuestion = (secName?: string) => {
+    setEditingQuestion(null);
+    setFormKode(`Q${questions.length + 1}`);
+    setFormTeks('');
+    setFormTipe('radio');
+    setFormSection(secName || 'identitas');
+    setFormOpsi('');
+    setFormIsRequired(true);
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditQuestion = (q: ApiQuestionItem) => {
+    setEditingQuestion(q);
+    setFormKode(q.kode_pertanyaan);
+    setFormTeks(q.teks_pertanyaan);
+    setFormTipe(q.tipe);
+    setFormSection(q.section);
+    setFormOpsi(q.opsi_jawaban ? q.opsi_jawaban.join('\n') : '');
+    setFormIsRequired(q.is_required);
+    setIsModalOpen(true);
+  };
+
+  const handleDeleteQuestion = async (id: number) => {
+    if (!confirm('Apakah Anda yakin ingin menghapus instrumen pertanyaan survei ini?')) return;
+    try {
+      const res = await apiClient.delete(`/survey/questions/${id}`);
+      if (res.success) {
+        setQuestions(prev => prev.filter(q => q.id !== id));
+        notifyToast({ type: 'success', title: 'Pertanyaan Dihapus', message: 'Instrumen berhasil dihapus dari database.' });
+      } else {
+        notifyToast({ type: 'error', title: 'Gagal Hapus', message: res.message || 'Gagal menghapus pertanyaan.' });
+      }
+    } catch {
+      notifyToast({ type: 'error', title: 'Error API', message: 'Gagal terhubung ke server MySQL.' });
+    }
+  };
+
+  const handleSaveQuestion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formTeks.trim()) return;
+
+    const parsedOpsi = formOpsi
+      .split('\n')
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    const payload = {
+      kode_pertanyaan: formKode,
+      teks_pertanyaan: formTeks,
+      tipe: formTipe,
+      section: formSection,
+      opsi_jawaban: parsedOpsi.length > 0 ? parsedOpsi : null,
+      is_required: formIsRequired,
+    };
+
+    try {
+      if (editingQuestion) {
+        const res = await apiClient.put(`/survey/questions/${editingQuestion.id}`, payload);
+        if (res.success) {
+          setQuestions(prev =>
+            prev.map(q =>
+              q.id === editingQuestion.id
+                ? { ...q, ...payload, opsi_jawaban: parsedOpsi.length > 0 ? parsedOpsi : null }
+                : q
+            )
+          );
+          notifyToast({ type: 'success', title: 'Berhasil Diperbarui', message: 'Instrumen pertanyaan survei berhasil diubah.' });
+        }
+      } else {
+        const res = await apiClient.post<{ id: number }>('/survey/questions', payload);
+        if (res.success && res.data) {
+          const newQ: ApiQuestionItem = {
+            id: res.data.id || Date.now(),
+            modul_id: 1,
+            kode_pertanyaan: formKode,
+            teks_pertanyaan: formTeks,
+            tipe: formTipe,
+            opsi_jawaban: parsedOpsi.length > 0 ? parsedOpsi : null,
+            urutan: questions.length + 1,
+            is_required: formIsRequired,
+            section: formSection,
+            target_kelas: '1-6',
+          };
+          setQuestions(prev => [...prev, newQ]);
+          notifyToast({ type: 'success', title: 'Berhasil Ditambahkan', message: 'Instrumen pertanyaan survei baru telah disimpan ke MySQL.' });
+        }
+      }
+      setIsModalOpen(false);
+    } catch {
+      notifyToast({ type: 'error', title: 'Error API', message: 'Gagal menyimpan pertanyaan ke MySQL.' });
+    }
+  };
 
   // Handle Restore Draft
   const handleRestoreDraft = () => {
@@ -365,6 +472,285 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     );
   }
 
+  // ADMIN MANAGEMENT VIEW
+  if (userRole === 'admin') {
+    const groupedSections = Array.from(new Set(questions.map(q => q.section)));
+
+    return (
+      <div className="space-y-6 max-w-[1400px] mx-auto animate-fade-in pb-12">
+        {/* Header Banner */}
+        <div className="rounded-2xl bg-white p-6 md:p-8 border border-slate-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold font-display text-slate-900 tracking-tight">
+              Manajemen Bank Soal Kuisioner BSAN
+            </h1>
+            <p className="text-slate-500 text-xs md:text-sm mt-1">
+              Kelola struktur pertanyaan, tipe isian (Esai/Pilihan), dan status kewajiban instrumen survei.
+            </p>
+          </div>
+          <div className="flex items-center space-x-3 shrink-0">
+            <button
+              onClick={() => setIsPreviewOpen(true)}
+              className="inline-flex items-center space-x-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer"
+            >
+              <Eye className="w-4 h-4 text-slate-500" />
+              <span>Preview Tampilan Pengawas</span>
+            </button>
+            <button
+              onClick={() => handleOpenAddQuestion()}
+              className="inline-flex items-center space-x-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md shadow-indigo-600/20 transition cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tambah Pertanyaan</span>
+            </button>
+          </div>
+        </div>
+
+        {/* List Pertanyaan Terkelompok per Bagian / Section */}
+        <div className="space-y-6">
+          {groupedSections.map((secKey, sIdx) => {
+            const secMeta = SECTION_METADATA[secKey] || {
+              title: secKey.toUpperCase(),
+              desc: 'Instrumen survei BSAN',
+            };
+            const secQuestions = questions.filter(q => q.section === secKey);
+
+            return (
+              <div key={secKey} className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+                {/* Section Header */}
+                <div className="px-6 py-4 bg-slate-50/70 border-b border-slate-100 flex items-center justify-between">
+                  <div>
+                    <span className="text-[11px] font-bold text-indigo-600 uppercase tracking-wider">
+                      BAGIAN {sIdx + 1}
+                    </span>
+                    <h3 className="text-base font-bold text-slate-800 font-display">{secMeta.title}</h3>
+                  </div>
+                  <span className="text-xs font-semibold px-3 py-1 bg-white border border-slate-200 rounded-full text-slate-600">
+                    {secQuestions.length} Pertanyaan
+                  </span>
+                </div>
+
+                {/* Questions Items */}
+                <div className="p-6 space-y-3">
+                  {secQuestions.map((q) => (
+                    <div
+                      key={q.id}
+                      className="p-4 rounded-xl bg-white border border-slate-200/60 hover:border-indigo-300 transition flex items-start justify-between gap-4 group"
+                    >
+                      <div className="flex items-start space-x-4">
+                        <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                          {q.urutan}
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-sm font-semibold text-slate-800 leading-snug">
+                            {q.kode_pertanyaan}. {q.teks_pertanyaan}
+                            {q.is_required && <span className="text-red-500 ml-1">*</span>}
+                          </p>
+                          <div className="flex items-center space-x-3 text-xs text-slate-400">
+                            <span>
+                              Tipe: <strong className="text-slate-600 capitalize">{q.tipe === 'text' ? 'Teks Isian' : q.tipe === 'radio' ? 'Pilihan Ganda' : q.tipe}</strong>
+                            </span>
+                            <span>•</span>
+                            <span>{q.is_required ? 'Wajib Diisi' : 'Opsional'}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2 shrink-0">
+                        <button
+                          onClick={() => handleOpenEditQuestion(q)}
+                          className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 transition text-xs font-medium inline-flex items-center space-x-1 cursor-pointer"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteQuestion(q.id)}
+                          className="p-2 rounded-lg border border-slate-200 hover:bg-red-50 hover:text-red-600 text-slate-400 transition cursor-pointer"
+                          title="Hapus Pertanyaan"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Modal Admin Add/Edit Question */}
+        {isModalOpen && createPortal(
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-xl overflow-hidden animate-scale-in">
+              <div className="flex items-center justify-between p-5 border-b border-slate-100">
+                <div className="flex items-center space-x-2">
+                  <FileText className="w-5 h-5 text-indigo-600" />
+                  <h3 className="font-bold text-slate-800 text-base font-display">
+                    {editingQuestion ? 'Edit Pertanyaan Survei' : 'Tambah Pertanyaan Survei Baru'}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setIsModalOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveQuestion} className="p-6 space-y-4 text-xs">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-600 uppercase text-[10px]">Kode Pertanyaan</label>
+                    <input
+                      type="text"
+                      value={formKode}
+                      onChange={e => setFormKode(e.target.value)}
+                      placeholder="Contoh: Q1, Q2"
+                      required
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-600 uppercase text-[10px]">Bagian / Section</label>
+                    <select
+                      value={formSection}
+                      onChange={e => setFormSection(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    >
+                      <option value="identitas">Identitas Responden</option>
+                      <option value="pelatihan">Pelatihan & Implementasi</option>
+                      <option value="implementasi_awal">Implementasi Kelas Awal</option>
+                      <option value="implementasi_tinggi">Implementasi Kelas Tinggi</option>
+                      <option value="kepsek">Dukungan Kepala Sekolah</option>
+                      <option value="refleksi">Refleksi & Perubahan Baik</option>
+                      <option value="kontak">Kontak Responden</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-600 uppercase text-[10px]">Teks Pertanyaan *</label>
+                  <textarea
+                    rows={3}
+                    value={formTeks}
+                    onChange={e => setFormTeks(e.target.value)}
+                    placeholder="Tuliskan butir pertanyaan survei..."
+                    required
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-relaxed"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-600 uppercase text-[10px]">Tipe Isian</label>
+                    <select
+                      value={formTipe}
+                      onChange={e => setFormTipe(e.target.value as any)}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                    >
+                      <option value="radio">Pilihan Ganda (Radio)</option>
+                      <option value="checkbox">Pilihan Jamak (Checkbox)</option>
+                      <option value="dropdown">Dropdown Options</option>
+                      <option value="text">Teks Isian / Esai</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1 flex items-center pt-5">
+                    <label className="flex items-center space-x-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={formIsRequired}
+                        onChange={e => setFormIsRequired(e.target.checked)}
+                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+                      />
+                      <span className="font-semibold text-slate-700">Wajib Diisi (Required)</span>
+                    </label>
+                  </div>
+                </div>
+
+                {formTipe !== 'text' && (
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-600 uppercase text-[10px]">
+                      Opsi Jawaban (Satu Opsi Per Baris)
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={formOpsi}
+                      onChange={e => setFormOpsi(e.target.value)}
+                      placeholder="Masukkan pilihan 1&#10;Masukkan pilihan 2&#10;Masukkan pilihan 3"
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none font-mono text-xs"
+                    />
+                  </div>
+                )}
+
+                <div className="border-t border-slate-100 pt-4 flex justify-end space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-50 transition cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl bg-indigo-600 text-white font-bold shadow-md hover:bg-indigo-700 transition flex items-center space-x-1.5 cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Simpan Pertanyaan</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
+
+        {/* Modal Live Preview */}
+        {isPreviewOpen && createPortal(
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-4xl max-h-[92vh] overflow-y-auto p-6 space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                <h3 className="font-bold text-slate-800 text-base">Preview Form Pengisian Pengawas</h3>
+                <button
+                  onClick={() => setIsPreviewOpen(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-2">
+                <p className="text-xs text-indigo-600 font-semibold mb-4">
+                  ℹ️ Ini adalah tampilan simulasi interaktif bagaimana Pengawas Sekolah melihat & mengisi instrumen survei ini.
+                </p>
+                {/* Embedded preview widget */}
+                <div className="bg-slate-50/50 p-6 rounded-2xl border border-slate-100 space-y-4">
+                  {questions.slice(0, 5).map(q => (
+                    <div key={q.id} className="p-4 bg-white rounded-xl border border-slate-200/70 space-y-2">
+                      <p className="text-sm font-semibold text-slate-800">{q.kode_pertanyaan}. {q.teks_pertanyaan}</p>
+                      {q.opsi_jawaban && (
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {q.opsi_jawaban.map((opt, oIdx) => (
+                            <span key={oIdx} className="px-3 py-1 bg-slate-100 text-slate-700 text-xs rounded-lg border border-slate-200">
+                              {opt}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+      </div>
+    );
+  }
+
+  // PENGAWAS USER VIEW (WIZARD PENGISIAN)
   // Active Wizard Screen
   return (
     <div className="space-y-6 pb-16">
