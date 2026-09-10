@@ -106,19 +106,24 @@ export default function KelolaFormSEL() {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Apakah Anda yakin ingin menghapus butir indikator pengamatan ini?')) return;
+  // Confirmation Modal State
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const confirmDeleteIndikator = async () => {
+    if (!deleteConfirmId) return;
+    setIsDeleting(true);
     try {
-      const res = await apiClient.delete(`/sel/indikator/${id}`);
+      const res = await apiClient.delete(`/sel/indikator/${deleteConfirmId}`);
       if (res.success) {
-        setIndikatorList(prev => prev.filter(i => i.id !== id));
+        setIndikatorList(prev => prev.filter(i => i.id !== deleteConfirmId));
         notifyToast({
           type: 'success',
           title: 'Indikator Dihapus',
           message: 'Butir indikator pengamatan berhasil dihapus.',
         });
       } else {
-        setIndikatorList(prev => prev.filter(i => i.id !== id));
+        setIndikatorList(prev => prev.filter(i => i.id !== deleteConfirmId));
         notifyToast({
           type: 'info',
           title: 'Indikator Dihapus',
@@ -126,12 +131,15 @@ export default function KelolaFormSEL() {
         });
       }
     } catch {
-      setIndikatorList(prev => prev.filter(i => i.id !== id));
+      setIndikatorList(prev => prev.filter(i => i.id !== deleteConfirmId));
       notifyToast({
         type: 'info',
         title: 'Indikator Dihapus',
         message: 'Indikator pengamatan telah dihapus.',
       });
+    } finally {
+      setIsDeleting(false);
+      setDeleteConfirmId(null);
     }
   };
 
@@ -543,7 +551,7 @@ export default function KelolaFormSEL() {
                                   <Edit3 className="h-3.5 w-3.5" />
                                 </button>
                                 <button
-                                  onClick={() => handleDelete(ind.id)}
+                                  onClick={() => setDeleteConfirmId(ind.id)}
                                   className="p-1.5 rounded-lg bg-surface border border-border text-status-belum hover:bg-status-belum/10 transition-smooth cursor-pointer"
                                   title="Hapus Indikator"
                                 >
@@ -695,6 +703,19 @@ export default function KelolaFormSEL() {
         </div>,
         document.body
       )}
+
+      {/* Confirmation Modal for Deleting Indicator */}
+      <ConfirmationModal
+        isOpen={deleteConfirmId !== null}
+        onClose={() => setDeleteConfirmId(null)}
+        onConfirm={confirmDeleteIndikator}
+        title="Hapus Indikator Pengamatan"
+        description="Apakah Anda yakin ingin menghapus butir indikator pengamatan ini? Tindakan ini tidak dapat dibatalkan."
+        confirmLabel="Hapus Indikator"
+        cancelLabel="Batal"
+        variant="danger"
+        isLoading={isDeleting}
+      />
     </div>
   );
 }
