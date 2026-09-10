@@ -347,13 +347,6 @@ export default function KelolaFormSEL() {
           { id: itemB.id, urutan: posA + 1 }
         ]
       });
-    try {
-      await apiClient.put('/sel/indikator/reorder', {
-        items: [
-          { id: itemA.id, urutan: posB + 1 },
-          { id: itemB.id, urutan: posA + 1 }
-        ]
-      });
       notifyToast({
         type: 'success',
         title: 'Urutan Diperbarui',
