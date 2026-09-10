@@ -136,6 +136,37 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     setIsModalOpen(true);
   };
 
+  // Submit Confirmation Modal State
+  const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
+
+  const confirmSubmitSurvey = async () => {
+    setIsSubmitModalOpen(false);
+    setSubmitting(true);
+    try {
+      const payload = {
+        responden: { nama: 'Pengawas Sidoarjo', peran: 'Pengawas Sekolah' },
+        jawaban: answers,
+      };
+
+      const res = await apiClient.post('/survey/submit', payload);
+      if (res.success) {
+        clearDraft('kuisioner');
+        setSubmitted(true);
+        notifyToast({
+          type: 'success',
+          title: 'Survei Berhasil Dikirim!',
+          message: 'Jawaban survei Anda telah resmi tersimpan di database.',
+        });
+      } else {
+        notifyToast({ type: 'error', title: 'Gagal Mengirim', message: res.message || 'Gagal mengirim survei.' });
+      }
+    } catch {
+      notifyToast({ type: 'error', title: 'Error Server', message: 'Gagal terhubung ke server.' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   // Confirmation Modal State
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -1169,8 +1200,11 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
             <button
               type="button"
               disabled={submitting}
-              onClick={handleSubmitSurvey}
-              className="inline-flex items-center space-x-2 px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm rounded-xl shadow-md shadow-emerald-600/30 transition transform hover:-translate-y-0.5"
+              onClick={() => {
+                if (!validateStep()) return;
+                setIsSubmitModalOpen(true);
+              }}
+              className="inline-flex items-center space-x-2 px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm rounded-xl shadow-md shadow-emerald-600/30 transition transform hover:-translate-y-0.5 cursor-pointer"
             >
               {submitting ? (
                 <ThreeDotsLoader size="sm" text="" className="p-0 flex-row" />
@@ -1184,6 +1218,20 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
           )}
         </div>
       </div>
+
+      {/* Confirmation Modal for Submitting Survey */}
+      <ConfirmationModal
+        isOpen={isSubmitModalOpen}
+        onClose={() => setIsSubmitModalOpen(false)}
+        onConfirm={confirmSubmitSurvey}
+        title="Kirim Jawaban Survei"
+        description="Apakah Anda yakin ingin mengirimkan seluruh jawaban survei ini? Jawaban yang telah dikirim tidak dapat diubah."
+        confirmLabel="Ya, Kirim Sekarang"
+        cancelLabel="Batal"
+        variant="purple"
+        icon={Send}
+        isLoading={submitting}
+      />
 
       {/* Confirmation Modal for Single Question Delete */}
       <ConfirmationModal

@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { NavLink, Link } from 'react-router-dom';
 import {
   LayoutDashboard, Map, BookOpen, Users, School, BarChart3,
   Layers, Grid3X3, AlertTriangle, MessageSquare, FileSpreadsheet,
   Settings, LogOut, X, PieChart, Brain, ClipboardList
 } from 'lucide-react';
+import ConfirmationModal from './ConfirmationModal';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -13,6 +15,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ isOpen, setIsOpen, userRole, onLogout }: SidebarProps) {
+  const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const adminGroups = [
     {
       title: 'RINGKASAN',
@@ -173,7 +176,7 @@ export default function Sidebar({ isOpen, setIsOpen, userRole, onLogout }: Sideb
             </div>
           </div>
           <button
-            onClick={onLogout}
+            onClick={() => setIsLogoutModalOpen(true)}
             className="flex w-full items-center space-x-3 rounded-xl px-3 py-2.5 text-[13px] font-medium text-status-belum hover:bg-status-belum/5 transition-smooth cursor-pointer"
           >
             <LogOut className="h-[18px] w-[18px]" />
@@ -181,6 +184,22 @@ export default function Sidebar({ isOpen, setIsOpen, userRole, onLogout }: Sideb
           </button>
         </div>
       </aside>
+
+      {/* Confirmation Modal for Logout */}
+      <ConfirmationModal
+        isOpen={isLogoutModalOpen}
+        onClose={() => setIsLogoutModalOpen(false)}
+        onConfirm={() => {
+          setIsLogoutModalOpen(false);
+          onLogout();
+        }}
+        title="Keluar dari Aplikasi"
+        description="Apakah Anda yakin ingin mengakhiri sesi login? Anda perlu memasukkan kredensial lagi untuk masuk."
+        confirmLabel="Ya, Keluar Akun"
+        cancelLabel="Batal"
+        variant="danger"
+        icon={LogOut}
+      />
     </>
   );
 }

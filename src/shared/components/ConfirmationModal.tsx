@@ -8,7 +8,8 @@ interface ConfirmationModalProps {
   description: string;
   confirmLabel?: string;
   cancelLabel?: string;
-  variant?: 'danger' | 'warning' | 'info';
+  variant?: 'danger' | 'warning' | 'info' | 'primary' | 'purple';
+  icon?: React.ElementType;
   isLoading?: boolean;
 }
 
@@ -21,6 +22,7 @@ export default function ConfirmationModal({
   confirmLabel = 'Delete',
   cancelLabel = 'Cancel',
   variant = 'danger',
+  icon: CustomIcon,
   isLoading = false,
 }: ConfirmationModalProps) {
   if (!isOpen) return null;
@@ -41,9 +43,19 @@ export default function ConfirmationModal({
       buttonBg: 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20',
       Icon: AlertTriangle,
     },
+    primary: {
+      iconBg: 'bg-indigo-50 text-indigo-600 border-indigo-100',
+      buttonBg: 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20',
+      Icon: AlertTriangle,
+    },
+    purple: {
+      iconBg: 'bg-purple-50 text-purple-600 border-purple-100',
+      buttonBg: 'bg-purple-600 hover:bg-purple-700 text-white shadow-purple-600/20',
+      Icon: AlertTriangle,
+    },
   }[variant];
 
-  const IconComp = variantStyles.Icon;
+  const IconComp = CustomIcon || variantStyles.Icon;
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
