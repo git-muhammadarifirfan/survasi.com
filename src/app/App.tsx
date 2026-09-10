@@ -160,35 +160,35 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    setTransitionText('Mengakhiri Sesi...');
+    setTransitionText('Mengakhiri Sesi & Keluar Account...');
     setIsAuthTransitioning(true);
-    clearToken();
-    localStorage.removeItem('bsan_user_role');
-    setIsLoggedIn(false);
-    notifyToast({
-      type: 'info',
-      title: 'Logout Berhasil',
-      message: 'Anda telah keluar dari akun.',
-    });
     setTimeout(() => {
+      clearToken();
+      localStorage.removeItem('bsan_user_role');
+      setIsLoggedIn(false);
       setIsAuthTransitioning(false);
-    }, 600);
+      notifyToast({
+        type: 'info',
+        title: 'Logout Berhasil',
+        message: 'Anda telah keluar dari akun.',
+      });
+    }, 1000);
   };
 
   const handleLogin = (user: any, role: 'admin' | 'pengawas') => {
-    setTransitionText('Login Berhasil! Menyiapkan Dashboard...');
+    setTransitionText('Menyiapkan Dashboard & Autentikasi Account...');
     setIsAuthTransitioning(true);
-    setUserRole(role);
-    setIsLoggedIn(true);
-    localStorage.setItem('bsan_user_role', role);
-    notifyToast({
-      type: 'success',
-      title: 'Login Berhasil!',
-      message: `Selamat datang kembali, ${user?.nama || 'Pengguna'}!`,
-    });
     setTimeout(() => {
+      setUserRole(role);
+      setIsLoggedIn(true);
+      localStorage.setItem('bsan_user_role', role);
       setIsAuthTransitioning(false);
-    }, 600);
+      notifyToast({
+        type: 'success',
+        title: 'Login Berhasil!',
+        message: `Selamat datang kembali, ${user?.nama || 'Pengguna'}!`,
+      });
+    }, 1000);
   };
 
   return (
