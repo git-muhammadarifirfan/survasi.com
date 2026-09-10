@@ -579,8 +579,8 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     );
   }
 
-  // Welcome / Start Screen
-  if (!hasStarted) {
+  // Welcome / Start Screen (Only for Pengawas)
+  if (!hasStarted && userRole !== 'admin') {
     return (
       <div className="space-y-6">
         {/* Offline Banner */}
