@@ -14,9 +14,10 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth');
+const { loginLimiter } = require('../middleware/rateLimiter');
 
 // ─── POST /api/auth/login ────────────────────────────────────────────────────
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   try {
     const { identifier, password } = req.body;
 
