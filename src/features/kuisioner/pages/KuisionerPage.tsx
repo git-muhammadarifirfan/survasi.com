@@ -205,6 +205,57 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     }
   };
 
+  // Drag and Drop State & Handler
+  const [draggedQuestionId, setDraggedQuestionId] = useState<number | null>(null);
+
+  const handleDragStart = (e: React.DragEvent, id: number) => {
+    setDraggedQuestionId(id);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', String(id));
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+
+  const handleDropQuestion = async (targetId: number, currentSectionList: ApiQuestionItem[]) => {
+    if (!draggedQuestionId || draggedQuestionId === targetId) return;
+
+    const sourceIdx = currentSectionList.findIndex(q => q.id === draggedQuestionId);
+    const targetIdx = currentSectionList.findIndex(q => q.id === targetId);
+    if (sourceIdx === -1 || targetIdx === -1) return;
+
+    const reorderedSection = [...currentSectionList];
+    const [movedItem] = reorderedSection.splice(sourceIdx, 1);
+    reorderedSection.splice(targetIdx, 0, movedItem);
+
+    // Re-assign urutan numbers within section
+    const reorderPayload: { id: number; urutan: number }[] = [];
+    const updatedQuestions = [...questions];
+
+    reorderedSection.forEach((qItem, newIndex) => {
+      const originalUrutan = currentSectionList[newIndex].urutan;
+      const qInMain = updatedQuestions.find(mq => mq.id === qItem.id);
+      if (qInMain) {
+        qInMain.urutan = originalUrutan;
+        reorderPayload.push({ id: qItem.id, urutan: originalUrutan });
+      }
+    });
+
+    updatedQuestions.sort((a, b) => a.urutan - b.urutan);
+    setQuestions(updatedQuestions);
+    setDraggedQuestionId(null);
+
+    // Sync to MySQL
+    try {
+      await apiClient.put('/survey/questions/reorder', { items: reorderPayload });
+      notifyToast({ type: 'success', title: 'Urutan Diperbarui', message: 'Urutan posisi berhasil disimpan ke MySQL.' });
+    } catch {
+      notifyToast({ type: 'error', title: 'Error API', message: 'Gagal memperbarui urutan ke MySQL.' });
+    }
+  };
+
   // Reorder / Move Question Up or Down
   const handleMoveQuestion = async (qId: number, direction: 'up' | 'down', currentSectionList: ApiQuestionItem[]) => {
     const idx = currentSectionList.findIndex(q => q.id === qId);
@@ -578,27 +629,38 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                   {secQuestions.map((q, qIdx) => (
                     <div
                       key={q.id}
-                      className="p-4 rounded-xl bg-white border border-slate-200/60 hover:border-indigo-300 transition flex items-start justify-between gap-4 group"
+                      draggable
+                      onDragStart={e => handleDragStart(e, q.id)}
+                      onDragOver={handleDragOver}
+                      onDrop={() => handleDropQuestion(q.id, secQuestions)}
+                      className={`p-4 rounded-xl bg-white border transition flex items-start justify-between gap-4 group cursor-grab active:cursor-grabbing ${
+                        draggedQuestionId === q.id ? 'border-indigo-500 bg-indigo-50/50 shadow-md opacity-60' : 'border-slate-200/60 hover:border-indigo-300 hover:shadow-xs'
+                      }`}
                     >
-                      <div className="flex items-start space-x-4">
-                        {/* Drag / Up-Down Controls */}
-                        <div className="flex flex-col items-center justify-center space-y-0.5 shrink-0 pt-0.5">
-                          <button
-                            disabled={qIdx === 0}
-                            onClick={() => handleMoveQuestion(q.id, 'up', secQuestions)}
-                            className={`p-1 rounded hover:bg-slate-100 cursor-pointer ${qIdx === 0 ? 'opacity-20 cursor-not-allowed' : 'text-slate-600'}`}
-                            title="Naikkan Urutan"
-                          >
-                            <ArrowUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            disabled={qIdx === secQuestions.length - 1}
-                            onClick={() => handleMoveQuestion(q.id, 'down', secQuestions)}
-                            className={`p-1 rounded hover:bg-slate-100 cursor-pointer ${qIdx === secQuestions.length - 1 ? 'opacity-20 cursor-not-allowed' : 'text-slate-600'}`}
-                            title="Turunkan Urutan"
-                          >
-                            <ArrowDown className="w-3.5 h-3.5" />
-                          </button>
+                      <div className="flex items-start space-x-3">
+                        {/* Drag Handle Icon + Up-Down Controls */}
+                        <div className="flex items-center space-x-1 shrink-0 pt-0.5">
+                          <div className="p-1 text-slate-300 group-hover:text-slate-500 transition cursor-grab">
+                            <Move className="w-4 h-4" />
+                          </div>
+                          <div className="flex flex-col items-center justify-center space-y-0.5">
+                            <button
+                              disabled={qIdx === 0}
+                              onClick={(e) => { e.stopPropagation(); handleMoveQuestion(q.id, 'up', secQuestions); }}
+                              className={`p-0.5 rounded hover:bg-slate-100 cursor-pointer ${qIdx === 0 ? 'opacity-20 cursor-not-allowed' : 'text-slate-600'}`}
+                              title="Naikkan Urutan"
+                            >
+                              <ArrowUp className="w-3 h-3" />
+                            </button>
+                            <button
+                              disabled={qIdx === secQuestions.length - 1}
+                              onClick={(e) => { e.stopPropagation(); handleMoveQuestion(q.id, 'down', secQuestions); }}
+                              className={`p-0.5 rounded hover:bg-slate-100 cursor-pointer ${qIdx === secQuestions.length - 1 ? 'opacity-20 cursor-not-allowed' : 'text-slate-600'}`}
+                              title="Turunkan Urutan"
+                            >
+                              <ArrowDown className="w-3 h-3" />
+                            </button>
+                          </div>
                         </div>
 
                         <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
