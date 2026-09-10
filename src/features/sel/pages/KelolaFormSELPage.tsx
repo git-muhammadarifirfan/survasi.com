@@ -137,19 +137,16 @@ export default function KelolaFormSEL() {
       tanggung_jawab: 5,
     };
 
-    const payload = {
-      kode: editingInd ? editingInd.id : `IND_${formSubjek.toUpperCase()}_${Date.now().toString().slice(-4)}`,
-      teks: formTeks,
-      subjek: formSubjek,
-      konteks: formKonteks,
-      catatan: formCatatan || null,
-      dimensi_id: dimensiMap[formDimensi] || 1,
-      urutan: indikatorList.length + 1,
-    };
-
     try {
       if (editingInd) {
-        const res = await apiClient.put(`/sel/indikator/${editingInd.id}`, payload);
+        const updatePayload = {
+          teks: formTeks,
+          subjek: formSubjek,
+          konteks: formKonteks,
+          catatan: formCatatan || null,
+          dimensi_id: dimensiMap[formDimensi] || 1,
+        };
+        const res = await apiClient.put(`/sel/indikator/${editingInd.id}`, updatePayload);
         if (res.success) {
           setIndikatorList(prev =>
             prev.map(i =>
@@ -170,7 +167,16 @@ export default function KelolaFormSEL() {
           showToast(res.message || 'Gagal menyimpan ke MySQL.');
         }
       } else {
-        const res = await apiClient.post<{ id: number }>('/sel/indikator', payload);
+        const createPayload = {
+          kode: `IND_${formSubjek.toUpperCase()}_${Date.now().toString().slice(-4)}`,
+          teks: formTeks,
+          subjek: formSubjek,
+          konteks: formKonteks,
+          catatan: formCatatan || null,
+          dimensi_id: dimensiMap[formDimensi] || 1,
+          urutan: indikatorList.length + 1,
+        };
+        const res = await apiClient.post<{ id: number }>('/sel/indikator', createPayload);
         const newId = res.data?.id ? String(res.data.id) : `${formSubjek}_${Date.now()}`;
         const newInd: SELIndikator = {
           id: newId,
@@ -180,7 +186,7 @@ export default function KelolaFormSEL() {
           konteks: formKonteks,
           catatan: formCatatan || undefined,
         };
-        setIndikatorList(prev => [newInd, ...prev]);
+        setIndikatorList(prev => [...prev, newInd]);
         showToast('Indikator baru berhasil disimpan ke MySQL!');
       }
     } catch (err: any) {

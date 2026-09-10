@@ -64,11 +64,33 @@ router.put('/indikator/:id', adminOnly, async (req, res) => {
     const { kode, deskripsi, teks, subjek, konteks, catatan, dimensi_id, urutan, is_active } = req.body;
     const teksVal = deskripsi || teks;
     await pool.execute(
-      `UPDATE sel_indikator SET kode=?, teks=?, subjek=?, konteks=?, catatan=?, dimensi_id=?, urutan=?, is_active=? WHERE id=?`,
-      [kode, teksVal, subjek, konteks || 'kelas', catatan || null, dimensi_id, urutan || 0, is_active !== undefined ? is_active : 1, req.params.id]
+      `UPDATE sel_indikator 
+       SET kode = COALESCE(?, kode), 
+           teks = COALESCE(?, teks), 
+           subjek = COALESCE(?, subjek), 
+           konteks = COALESCE(?, konteks), 
+           catatan = ?, 
+           dimensi_id = COALESCE(?, dimensi_id), 
+           urutan = CASE WHEN ? IS NOT NULL AND ? > 0 THEN ? ELSE urutan END, 
+           is_active = COALESCE(?, is_active) 
+       WHERE id = ?`,
+      [
+        kode || null,
+        teksVal || null,
+        subjek || null,
+        konteks || null,
+        catatan || null,
+        dimensi_id || null,
+        urutan !== undefined ? urutan : null,
+        urutan !== undefined ? urutan : null,
+        urutan !== undefined ? urutan : null,
+        is_active !== undefined ? is_active : null,
+        req.params.id
+      ]
     );
     return res.json({ success: true });
   } catch (err) {
+    console.error('[SEL] update error:', err);
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
