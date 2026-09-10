@@ -41,8 +41,9 @@ export const ThreeDotsLoader: React.FC<ThreeDotsLoaderProps> = ({
 
   if (fullScreen) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/10 backdrop-blur-xs">
-        <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-100 min-w-[200px] text-center">
+      <div className="fixed inset-0 z-[99999] flex flex-col items-center justify-center bg-slate-950/40 backdrop-blur-md animate-fade-in">
+        <div className="bg-white/95 dark:bg-slate-900/95 p-8 rounded-3xl shadow-2xl border border-white/20 flex flex-col items-center space-y-4 max-w-xs w-full mx-4 backdrop-blur-xl animate-scale-in">
+          <img src="/bsan_logo.png" className="w-12 h-12 object-contain animate-bounce" alt="BSAN Logo" />
           {content}
         </div>
       </div>

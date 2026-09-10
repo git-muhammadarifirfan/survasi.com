@@ -7,7 +7,7 @@ import { isAuthenticated, clearToken } from '../shared/services/api-client';
 import Sidebar from '../shared/components/Sidebar';
 import Topbar from '../shared/components/Topbar';
 import ThreeDotsLoader from '../shared/components/ThreeDotsLoader';
-import ThrottleToast from '../shared/components/ThrottleToast';
+import ThrottleToast, { notifyToast } from '../shared/components/ThrottleToast';
 
 // Lazy Loaded Feature Pages
 const Login = lazy(() => import('../features/auth/pages/LoginPage'));
@@ -48,7 +48,7 @@ function AppContent({
     if (window.innerWidth < 1024) {
       setSidebarOpen(false);
     }
-  }, [location.pathname, setSidebarOpen]);
+  }, [setSidebarOpen]);
 
   return (
     <div className="flex h-screen bg-bg overflow-hidden font-sans text-text-primary antialiased">
@@ -72,7 +72,7 @@ function AppContent({
         />
         <main className="flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar">
           <div className="max-w-[1400px] mx-auto w-full">
-            <Suspense fallback={<ThreeDotsLoader fullScreen={false} text="Memuat Halaman..." size="lg" className="py-20" />}>
+            <Suspense fallback={<ThreeDotsLoader fullScreen={true} text="Memuat Halaman..." size="lg" />}>
               <Routes>
                 {userRole === 'admin' ? (
                   <>
@@ -117,9 +117,11 @@ function AppContent({
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
-    // Gunakan JWT token sebagai sumber kebenaran auth
     return isAuthenticated();
   });
+
+  const [isAuthTransitioning, setIsAuthTransitioning] = useState(false);
+  const [transitionText, setTransitionText] = useState('Memuat...');
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [activeKecamatan, setActiveKecamatan] = useState<string | null>(null);
@@ -148,42 +150,70 @@ export default function App() {
   const handleSwitchRole = (role: 'admin' | 'pengawas') => {
     setUserRole(role);
     localStorage.setItem('bsan_user_role', role);
+    notifyToast({
+      type: 'info',
+      title: 'Peran Diubah',
+      message: `Akses aktif Anda sekarang adalah ${role.toUpperCase()}.`,
+    });
   };
 
   const handleLogout = () => {
+    setTransitionText('Mengakhiri Sesi...');
+    setIsAuthTransitioning(true);
     clearToken();
     localStorage.removeItem('bsan_user_role');
     setIsLoggedIn(false);
+    notifyToast({
+      type: 'info',
+      title: 'Logout Berhasil',
+      message: 'Anda telah keluar dari akun.',
+    });
+    setTimeout(() => {
+      setIsAuthTransitioning(false);
+    }, 600);
   };
 
   const handleLogin = (user: any, role: 'admin' | 'pengawas') => {
+    setTransitionText('Login Berhasil! Menyiapkan Dashboard...');
+    setIsAuthTransitioning(true);
     setUserRole(role);
     setIsLoggedIn(true);
     localStorage.setItem('bsan_user_role', role);
-    // user info tersimpan di JWT token (lihat api-client.ts → saveToken)
-    void user; // user object tersedia jika perlu disimpan ke context/state
+    notifyToast({
+      type: 'success',
+      title: 'Login Berhasil!',
+      message: `Selamat datang kembali, ${user?.nama || 'Pengguna'}!`,
+    });
+    setTimeout(() => {
+      setIsAuthTransitioning(false);
+    }, 600);
   };
 
-
-  if (!isLoggedIn) {
-    return <Login onLogin={handleLogin} />;
-  }
-
   return (
-    <QueryClientProvider client={queryClient}>
-      <Router>
-        <AppContent 
-          userRole={userRole}
-          sidebarOpen={sidebarOpen}
-          setSidebarOpen={setSidebarOpen}
-          activeKecamatan={activeKecamatan}
-          setActiveKecamatan={setActiveKecamatan}
-          searchTerm={searchTerm}
-          setSearchTerm={setSearchTerm}
-          handleSwitchRole={handleSwitchRole}
-          handleLogout={handleLogout}
-        />
-      </Router>
-    </QueryClientProvider>
+    <>
+      <ThrottleToast />
+      {isAuthTransitioning && <ThreeDotsLoader fullScreen={true} text={transitionText} size="lg" />}
+      {!isLoggedIn ? (
+        <Suspense fallback={<ThreeDotsLoader fullScreen={true} text="Memuat Halaman Login..." />}>
+          <Login onLogin={handleLogin} />
+        </Suspense>
+      ) : (
+        <QueryClientProvider client={queryClient}>
+          <Router>
+            <AppContent 
+              userRole={userRole}
+              sidebarOpen={sidebarOpen}
+              setSidebarOpen={setSidebarOpen}
+              activeKecamatan={activeKecamatan}
+              setActiveKecamatan={setActiveKecamatan}
+              searchTerm={searchTerm}
+              setSearchTerm={setSearchTerm}
+              handleSwitchRole={handleSwitchRole}
+              handleLogout={handleLogout}
+            />
+          </Router>
+        </QueryClientProvider>
+      )}
+    </>
   );
 }
