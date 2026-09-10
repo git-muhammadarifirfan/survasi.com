@@ -10,7 +10,7 @@ import { createPortal } from 'react-dom';
 import {
   BookOpen, ChevronLeft, ChevronRight, Check, Save, Send, HelpCircle,
   AlertCircle, PlayCircle, ShieldCheck, WifiOff, RefreshCw, Plus, Edit3,
-  Trash2, X, Eye, Layers, FileText
+  Trash2, X, Eye, Layers, FileText, ArrowUp, ArrowDown, Move
 } from 'lucide-react';
 import { apiClient } from '../../../shared/services/api-client';
 import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
@@ -202,6 +202,40 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
       setIsModalOpen(false);
     } catch {
       notifyToast({ type: 'error', title: 'Error API', message: 'Gagal menyimpan pertanyaan ke MySQL.' });
+    }
+  };
+
+  // Reorder / Move Question Up or Down
+  const handleMoveQuestion = async (qId: number, direction: 'up' | 'down', currentSectionList: ApiQuestionItem[]) => {
+    const idx = currentSectionList.findIndex(q => q.id === qId);
+    if (idx === -1) return;
+    if (direction === 'up' && idx === 0) return;
+    if (direction === 'down' && idx === currentSectionList.length - 1) return;
+
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    const itemA = currentSectionList[idx];
+    const itemB = currentSectionList[targetIdx];
+
+    // Swap urutan
+    const updatedQuestions = questions.map(q => {
+      if (q.id === itemA.id) return { ...q, urutan: itemB.urutan };
+      if (q.id === itemB.id) return { ...q, urutan: itemA.urutan };
+      return q;
+    }).sort((a, b) => a.urutan - b.urutan);
+
+    setQuestions(updatedQuestions);
+
+    // Save to MySQL
+    try {
+      await apiClient.put('/survey/questions/reorder', {
+        items: [
+          { id: itemA.id, urutan: itemB.urutan },
+          { id: itemB.id, urutan: itemA.urutan }
+        ]
+      });
+      notifyToast({ type: 'success', title: 'Urutan Diperbarui', message: 'Urutan pertanyaan berhasil disimpan ke MySQL.' });
+    } catch {
+      notifyToast({ type: 'error', title: 'Error API', message: 'Gagal memperbarui urutan ke MySQL.' });
     }
   };
 
@@ -525,21 +559,50 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                     </span>
                     <h3 className="text-base font-bold text-slate-800 font-display">{secMeta.title}</h3>
                   </div>
-                  <span className="text-xs font-semibold px-3 py-1 bg-white border border-slate-200 rounded-full text-slate-600">
-                    {secQuestions.length} Pertanyaan
-                  </span>
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-semibold px-3 py-1 bg-white border border-slate-200 rounded-full text-slate-600">
+                      {secQuestions.length} Pertanyaan
+                    </span>
+                    <button
+                      onClick={() => handleOpenAddQuestion(secKey)}
+                      className="inline-flex items-center space-x-1 px-3 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg border border-indigo-200 transition cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Tambah Pertanyaan di Bagian Ini</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Questions Items */}
                 <div className="p-6 space-y-3">
-                  {secQuestions.map((q) => (
+                  {secQuestions.map((q, qIdx) => (
                     <div
                       key={q.id}
                       className="p-4 rounded-xl bg-white border border-slate-200/60 hover:border-indigo-300 transition flex items-start justify-between gap-4 group"
                     >
                       <div className="flex items-start space-x-4">
+                        {/* Drag / Up-Down Controls */}
+                        <div className="flex flex-col items-center justify-center space-y-0.5 shrink-0 pt-0.5">
+                          <button
+                            disabled={qIdx === 0}
+                            onClick={() => handleMoveQuestion(q.id, 'up', secQuestions)}
+                            className={`p-1 rounded hover:bg-slate-100 cursor-pointer ${qIdx === 0 ? 'opacity-20 cursor-not-allowed' : 'text-slate-600'}`}
+                            title="Naikkan Urutan"
+                          >
+                            <ArrowUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            disabled={qIdx === secQuestions.length - 1}
+                            onClick={() => handleMoveQuestion(q.id, 'down', secQuestions)}
+                            className={`p-1 rounded hover:bg-slate-100 cursor-pointer ${qIdx === secQuestions.length - 1 ? 'opacity-20 cursor-not-allowed' : 'text-slate-600'}`}
+                            title="Turunkan Urutan"
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
                         <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
-                          {q.urutan}
+                          {qIdx + 1}
                         </div>
                         <div className="space-y-1">
                           <p className="text-sm font-semibold text-slate-800 leading-snug">

@@ -106,6 +106,33 @@ router.delete('/indikator/:id', adminOnly, async (req, res) => {
   }
 });
 
+// ─── PUT /api/sel/indikator/reorder ──────────────────────────────────────────
+router.put('/indikator/reorder', adminOnly, async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    const { items } = req.body; // array of { id: number | string, urutan: number }
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ success: false, message: 'Format data reorder tidak valid.' });
+    }
+
+    await conn.beginTransaction();
+    for (const item of items) {
+      await conn.execute(
+        `UPDATE sel_indikator SET urutan = ? WHERE id = ?`,
+        [item.urutan, item.id]
+      );
+    }
+    await conn.commit();
+    return res.json({ success: true, message: 'Urutan indikator SEL berhasil disimpan.' });
+  } catch (err) {
+    await conn.rollback();
+    console.error('[SEL] reorder error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal mengubah urutan indikator.' });
+  } finally {
+    conn.release();
+  }
+});
+
 // ─── POST /api/sel/sesi ───────────────────────────────────────────────────────
 router.post('/sesi', submitLimiter, async (req, res) => {
   const conn = await pool.getConnection();

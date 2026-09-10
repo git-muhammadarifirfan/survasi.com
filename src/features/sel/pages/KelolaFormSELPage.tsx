@@ -14,7 +14,7 @@ import {
   FileText, Plus, Edit3, Trash2, Search, Filter, Save, X, CheckCircle2,
   AlertCircle, GraduationCap, Users, Building2, Trees, Settings2, Eye,
   XCircle, Clock, CheckCircle, Sparkles, Brain, MapPin, ChevronRight,
-  School, ClipboardList
+  School, ClipboardList, ArrowUp, ArrowDown
 } from 'lucide-react';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import { apiClient } from '../../../shared/services/api-client';
@@ -196,6 +196,42 @@ export default function KelolaFormSEL() {
     setIsModalOpen(false);
   };
 
+  // Move Indikator Up/Down Reorder
+  const handleMoveIndikator = async (id: string, direction: 'up' | 'down', groupList: SELIndikator[]) => {
+    const idx = groupList.findIndex(i => i.id === id);
+    if (idx === -1) return;
+    if (direction === 'up' && idx === 0) return;
+    if (direction === 'down' && idx === groupList.length - 1) return;
+
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    const itemA = groupList[idx];
+    const itemB = groupList[targetIdx];
+
+    // Swap position in indikatorList
+    const newArr = [...indikatorList];
+    const posA = newArr.findIndex(i => i.id === itemA.id);
+    const posB = newArr.findIndex(i => i.id === itemB.id);
+
+    if (posA !== -1 && posB !== -1) {
+      const temp = newArr[posA];
+      newArr[posA] = newArr[posB];
+      newArr[posB] = temp;
+      setIndikatorList(newArr);
+    }
+
+    try {
+      await apiClient.put('/sel/indikator/reorder', {
+        items: [
+          { id: itemA.id, urutan: posB + 1 },
+          { id: itemB.id, urutan: posA + 1 }
+        ]
+      });
+      showToast('Urutan indikator berhasil diperbarui!');
+    } catch {
+      showToast('Gagal menyimpan urutan ke MySQL.');
+    }
+  };
+
   // Filtered List
   const filteredList = indikatorList.filter(ind => {
     if (selectedDimensi && ind.dimensi !== selectedDimensi) return false;
@@ -335,7 +371,25 @@ export default function KelolaFormSEL() {
                         {inds.map((ind, idx) => (
                           <div key={ind.id} className="rounded-xl border border-border bg-bg/30 p-3.5 space-y-2 transition-all hover:border-primary/40 hover:bg-surface hover:shadow-xs relative group">
                             <div className="flex items-start justify-between gap-3">
-                              <div className="flex items-start gap-3 flex-1">
+                              <div className="flex items-start gap-2.5 flex-1">
+                                <div className="flex flex-col items-center justify-center space-y-0.5 shrink-0 pt-0.5">
+                                  <button
+                                    disabled={idx === 0}
+                                    onClick={() => handleMoveIndikator(ind.id, 'up', inds)}
+                                    className={`p-0.5 rounded hover:bg-border/60 cursor-pointer ${idx === 0 ? 'opacity-20 cursor-not-allowed' : 'text-text-secondary hover:text-primary'}`}
+                                    title="Naikkan Urutan"
+                                  >
+                                    <ArrowUp className="h-3 w-3" />
+                                  </button>
+                                  <button
+                                    disabled={idx === inds.length - 1}
+                                    onClick={() => handleMoveIndikator(ind.id, 'down', inds)}
+                                    className={`p-0.5 rounded hover:bg-border/60 cursor-pointer ${idx === inds.length - 1 ? 'opacity-20 cursor-not-allowed' : 'text-text-secondary hover:text-primary'}`}
+                                    title="Turunkan Urutan"
+                                  >
+                                    <ArrowDown className="h-3 w-3" />
+                                  </button>
+                                </div>
                                 <div className="h-6 w-6 rounded-lg bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
                                   {idx + 1}
                                 </div>
