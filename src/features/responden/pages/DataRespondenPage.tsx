@@ -17,6 +17,9 @@ import {
 } from 'lucide-react';
 
 import CustomSelect from '../../../shared/components/CustomSelect';
+import { notifyToast } from '../../../shared/components/NotificationToast';
+import PaginationCardMinimal from '../../../shared/components/PaginationCardMinimal';
+import { LoadingIndicator } from '../../../shared/components/LoadingIndicator';
 
 interface DataRespondenProps {
   activeKecamatan: string | null;
@@ -32,8 +35,33 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
   const [remindedSchools, setRemindedSchools] = useState<Record<string, boolean>>({});
   const [selectedSchool, setSelectedSchool] = useState<School | null>(null);
   const [activeModalTab, setActiveModalTab] = useState('modul1');
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const perPage = 15;
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isBulkMode, setIsBulkMode] = useState(false);
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === paged.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(paged.map(s => s.npsn));
+    }
+  };
+
+  const toggleSelectRow = (npsn: string) => {
+    setSelectedIds(prev =>
+      prev.includes(npsn) ? prev.filter(id => id !== npsn) : [...prev, npsn]
+    );
+  };
+
+  const handleBulkRemind = () => {
+    if (selectedIds.length === 0) return;
+    notifyToast({
+      type: 'info',
+      title: 'Bulk Broadcast Pengingat',
+      message: `Pengingat WhatsApp berhasil dikirimkan ke ${selectedIds.length} sekolah pilihan.`,
+    });
+    setSelectedIds([]);
+    setIsBulkMode(false);
+  };
 
   const { data: schools = [], isLoading } = useQuery({
     queryKey: ['schools', kabupatenFilter, activeKecamatan, statusFilter, searchTerm],
@@ -172,11 +200,54 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
             </p>
           </div>
 
-          <div className="flex items-center space-x-2">
-            <Users className="h-4 w-4 text-primary" />
+          <div className="flex items-center space-x-3">
+            <button
+              type="button"
+              onClick={() => {
+                setIsBulkMode(!isBulkMode);
+                setSelectedIds([]);
+              }}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer border ${
+                isBulkMode
+                  ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              <Users className="h-4 w-4" />
+              <span>{isBulkMode ? 'Tutup Pilihan Massal' : 'Pilih Massal (Bulk Action)'}</span>
+            </button>
             <span className="text-xs font-semibold text-text-primary">{schools.length} sekolah sasaran</span>
           </div>
         </div>
+
+        {/* Bulk Action Sticky Bar when triggered */}
+        {isBulkMode && (
+          <div className="p-3 mb-4 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                checked={selectedIds.length === paged.length && paged.length > 0}
+                onChange={toggleSelectAll}
+                className="w-4 h-4 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+              />
+              <span className="text-xs font-semibold text-indigo-950">
+                Terpilih <strong>{selectedIds.length}</strong> dari <strong>{paged.length}</strong> sekolah di halaman ini
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={selectedIds.length === 0}
+                onClick={handleBulkRemind}
+                className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Kirim WhatsApp Broadcast ({selectedIds.length})</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Filter Controls */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -238,6 +309,16 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-bg/60 border-b border-border text-text-secondary font-bold uppercase tracking-wider text-[10px]">
+                {isBulkMode && (
+                  <th className="py-3.5 px-4 text-center w-10">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.length === paged.length && paged.length > 0}
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                  </th>
+                )}
                 <th className="py-3.5 px-5 text-left">NPSN</th>
                 <th className="py-3.5 px-5 text-left">Nama Sekolah</th>
                 <th className="py-3.5 px-5 text-left hidden md:table-cell">Kecamatan</th>
@@ -249,19 +330,29 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
             <tbody className="divide-y divide-border/40 text-text-primary">
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="py-16 text-center text-xs font-semibold text-text-secondary animate-pulse">
-                    Memuat data sekolah...
+                  <td colSpan={isBulkMode ? 7 : 6} className="py-16 text-center">
+                    <LoadingIndicator type="line-spinner" size="md" label="Memuat data sekolah..." />
                   </td>
                 </tr>
               ) : paged.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-16 text-center text-xs font-normal text-text-secondary">
+                  <td colSpan={isBulkMode ? 7 : 6} className="py-16 text-center text-xs font-normal text-text-secondary">
                     Tidak ditemukan sekolah yang sesuai dengan filter.
                   </td>
                 </tr>
               ) : (
                 paged.map((s) => (
                   <tr key={s.id} className="table-row-hover">
+                    {isBulkMode && (
+                      <td className="py-3.5 px-4 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(s.npsn)}
+                          onChange={() => toggleSelectRow(s.npsn)}
+                          className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        />
+                      </td>
+                    )}
                     <td className="py-3.5 px-5 font-mono text-xs font-semibold text-primary">{s.npsn}</td>
                     <td className="py-3.5 px-5">
                       <p className="font-semibold text-text-primary text-xs truncate max-w-[220px]">{s.nama}</p>
@@ -286,7 +377,11 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
                           <button
                             onClick={() => {
                               setRemindedSchools(p => ({ ...p, [s.id]: true }));
-                              showToast(`Pemberitahuan reminder survei berhasil dikirim ke ${s.nama}!`);
+                              notifyToast({
+                                type: 'success',
+                                title: 'Reminder Terkirim',
+                                message: `Pemberitahuan reminder survei berhasil dikirim ke ${s.nama}!`,
+                              });
                             }}
                             className="inline-flex items-center space-x-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1.5 text-[10px] font-bold transition-smooth active:scale-95 cursor-pointer shadow-sm"
                           >
@@ -295,7 +390,6 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
                           </button>
                         )
                       ) : (
-                        /* Tombol Lihat Jawaban: WARNA HIJAU (bg-emerald-600) */
                         <button
                           onClick={() => { setSelectedSchool(s); setActiveModalTab('modul1'); }}
                           className="inline-flex items-center space-x-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-[10px] font-bold transition-smooth active:scale-95 cursor-pointer shadow-sm"
@@ -312,41 +406,16 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
           </table>
         </div>
 
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-5 py-3.5 border-t border-border/50 bg-bg/30 text-xs">
-            <p className="text-[11px] text-text-secondary font-normal">
-              Halaman <span className="font-bold text-text-primary">{currentPage}</span> dari <span className="font-bold text-text-primary">{totalPages}</span> ({schools.length} sekolah)
-            </p>
-            <div className="flex items-center space-x-1">
-              <button
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-                className="rounded-lg p-1.5 text-text-secondary hover:bg-bg disabled:opacity-30 transition-smooth"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              {getPageRange().map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setCurrentPage(p)}
-                  className={`h-8 w-8 rounded-lg text-xs font-semibold transition-smooth ${
-                    currentPage === p ? 'bg-primary text-white shadow-sm' : 'text-text-secondary hover:bg-bg'
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-              <button
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-                className="rounded-lg p-1.5 text-text-secondary hover:bg-bg disabled:opacity-30 transition-smooth"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Minimal Pagination */}
+        <div className="p-3 border-t border-border/50 bg-bg/20">
+          <PaginationCardMinimal
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+            totalItems={schools.length}
+            itemsPerPage={perPage}
+          />
+        </div>
       </div>
 
       {/* Modal Preview Jawaban */}

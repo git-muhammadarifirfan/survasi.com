@@ -17,7 +17,9 @@ import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
 import SkeletonLoader from '../../../shared/components/SkeletonLoader';
 import { saveDraft, getDraft, clearDraft } from '../../../shared/utils/draftStorage';
 import { throttle } from '../../../shared/utils/throttle';
-import { notifyToast } from '../../../shared/components/ThrottleToast';
+import { notifyToast } from '../../../shared/components/NotificationToast';
+import ConfirmationModal from '../../../shared/components/ConfirmationModal';
+import { LoadingIndicator } from '../../../shared/components/LoadingIndicator';
 
 interface KuisionerProps {
   userRole: 'admin' | 'pengawas';
@@ -134,18 +136,58 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     setIsModalOpen(true);
   };
 
-  const handleDeleteQuestion = async (id: number) => {
-    if (!confirm('Apakah Anda yakin ingin menghapus instrumen pertanyaan survei ini?')) return;
+  // Confirmation Modal State
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Bulk Mode State for Questions
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<number[]>([]);
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+
+  const toggleSelectQuestion = (id: number) => {
+    setSelectedQuestionIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedQuestionIds.length === 0) return;
+    setIsDeleting(true);
     try {
-      const res = await apiClient.delete(`/survey/questions/${id}`);
+      await Promise.all(selectedQuestionIds.map((id) => apiClient.delete(`/survey/questions/${id}`)));
+      setQuestions((prev) => prev.filter((q) => !selectedQuestionIds.includes(q.id)));
+      notifyToast({
+        type: 'success',
+        title: 'Hapus Massal Berhasil',
+        message: `${selectedQuestionIds.length} pertanyaan berhasil dihapus dari database.`,
+      });
+      setSelectedQuestionIds([]);
+      setIsBulkMode(false);
+    } catch {
+      notifyToast({ type: 'error', title: 'Gagal Hapus', message: 'Beberapa pertanyaan gagal dihapus.' });
+    } finally {
+      setIsDeleting(false);
+      setIsBulkDeleteModalOpen(false);
+    }
+  };
+
+  const confirmDeleteQuestion = async () => {
+    if (!deleteConfirmId) return;
+    setIsDeleting(true);
+    try {
+      const res = await apiClient.delete(`/survey/questions/${deleteConfirmId}`);
       if (res.success) {
-        setQuestions(prev => prev.filter(q => q.id !== id));
+        setQuestions((prev) => prev.filter((q) => q.id !== deleteConfirmId));
         notifyToast({ type: 'success', title: 'Pertanyaan Dihapus', message: 'Instrumen berhasil dihapus dari database.' });
       } else {
         notifyToast({ type: 'error', title: 'Gagal Hapus', message: res.message || 'Gagal menghapus pertanyaan.' });
       }
     } catch {
       notifyToast({ type: 'error', title: 'Error API', message: 'Gagal terhubung ke server MySQL.' });
+    } finally {
+      setIsDeleting(false);
+      setDeleteConfirmId(null);
     }
   };
 
@@ -606,6 +648,20 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
           </div>
           <div className="flex items-center space-x-3 shrink-0">
             <button
+              onClick={() => {
+                setIsBulkMode(!isBulkMode);
+                setSelectedQuestionIds([]);
+              }}
+              className={`inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                isBulkMode
+                  ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                  : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>{isBulkMode ? 'Tutup Pilihan Massal' : 'Pilih Massal (Bulk Action)'}</span>
+            </button>
+            <button
               onClick={() => setIsPreviewOpen(true)}
               className="inline-flex items-center space-x-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer"
             >
@@ -621,6 +677,24 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
             </button>
           </div>
         </div>
+
+        {/* Bulk Sticky Bar for Questions */}
+        {isBulkMode && (
+          <div className="p-4 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-between gap-4 animate-in fade-in duration-200">
+            <span className="text-xs font-semibold text-indigo-950">
+              Terpilih <strong>{selectedQuestionIds.length}</strong> pertanyaan survei
+            </span>
+            <button
+              type="button"
+              disabled={selectedQuestionIds.length === 0}
+              onClick={() => setIsBulkDeleteModalOpen(true)}
+              className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Hapus Pertanyaan Terpilih ({selectedQuestionIds.length})</span>
+            </button>
+          </div>
+        )}
 
         {/* List Pertanyaan Terkelompok per Bagian / Section */}
         <div className="space-y-6">
@@ -675,6 +749,15 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                       }`}
                     >
                       <div className="flex items-center space-x-3">
+                        {isBulkMode && (
+                          <input
+                            type="checkbox"
+                            checked={selectedQuestionIds.includes(q.id)}
+                            onChange={() => toggleSelectQuestion(q.id)}
+                            className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer shrink-0"
+                          />
+                        )}
+
                         {/* 6-Dots Drag Handle Icon Centered Vertically */}
                         <div className="p-1.5 rounded-md text-slate-300 group-hover:text-indigo-600 group-hover:bg-indigo-50 transition cursor-grab shrink-0 flex items-center justify-center" title="Tarik & Geser untuk mengubah urutan">
                           <GripVertical className="w-5 h-5 stroke-[2.5]" />
@@ -707,8 +790,8 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                           <span>Edit</span>
                         </button>
                         <button
-                          onClick={() => handleDeleteQuestion(q.id)}
-                          className="p-2 rounded-lg border border-slate-200 hover:bg-red-50 hover:text-red-600 text-slate-400 transition cursor-pointer"
+                          onClick={() => setDeleteConfirmId(q.id)}
+                          className="p-2 rounded-lg border border-slate-200 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 text-slate-400 transition cursor-pointer"
                           title="Hapus Pertanyaan"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -1101,6 +1184,32 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
           )}
         </div>
       </div>
+
+      {/* Confirmation Modal for Single Question Delete */}
+      <ConfirmationModal
+        isOpen={deleteConfirmId !== null}
+        onClose={() => setDeleteConfirmId(null)}
+        onConfirm={confirmDeleteQuestion}
+        title="Hapus Pertanyaan Survei"
+        description="Apakah Anda yakin ingin menghapus pertanyaan instrumen ini? Tindakan ini tidak dapat dibatalkan."
+        confirmLabel="Hapus Pertanyaan"
+        cancelLabel="Batal"
+        variant="danger"
+        isLoading={isDeleting}
+      />
+
+      {/* Confirmation Modal for Bulk Delete */}
+      <ConfirmationModal
+        isOpen={isBulkDeleteModalOpen}
+        onClose={() => setIsBulkDeleteModalOpen(false)}
+        onConfirm={handleBulkDelete}
+        title={`Hapus ${selectedQuestionIds.length} Pertanyaan`}
+        description={`Apakah Anda yakin ingin menghapus ${selectedQuestionIds.length} pertanyaan terpilih? Seluruh instrumen tersebut akan dihapus permanen dari MySQL.`}
+        confirmLabel="Hapus Semua"
+        cancelLabel="Batal"
+        variant="danger"
+        isLoading={isDeleting}
+      />
     </div>
   );
 }

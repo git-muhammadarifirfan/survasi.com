@@ -7,7 +7,8 @@ import { isAuthenticated, clearToken } from '../shared/services/api-client';
 import Sidebar from '../shared/components/Sidebar';
 import Topbar from '../shared/components/Topbar';
 import ThreeDotsLoader from '../shared/components/ThreeDotsLoader';
-import ThrottleToast, { notifyToast } from '../shared/components/ThrottleToast';
+import ThrottleToast from '../shared/components/ThrottleToast';
+import NotificationToastContainer from '../shared/components/NotificationToast';
 
 // Lazy Loaded Feature Pages
 const Login = lazy(() => import('../features/auth/pages/LoginPage'));
@@ -52,6 +53,7 @@ function AppContent({
 
   return (
     <div className="flex h-screen bg-bg overflow-hidden font-sans text-text-primary antialiased">
+      <NotificationToastContainer />
       <ThrottleToast />
       <Sidebar 
         isOpen={sidebarOpen} 
