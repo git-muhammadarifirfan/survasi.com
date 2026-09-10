@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { Trash2, AlertTriangle, X } from 'lucide-react';
 
 interface ConfirmationModalProps {
@@ -57,8 +58,8 @@ export default function ConfirmationModal({
 
   const IconComp = CustomIcon || variantStyles.Icon;
 
-  return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 animate-in fade-in duration-200">
+  return createPortal(
+    <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/60 animate-in fade-in duration-200">
       <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-sm w-full p-6 relative animate-in zoom-in-95 duration-200 space-y-5">
         {/* Close Button */}
         <button
@@ -103,6 +104,7 @@ export default function ConfirmationModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
