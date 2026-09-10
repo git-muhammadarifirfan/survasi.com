@@ -10,6 +10,7 @@
 const router = require('express').Router();
 const pool   = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth');
+const { submitLimiter } = require('../middleware/rateLimiter');
 
 router.use(authMiddleware);
 
@@ -42,7 +43,7 @@ router.get('/questions', async (req, res) => {
 });
 
 // ─── POST /api/survey/submit ─────────────────────────────────────────────────
-router.post('/submit', async (req, res) => {
+router.post('/submit', submitLimiter, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
