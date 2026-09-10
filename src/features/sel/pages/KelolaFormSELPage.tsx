@@ -347,9 +347,24 @@ export default function KelolaFormSEL() {
           { id: itemB.id, urutan: posA + 1 }
         ]
       });
-      showToast('Urutan indikator berhasil diperbarui!');
+    try {
+      await apiClient.put('/sel/indikator/reorder', {
+        items: [
+          { id: itemA.id, urutan: posB + 1 },
+          { id: itemB.id, urutan: posA + 1 }
+        ]
+      });
+      notifyToast({
+        type: 'success',
+        title: 'Urutan Diperbarui',
+        message: 'Posisi indikator pengamatan berhasil diubah.',
+      });
     } catch {
-      showToast('Gagal menyimpan urutan ke MySQL.');
+      notifyToast({
+        type: 'error',
+        title: 'Gagal Menyimpan',
+        message: 'Gagal memperbarui posisi urutan indikator.',
+      });
     }
   };
 
@@ -363,13 +378,6 @@ export default function KelolaFormSEL() {
 
   return (
     <div className="space-y-6 max-w-[1400px] mx-auto animate-fade-in">
-      {toast && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-xl bg-primary text-white px-4 py-3 shadow-xl text-xs font-semibold animate-scale-in">
-          <CheckCircle2 className="h-4 w-4 text-emerald-300" />
-          {toast}
-        </div>
-      )}
-
       {/* Header Banner */}
       <div className="rounded-2xl bg-gradient-to-r from-primary via-[#5a6bd4] to-accent p-6 text-white shadow-lg relative overflow-hidden animate-slide-up">
         <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -mr-16 -mt-16" />
@@ -584,7 +592,11 @@ export default function KelolaFormSEL() {
 
             <div className="p-4 sm:p-6 bg-bg/50">
               <ObservasiFormWizard onSubmitDone={() => {
-                showToast('Simulasi Pengiriman Berhasil!');
+                notifyToast({
+                  type: 'success',
+                  title: 'Simulasi Berhasil',
+                  message: 'Simulasi pengiriman form observasi berhasil diselesaikan.',
+                });
                 setIsPreviewOpen(false);
               }} />
             </div>
