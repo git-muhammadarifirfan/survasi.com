@@ -29,8 +29,8 @@ async function fetchJson<T>(endpoint: string, options?: RequestInit): Promise<T>
 
   const response = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
 
-  // Auto-redirect on unauthorized
-  if (response.status === 401) {
+  // Auto-redirect on unauthorized (kecuali endpoint login)
+  if (response.status === 401 && !endpoint.startsWith('/auth/login')) {
     localStorage.removeItem(TOKEN_KEY);
     window.location.href = '/login';
     throw new Error('Sesi berakhir. Silakan login kembali.');

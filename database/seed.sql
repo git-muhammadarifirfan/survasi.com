@@ -146,8 +146,7 @@ INSERT INTO users (nama, email, password_hash, role, jabatan, instansi, is_activ
   'Administrator BSAN',
   'admin@survasi.com',
   -- bcrypt hash of 'admin' (rounds=12)
-  -- Generate ulang: node -e "require('bcryptjs').hash('admin',12).then(console.log)"
-  '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj6o8dE9V8fy',
+  '$2b$12$4tFnBVeY4WdARvfHnIjwDOZBTCp/wPf1bP8lQaxWm0TmLOy9D/EOm',
   'admin',
   'Administrator Sistem Monitoring BSAN',
   'Survasi.com / Dinas Pendidikan Jawa Timur',
@@ -161,7 +160,7 @@ INSERT INTO users (nama, email, password_hash, role, jabatan, instansi, is_activ
   'Demo Pengawas',
   'pengawas@survasi.com',
   -- bcrypt hash of 'pengawas' (rounds=12)
-  '$2b$12$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uADdmTxCi',
+  '$2b$12$JoJRSHHy1Pox1S.Qed/mIeIrfbhZ1F7Q2GimDL1wireB0yM.gYNl.',
   'pengawas',
   'Pengawas Sekolah / Penilik',
   'Dinas Pendidikan Kab. Sidoarjo',

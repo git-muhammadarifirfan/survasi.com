@@ -21,11 +21,11 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-'use strict';
-require('dotenv').config({ path: './server/.env' });
+import dotenv from 'dotenv';
+import mysql from 'mysql2/promise';
+import bcrypt from 'bcryptjs';
 
-const mysql  = require('mysql2/promise');
-const bcrypt = require('bcryptjs');
+dotenv.config({ path: './server/.env' });
 
 const BCRYPT_ROUNDS = 12;
 
