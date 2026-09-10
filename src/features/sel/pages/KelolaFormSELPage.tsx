@@ -206,12 +206,36 @@ export default function KelolaFormSEL() {
     e.dataTransfer.setData('text/plain', id);
   };
 
-  const handleDragOverIndikator = (e: React.DragEvent, id: string) => {
+  const handleDragEndIndikator = () => {
+    setDraggedIndikatorId(null);
+    setDragOverIndikatorId(null);
+  };
+
+  const handleDragOverIndikator = (e: React.DragEvent, id: string, groupList: SELIndikator[]) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     if (dragOverIndikatorId !== id) {
       setDragOverIndikatorId(id);
     }
+
+    if (!draggedIndikatorId || draggedIndikatorId === id) return;
+
+    // Real-time live position swap for smooth drag animation
+    const sourceIdx = groupList.findIndex(i => i.id === draggedIndikatorId);
+    const targetIdx = groupList.findIndex(i => i.id === id);
+    if (sourceIdx === -1 || targetIdx === -1) return;
+
+    setIndikatorList(prev => {
+      const newMain = [...prev];
+      const srcPos = newMain.findIndex(i => i.id === draggedIndikatorId);
+      const tgtPos = newMain.findIndex(i => i.id === id);
+      if (srcPos !== -1 && tgtPos !== -1) {
+        const temp = newMain[srcPos];
+        newMain[srcPos] = newMain[tgtPos];
+        newMain[tgtPos] = temp;
+      }
+      return newMain;
+    });
   };
 
   const handleDragLeaveIndikator = () => {
@@ -438,7 +462,8 @@ export default function KelolaFormSEL() {
                             key={ind.id}
                             draggable
                             onDragStart={e => handleDragStartIndikator(e, ind.id)}
-                            onDragOver={e => handleDragOverIndikator(e, ind.id)}
+                            onDragEnd={handleDragEndIndikator}
+                            onDragOver={e => handleDragOverIndikator(e, ind.id, inds)}
                             onDragLeave={handleDragLeaveIndikator}
                             onDrop={() => handleDropIndikator(ind.id, inds)}
                             className={`rounded-xl border p-3.5 space-y-2 transition-all duration-200 relative group cursor-grab active:cursor-grabbing ${
@@ -449,12 +474,12 @@ export default function KelolaFormSEL() {
                                 : 'border-border bg-bg/30 hover:border-primary/40 hover:bg-surface hover:shadow-xs'
                             }`}
                           >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="flex items-start gap-2.5 flex-1">
-                                <div className="p-1.5 text-text-secondary/40 group-hover:text-primary transition-colors cursor-grab shrink-0 pt-1 hover:bg-border/40 rounded-md">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-2.5 flex-1">
+                                <div className="p-1.5 text-text-secondary/40 group-hover:text-primary transition-colors cursor-grab shrink-0 flex items-center justify-center hover:bg-border/40 rounded-md">
                                   <GripVertical className="h-4 w-4" />
                                 </div>
-                                <div className="h-6 w-6 rounded-lg bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
+                                <div className="h-6 w-6 rounded-lg bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0 shadow-2xs">
                                   {idx + 1}
                                 </div>
                                 <div className="space-y-1">

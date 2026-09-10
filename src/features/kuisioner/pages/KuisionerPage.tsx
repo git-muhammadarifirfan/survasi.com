@@ -215,12 +215,41 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     e.dataTransfer.setData('text/plain', String(id));
   };
 
-  const handleDragOver = (e: React.DragEvent, id: number) => {
+  const handleDragEnd = () => {
+    setDraggedQuestionId(null);
+    setDragOverQuestionId(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent, id: number, currentSectionList: ApiQuestionItem[]) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     if (dragOverQuestionId !== id) {
       setDragOverQuestionId(id);
     }
+
+    if (!draggedQuestionId || draggedQuestionId === id) return;
+
+    // Real-time live swap animation while dragging over
+    const sourceIdx = currentSectionList.findIndex(q => q.id === draggedQuestionId);
+    const targetIdx = currentSectionList.findIndex(q => q.id === id);
+    if (sourceIdx === -1 || targetIdx === -1) return;
+
+    const reorderedSection = [...currentSectionList];
+    const [movedItem] = reorderedSection.splice(sourceIdx, 1);
+    reorderedSection.splice(targetIdx, 0, movedItem);
+
+    // Swap positions in main state for smooth preview animation
+    setQuestions(prev => {
+      const newMain = [...prev];
+      const srcMainIdx = newMain.findIndex(q => q.id === draggedQuestionId);
+      const tgtMainIdx = newMain.findIndex(q => q.id === id);
+      if (srcMainIdx !== -1 && tgtMainIdx !== -1) {
+        const temp = newMain[srcMainIdx];
+        newMain[srcMainIdx] = newMain[tgtMainIdx];
+        newMain[tgtMainIdx] = temp;
+      }
+      return newMain;
+    });
   };
 
   const handleDragLeave = () => {
@@ -640,10 +669,11 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                       key={q.id}
                       draggable
                       onDragStart={e => handleDragStart(e, q.id)}
-                      onDragOver={e => handleDragOver(e, q.id)}
+                      onDragEnd={handleDragEnd}
+                      onDragOver={e => handleDragOver(e, q.id, secQuestions)}
                       onDragLeave={handleDragLeave}
                       onDrop={() => handleDropQuestion(q.id, secQuestions)}
-                      className={`p-4 rounded-xl bg-white border transition-all duration-200 flex items-start justify-between gap-4 group cursor-grab active:cursor-grabbing ${
+                      className={`p-4 rounded-xl bg-white border transition-all duration-200 flex items-center justify-between gap-4 group cursor-grab active:cursor-grabbing ${
                         draggedQuestionId === q.id
                           ? 'border-indigo-500 bg-indigo-50/60 shadow-lg scale-[0.99] opacity-40 border-dashed'
                           : dragOverQuestionId === q.id
@@ -651,13 +681,13 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                           : 'border-slate-200/60 hover:border-indigo-300 hover:shadow-xs'
                       }`}
                     >
-                      <div className="flex items-start space-x-3">
-                        {/* 6-Dots Drag Handle Icon */}
-                        <div className="p-1.5 rounded-md text-slate-300 group-hover:text-indigo-600 group-hover:bg-indigo-50 transition cursor-grab shrink-0 mt-0.5" title="Tarik & Geser untuk mengubah urutan">
+                      <div className="flex items-center space-x-3">
+                        {/* 6-Dots Drag Handle Icon Centered Vertically */}
+                        <div className="p-1.5 rounded-md text-slate-300 group-hover:text-indigo-600 group-hover:bg-indigo-50 transition cursor-grab shrink-0 flex items-center justify-center" title="Tarik & Geser untuk mengubah urutan">
                           <GripVertical className="w-5 h-5 stroke-[2.5]" />
                         </div>
 
-                        <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                        <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 text-xs font-bold flex items-center justify-center shrink-0">
                           {qIdx + 1}
                         </div>
                         <div className="space-y-1">
