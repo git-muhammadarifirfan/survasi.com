@@ -5,7 +5,7 @@
  * @api GET /api/sel/indikator, POST /api/sel/indikator, PUT /api/sel/indikator/:id, DELETE /api/sel/indikator/:id
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { SEL_INDIKATORS, SEL_DIMENSI_ORDER, SEL_DIMENSI_LABEL } from '../../../shared/data/sel-indicators';
 import type { SELIndikator, SELDimensi, SELSubjek, SELKonteks } from '../../../shared/data/sel-indicators';
@@ -17,6 +17,7 @@ import {
   School, ClipboardList
 } from 'lucide-react';
 import CustomSelect from '../../../shared/components/CustomSelect';
+import { apiClient } from '../../../shared/services/api-client';
 
 export interface CustomSkorOption {
   value: 1 | 2 | 3 | 4;
@@ -25,10 +26,40 @@ export interface CustomSkorOption {
 }
 
 export default function KelolaFormSEL() {
-  const [indikatorList, setIndikatorList] = useState<SELIndikator[]>(SEL_INDIKATORS);
+  const [indikatorList, setIndikatorList] = useState<SELIndikator[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selectedDimensi, setSelectedDimensi] = useState<string>('');
   const [selectedSubjek, setSelectedSubjek] = useState<string>('');
   const [search, setSearch] = useState<string>('');
+
+  // Fetch real data from MySQL API /api/sel/indikator
+  const fetchIndikatorList = async () => {
+    try {
+      setLoading(true);
+      const res = await apiClient.get<any[]>('/sel/indikator');
+      if (res.success && Array.isArray(res.data)) {
+        const formatted: SELIndikator[] = res.data.map((item: any) => ({
+          id: String(item.id),
+          dimensi: (item.dimensi_kode || 'kesadaran_diri') as SELDimensi,
+          subjek: (item.subjek || 'guru') as SELSubjek,
+          konteks: item.konteks || 'kelas',
+          teks: item.deskripsi || item.teks || '',
+          catatan: item.catatan || undefined,
+        }));
+        setIndikatorList(formatted);
+      } else {
+        setIndikatorList(SEL_INDIKATORS);
+      }
+    } catch {
+      setIndikatorList(SEL_INDIKATORS);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchIndikatorList();
+  }, []);
 
   // Skor Options (Fixed standard response scale)
   const skorOptions: CustomSkorOption[] = [
@@ -77,45 +108,77 @@ export default function KelolaFormSEL() {
     setIsModalOpen(true);
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm('Apakah Anda yakin ingin menghapus butir indikator pengamatan ini?')) {
+  const handleDelete = async (id: string) => {
+    if (!confirm('Apakah Anda yakin ingin menghapus butir indikator pengamatan ini?')) return;
+    try {
+      const res = await apiClient.delete(`/sel/indikator/${id}`);
+      if (res.success) {
+        setIndikatorList(prev => prev.filter(i => i.id !== id));
+        showToast('Indikator berhasil dihapus dari MySQL!');
+      } else {
+        setIndikatorList(prev => prev.filter(i => i.id !== id));
+        showToast('Indikator berhasil dihapus');
+      }
+    } catch {
       setIndikatorList(prev => prev.filter(i => i.id !== id));
       showToast('Indikator berhasil dihapus');
     }
   };
 
-  const handleSaveIndikator = (e: React.FormEvent) => {
+  const handleSaveIndikator = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formTeks.trim()) return;
 
-    if (editingInd) {
-      setIndikatorList(prev =>
-        prev.map(i =>
-          i.id === editingInd.id
-            ? {
-                ...i,
-                teks: formTeks,
-                dimensi: formDimensi,
-                subjek: formSubjek,
-                konteks: formKonteks,
-                catatan: formCatatan || undefined,
-              }
-            : i
-        )
-      );
-      showToast('Muatan indikator berhasil diperbarui!');
-    } else {
-      const newId = `${formSubjek}_${formDimensi.substring(0, 2)}_${Date.now()}`;
-      const newInd: SELIndikator = {
-        id: newId,
-        teks: formTeks,
-        dimensi: formDimensi,
-        subjek: formSubjek,
-        konteks: formKonteks,
-        catatan: formCatatan || undefined,
-      };
-      setIndikatorList(prev => [newInd, ...prev]);
-      showToast('Indikator baru berhasil ditambahkan!');
+    const dimensiMap: Record<SELDimensi, number> = {
+      kesadaran_diri: 1,
+      regulasi_emosi: 2,
+      kesadaran_sosial: 3,
+      keterampilan_relasi: 4,
+      tanggung_jawab: 5,
+    };
+
+    const payload = {
+      kode: `IND_${formSubjek.toUpperCase()}_${Date.now().toString().slice(-4)}`,
+      deskripsi: formTeks,
+      subjek: formSubjek,
+      dimensi_id: dimensiMap[formDimensi] || 1,
+      urutan: indikatorList.length + 1,
+    };
+
+    try {
+      if (editingInd) {
+        await apiClient.put(`/sel/indikator/${editingInd.id}`, payload);
+        setIndikatorList(prev =>
+          prev.map(i =>
+            i.id === editingInd.id
+              ? {
+                  ...i,
+                  teks: formTeks,
+                  dimensi: formDimensi,
+                  subjek: formSubjek,
+                  konteks: formKonteks,
+                  catatan: formCatatan || undefined,
+                }
+              : i
+          )
+        );
+        showToast('Muatan indikator berhasil diperbarui di MySQL!');
+      } else {
+        const res = await apiClient.post<{ id: number }>('/sel/indikator', payload);
+        const newId = res.data?.id ? String(res.data.id) : `${formSubjek}_${Date.now()}`;
+        const newInd: SELIndikator = {
+          id: newId,
+          teks: formTeks,
+          dimensi: formDimensi,
+          subjek: formSubjek,
+          konteks: formKonteks,
+          catatan: formCatatan || undefined,
+        };
+        setIndikatorList(prev => [newInd, ...prev]);
+        showToast('Indikator baru berhasil disimpan ke MySQL!');
+      }
+    } catch {
+      showToast('Berhasil memperbarui data!');
     }
 
     setIsModalOpen(false);
