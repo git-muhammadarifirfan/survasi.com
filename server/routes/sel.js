@@ -27,7 +27,7 @@ router.get('/indikator', async (req, res) => {
   try {
     const [rows] = await pool.execute(`
       SELECT
-        si.id, si.kode, si.deskripsi, si.subjek, si.konteks, si.catatan,
+        si.id, si.kode, si.teks, si.subjek, si.konteks, si.catatan,
         sd.id AS dimensi_id, sd.kode AS dimensi_kode,
         sd.nama AS dimensi_nama, sd.modul_bsan_kode,
         si.urutan, si.is_active
@@ -45,10 +45,11 @@ router.get('/indikator', async (req, res) => {
 // ─── POST /api/sel/indikator ─────────────────────────────────────────────────
 router.post('/indikator', adminOnly, async (req, res) => {
   try {
-    const { kode, deskripsi, subjek, konteks, catatan, dimensi_id, urutan } = req.body;
+    const { kode, deskripsi, teks, subjek, konteks, catatan, dimensi_id, urutan } = req.body;
+    const teksVal = deskripsi || teks;
     const [result] = await pool.execute(
-      `INSERT INTO sel_indikator (kode, deskripsi, subjek, konteks, catatan, dimensi_id, urutan) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [kode, deskripsi, subjek, konteks || 'kelas', catatan || null, dimensi_id, urutan || 0]
+      `INSERT INTO sel_indikator (kode, teks, subjek, konteks, catatan, dimensi_id, urutan) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [kode, teksVal, subjek, konteks || 'kelas', catatan || null, dimensi_id, urutan || 0]
     );
     return res.status(201).json({ success: true, id: result.insertId });
   } catch (err) {
@@ -60,10 +61,11 @@ router.post('/indikator', adminOnly, async (req, res) => {
 // ─── PUT /api/sel/indikator/:id ──────────────────────────────────────────────
 router.put('/indikator/:id', adminOnly, async (req, res) => {
   try {
-    const { kode, deskripsi, subjek, konteks, catatan, dimensi_id, urutan, is_active } = req.body;
+    const { kode, deskripsi, teks, subjek, konteks, catatan, dimensi_id, urutan, is_active } = req.body;
+    const teksVal = deskripsi || teks;
     await pool.execute(
-      `UPDATE sel_indikator SET kode=?, deskripsi=?, subjek=?, konteks=?, catatan=?, dimensi_id=?, urutan=?, is_active=? WHERE id=?`,
-      [kode, deskripsi, subjek, konteks || 'kelas', catatan || null, dimensi_id, urutan || 0, is_active !== undefined ? is_active : 1, req.params.id]
+      `UPDATE sel_indikator SET kode=?, teks=?, subjek=?, konteks=?, catatan=?, dimensi_id=?, urutan=?, is_active=? WHERE id=?`,
+      [kode, teksVal, subjek, konteks || 'kelas', catatan || null, dimensi_id, urutan || 0, is_active !== undefined ? is_active : 1, req.params.id]
     );
     return res.json({ success: true });
   } catch (err) {
