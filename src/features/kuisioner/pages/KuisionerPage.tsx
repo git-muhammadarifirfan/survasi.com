@@ -77,7 +77,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     async function loadQuestions() {
       try {
         setLoading(true);
-        const res = await apiClient.get<ApiQuestionItem[]>('/api/survey/questions');
+        const res = await apiClient.get<ApiQuestionItem[]>('/survey/questions');
         if (res.success && res.data) {
           setQuestions(res.data);
 
@@ -209,7 +209,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
         jawaban: payloadAnswers,
       };
 
-      const res = await apiClient.post<{ meesage: string }>('/api/survey/submit', payload);
+      const res = await apiClient.post<{ meesage: string }>('/survey/submit', payload);
       if (res.success) {
         clearDraft('kuisioner');
         setSubmitted(true);
