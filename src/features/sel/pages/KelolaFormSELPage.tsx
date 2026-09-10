@@ -138,31 +138,37 @@ export default function KelolaFormSEL() {
     };
 
     const payload = {
-      kode: `IND_${formSubjek.toUpperCase()}_${Date.now().toString().slice(-4)}`,
-      deskripsi: formTeks,
+      kode: editingInd ? editingInd.id : `IND_${formSubjek.toUpperCase()}_${Date.now().toString().slice(-4)}`,
+      teks: formTeks,
       subjek: formSubjek,
+      konteks: formKonteks,
+      catatan: formCatatan || null,
       dimensi_id: dimensiMap[formDimensi] || 1,
       urutan: indikatorList.length + 1,
     };
 
     try {
       if (editingInd) {
-        await apiClient.put(`/sel/indikator/${editingInd.id}`, payload);
-        setIndikatorList(prev =>
-          prev.map(i =>
-            i.id === editingInd.id
-              ? {
-                  ...i,
-                  teks: formTeks,
-                  dimensi: formDimensi,
-                  subjek: formSubjek,
-                  konteks: formKonteks,
-                  catatan: formCatatan || undefined,
-                }
-              : i
-          )
-        );
-        showToast('Muatan indikator berhasil diperbarui di MySQL!');
+        const res = await apiClient.put(`/sel/indikator/${editingInd.id}`, payload);
+        if (res.success) {
+          setIndikatorList(prev =>
+            prev.map(i =>
+              i.id === editingInd.id
+                ? {
+                    ...i,
+                    teks: formTeks,
+                    dimensi: formDimensi,
+                    subjek: formSubjek,
+                    konteks: formKonteks,
+                    catatan: formCatatan || undefined,
+                  }
+                : i
+            )
+          );
+          showToast('Muatan indikator berhasil diperbarui di MySQL!');
+        } else {
+          showToast(res.message || 'Gagal menyimpan ke MySQL.');
+        }
       } else {
         const res = await apiClient.post<{ id: number }>('/sel/indikator', payload);
         const newId = res.data?.id ? String(res.data.id) : `${formSubjek}_${Date.now()}`;
@@ -177,8 +183,8 @@ export default function KelolaFormSEL() {
         setIndikatorList(prev => [newInd, ...prev]);
         showToast('Indikator baru berhasil disimpan ke MySQL!');
       }
-    } catch {
-      showToast('Berhasil memperbarui data!');
+    } catch (err: any) {
+      showToast(err?.message || 'Gagal memperbarui data di MySQL.');
     }
 
     setIsModalOpen(false);
