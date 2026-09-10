@@ -18,6 +18,7 @@
 const router = require('express').Router();
 const pool   = require('../db/pool');
 const { authMiddleware, adminOnly } = require('../middleware/auth');
+const { submitLimiter } = require('../middleware/rateLimiter');
 
 router.use(authMiddleware);
 
@@ -82,7 +83,7 @@ router.delete('/indikator/:id', adminOnly, async (req, res) => {
 });
 
 // ─── POST /api/sel/sesi ───────────────────────────────────────────────────────
-router.post('/sesi', async (req, res) => {
+router.post('/sesi', submitLimiter, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();

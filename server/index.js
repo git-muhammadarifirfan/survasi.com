@@ -25,11 +25,18 @@
 
 require('dotenv').config();
 
-const express  = require('express');
-const cors     = require('cors');
-const morgan   = require('morgan');
+const express = require('express');
+const cors    = require('cors');
+const morgan  = require('morgan');
+const helmet  = require('helmet');
+const { globalLimiter } = require('./middleware/rateLimiter');
 
 const app = express();
+
+// ─── Security Headers (Helmet) & Rate Limiting ────────────────────────────────
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.disable('x-powered-by'); // Sembunyikan header Express
+app.use('/api', globalLimiter); // Apply Rate Limiting ke semua endpoint /api
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 

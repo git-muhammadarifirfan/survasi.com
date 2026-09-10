@@ -1,8 +1,7 @@
 'use strict';
 /**
  * @file db/pool.js
- * @description MySQL2 connection pool — single instance reusable di seluruh server.
- * Gunakan pool.query() atau pool.execute() untuk semua query database.
+ * @description MySQL2 connection pool — Optimized for production performance & high concurrency.
  */
 
 require('dotenv').config();
@@ -15,9 +14,13 @@ const pool = mysql.createPool({
   password: process.env.DB_PASS || '',
   database: process.env.DB_NAME || 'bsan_jatim_monitoring',
   waitForConnections: true,
-  connectionLimit: 20,
+  connectionLimit: 25,              // Max 25 simultaneous active DB connections
+  maxIdle: 10,                      // Keep up to 10 idle connections for immediate reuse
+  idleTimeout: 60000,               // Close idle connections after 60s
   queueLimit: 0,
-  timezone: '+07:00',         // WIB
+  enableKeepAlive: true,            // Keep TCP connections alive
+  keepAliveInitialDelay: 0,
+  timezone: '+07:00',               // WIB
   charset: 'utf8mb4',
   decimalNumbers: true,             // Return DECIMAL as number, not string
 });
@@ -25,7 +28,7 @@ const pool = mysql.createPool({
 // Test koneksi saat startup
 pool.getConnection()
   .then(conn => {
-    console.log('[DB] ✅ MySQL Connected —', process.env.DB_NAME);
+    console.log('[DB] ✅ MySQL Connected & Optimized —', process.env.DB_NAME);
     conn.release();
   })
   .catch(err => {
