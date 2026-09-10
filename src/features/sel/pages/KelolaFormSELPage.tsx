@@ -18,6 +18,9 @@ import {
 } from 'lucide-react';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import { apiClient } from '../../../shared/services/api-client';
+import { notifyToast } from '../../../shared/components/NotificationToast';
+import ConfirmationModal from '../../../shared/components/ConfirmationModal';
+import { LoadingIndicator } from '../../../shared/components/LoadingIndicator';
 
 export interface CustomSkorOption {
   value: 1 | 2 | 3 | 4;
@@ -81,12 +84,7 @@ export default function KelolaFormSEL() {
   const [formKonteks, setFormKonteks] = useState<SELKonteks>('kelas');
   const [formCatatan, setFormCatatan] = useState('');
 
-  const [toast, setToast] = useState<string | null>(null);
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 3000);
-  };
 
   const handleOpenAdd = () => {
     setEditingInd(null);
@@ -114,14 +112,26 @@ export default function KelolaFormSEL() {
       const res = await apiClient.delete(`/sel/indikator/${id}`);
       if (res.success) {
         setIndikatorList(prev => prev.filter(i => i.id !== id));
-        showToast('Indikator berhasil dihapus dari MySQL!');
+        notifyToast({
+          type: 'success',
+          title: 'Indikator Dihapus',
+          message: 'Butir indikator pengamatan berhasil dihapus.',
+        });
       } else {
         setIndikatorList(prev => prev.filter(i => i.id !== id));
-        showToast('Indikator berhasil dihapus');
+        notifyToast({
+          type: 'info',
+          title: 'Indikator Dihapus',
+          message: 'Indikator pengamatan telah dihapus.',
+        });
       }
     } catch {
       setIndikatorList(prev => prev.filter(i => i.id !== id));
-      showToast('Indikator berhasil dihapus');
+      notifyToast({
+        type: 'info',
+        title: 'Indikator Dihapus',
+        message: 'Indikator pengamatan telah dihapus.',
+      });
     }
   };
 
@@ -162,9 +172,17 @@ export default function KelolaFormSEL() {
                 : i
             )
           );
-          showToast('Muatan indikator berhasil diperbarui di MySQL!');
+          notifyToast({
+            type: 'success',
+            title: 'Berhasil Diperbarui',
+            message: 'Butir indikator pengamatan SEL berhasil disimpan.',
+          });
         } else {
-          showToast(res.message || 'Gagal menyimpan ke MySQL.');
+          notifyToast({
+            type: 'error',
+            title: 'Gagal Menyimpan',
+            message: res.message || 'Terjadi kesalahan saat memperbarui indikator.',
+          });
         }
       } else {
         const createPayload = {
@@ -187,10 +205,18 @@ export default function KelolaFormSEL() {
           catatan: formCatatan || undefined,
         };
         setIndikatorList(prev => [...prev, newInd]);
-        showToast('Indikator baru berhasil disimpan ke MySQL!');
+        notifyToast({
+          type: 'success',
+          title: 'Indikator Ditambahkan',
+          message: 'Indikator pengamatan SEL baru berhasil disimpan.',
+        });
       }
     } catch (err: any) {
-      showToast(err?.message || 'Gagal memperbarui data di MySQL.');
+      notifyToast({
+        type: 'error',
+        title: 'Error Koneksi',
+        message: err?.message || 'Gagal menyimpan perubahan.',
+      });
     }
 
     setIsModalOpen(false);
@@ -277,9 +303,17 @@ export default function KelolaFormSEL() {
 
     try {
       await apiClient.put('/sel/indikator/reorder', { items: reorderPayload });
-      showToast('Urutan posisi berhasil disimpan ke MySQL!');
+      notifyToast({
+        type: 'success',
+        title: 'Urutan Diperbarui',
+        message: 'Posisi urutan indikator pengamatan berhasil disimpan.',
+      });
     } catch {
-      showToast('Gagal menyimpan urutan ke MySQL.');
+      notifyToast({
+        type: 'error',
+        title: 'Gagal Menyimpan',
+        message: 'Gagal memperbarui urutan indikator.',
+      });
     }
   };
 
