@@ -214,11 +214,9 @@ export default function KelolaFormSEL() {
   const handleDragOverIndikator = (e: React.DragEvent, id: string, groupList: SELIndikator[]) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    if (dragOverIndikatorId !== id) {
-      setDragOverIndikatorId(id);
-    }
+    if (dragOverIndikatorId === id || !draggedIndikatorId || draggedIndikatorId === id) return;
 
-    if (!draggedIndikatorId || draggedIndikatorId === id) return;
+    setDragOverIndikatorId(id);
 
     // Real-time live position swap for smooth drag animation
     const sourceIdx = groupList.findIndex(i => i.id === draggedIndikatorId);

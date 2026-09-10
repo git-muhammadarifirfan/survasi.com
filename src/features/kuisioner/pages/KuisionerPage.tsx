@@ -223,22 +223,15 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
   const handleDragOver = (e: React.DragEvent, id: number, currentSectionList: ApiQuestionItem[]) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    if (dragOverQuestionId !== id) {
-      setDragOverQuestionId(id);
-    }
+    if (dragOverQuestionId === id || !draggedQuestionId || draggedQuestionId === id) return;
 
-    if (!draggedQuestionId || draggedQuestionId === id) return;
+    setDragOverQuestionId(id);
 
-    // Real-time live swap animation while dragging over
+    // Swap positions in main state for smooth preview animation
     const sourceIdx = currentSectionList.findIndex(q => q.id === draggedQuestionId);
     const targetIdx = currentSectionList.findIndex(q => q.id === id);
     if (sourceIdx === -1 || targetIdx === -1) return;
 
-    const reorderedSection = [...currentSectionList];
-    const [movedItem] = reorderedSection.splice(sourceIdx, 1);
-    reorderedSection.splice(targetIdx, 0, movedItem);
-
-    // Swap positions in main state for smooth preview animation
     setQuestions(prev => {
       const newMain = [...prev];
       const srcMainIdx = newMain.findIndex(q => q.id === draggedQuestionId);
