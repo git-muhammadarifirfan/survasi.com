@@ -19,9 +19,11 @@ const { loginLimiter } = require('../middleware/rateLimiter');
 // ─── POST /api/auth/login ────────────────────────────────────────────────────
 router.post('/login', loginLimiter, async (req, res) => {
   try {
-    const { identifier, password } = req.body;
+    const { identifier, password } = req.body || {};
+    const cleanIdentifier = String(identifier || '').trim().toLowerCase();
+    const cleanPassword   = String(password || '').trim();
 
-    if (!identifier || !password) {
+    if (!cleanIdentifier || !cleanPassword) {
       return res.status(400).json({ success: false, message: 'Identifier (email/NPSN) dan password wajib diisi.' });
     }
 
@@ -39,9 +41,9 @@ router.post('/login', loginLimiter, async (req, res) => {
       LEFT JOIN satuan_pendidikan sp ON u.sekolah_id = sp.id
       LEFT JOIN kabupaten kb ON u.kabupaten_id = kb.id
       LEFT JOIN kecamatan k  ON u.kecamatan_id = k.id
-      WHERE (u.email = ? OR sp.npsn = ?) AND u.is_active = TRUE
+      WHERE (LOWER(u.email) = ? OR sp.npsn = ?) AND u.is_active = TRUE
       LIMIT 1
-    `, [identifier, identifier]);
+    `, [cleanIdentifier, cleanIdentifier]);
 
     if (rows.length === 0) {
       return res.status(401).json({ success: false, message: 'Email/NPSN atau password salah.' });
@@ -50,7 +52,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     const user = rows[0];
 
     // Verifikasi password
-    const match = await bcrypt.compare(password, user.password_hash);
+    const match = await bcrypt.compare(cleanPassword, user.password_hash);
     if (!match) {
       return res.status(401).json({ success: false, message: 'Email/NPSN atau password salah.' });
     }
@@ -76,7 +78,8 @@ router.post('/login', loginLimiter, async (req, res) => {
       kecamatan_id: user.kecamatan_id,
     };
 
-    const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, {
+    const secret = process.env.JWT_SECRET || 'survasi_jwt_secret_key_development_32chars_min';
+    const token = jwt.sign(tokenPayload, secret, {
       expiresIn: process.env.JWT_EXPIRES_IN || '8h',
     });
 

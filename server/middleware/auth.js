@@ -18,7 +18,8 @@ function authMiddleware(req, res, next) {
 
   const token = authHeader.split(' ')[1];
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const secret = process.env.JWT_SECRET || 'survasi_jwt_secret_key_development_32chars_min';
+    const payload = jwt.verify(token, secret);
     req.user = payload;
     next();
   } catch (err) {
