@@ -72,6 +72,19 @@ export const apiClient = {
       body: data ? JSON.stringify(data) : undefined,
     }),
 
+  /** Generic PUT request wrapper */
+  put: <T = any>(endpoint: string, data?: any) =>
+    fetchJson<ApiResponse<T>>(endpoint, {
+      method: 'PUT',
+      body: data ? JSON.stringify(data) : undefined,
+    }),
+
+  /** Generic DELETE request wrapper */
+  delete: <T = any>(endpoint: string) =>
+    fetchJson<ApiResponse<T>>(endpoint, {
+      method: 'DELETE',
+    }),
+
   // ── Auth ──────────────────────────────────────────────────────────────────
   auth: {
     /** Login dengan email atau NPSN sekolah */
