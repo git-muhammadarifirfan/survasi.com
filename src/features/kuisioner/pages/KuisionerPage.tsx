@@ -1201,7 +1201,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
               type="button"
               disabled={submitting}
               onClick={() => {
-                if (!validateStep()) return;
+                if (!validateCurrentSection()) return;
                 setIsSubmitModalOpen(true);
               }}
               className="inline-flex items-center space-x-2 px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm rounded-xl shadow-md shadow-emerald-600/30 transition transform hover:-translate-y-0.5 cursor-pointer"
