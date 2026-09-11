@@ -41,4 +41,21 @@ function adminOnly(req, res, next) {
   next();
 }
 
-module.exports = { authMiddleware, adminOnly };
+/**
+ * Middleware fleksibel: izinkan role yang berada dalam daftar allowedRoles.
+ * Contoh: roleGuard('admin', 'pengawas')
+ */
+function roleGuard(...allowedRoles) {
+  return (req, res, next) => {
+    if (!req.user || !allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: `Akses ditolak. Halaman/API ini hanya untuk role: ${allowedRoles.join(', ')}.`
+      });
+    }
+    next();
+  };
+}
+
+module.exports = { authMiddleware, adminOnly, roleGuard };
+
