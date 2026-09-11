@@ -94,6 +94,20 @@ export const apiClient = {
         body: JSON.stringify(credentials),
       }),
 
+    /** Registrasi akun sekolah baru */
+    registerSekolah: (payload: { nama: string; email: string; password: string; sekolah_id: number }) =>
+      fetchJson<{ success: boolean; token: string; user: any; message: string }>('/auth/register-sekolah', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    /** Registrasi akun pengawas baru */
+    registerPengawas: (payload: { nama: string; email: string; password: string }) =>
+      fetchJson<{ success: boolean; token: string; user: any; message: string }>('/auth/register-pengawas', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
     logout: () =>
       fetchJson<{ success: boolean }>('/auth/logout', { method: 'POST' }),
 
@@ -108,6 +122,7 @@ export const apiClient = {
         body: JSON.stringify(payload),
       }),
   },
+
 
   // ── Dashboard ──────────────────────────────────────────────────────────────
   dashboard: {
@@ -161,7 +176,46 @@ export const apiClient = {
 
     getKecamatan: (kabupatenId?: number) =>
       fetchJson<ApiResponse<any[]>>(`/sekolah/kecamatan${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
+
+    getOptions: () =>
+      fetchJson<ApiResponse<any[]>>('/sekolah/options'),
   },
+
+  // ── Users Management (Admin) ───────────────────────────────────────────────
+  users: {
+    getAll: (params?: { role?: string; search?: string; page?: number; limit?: number }) => {
+      const query = new URLSearchParams(
+        Object.fromEntries(Object.entries(params || {}).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))
+      ).toString();
+      return fetchJson<ListResponse<any>>(`/users?${query}`);
+    },
+
+    create: (data: any) =>
+      fetchJson<{ success: boolean; id: number; message: string }>('/users', { method: 'POST', body: JSON.stringify(data) }),
+
+    update: (id: number, data: any) =>
+      fetchJson<{ success: boolean; message: string }>(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+    toggleStatus: (id: number, isActive: boolean) =>
+      fetchJson<{ success: boolean; message: string }>(`/users/${id}/status`, { method: 'PUT', body: JSON.stringify({ is_active: isActive }) }),
+
+    delete: (id: number) =>
+      fetchJson<{ success: boolean; message: string }>(`/users/${id}`, { method: 'DELETE' }),
+  },
+
+
+  // ── Notifikasi ─────────────────────────────────────────────────────────────
+  notifikasi: {
+    getAll: () =>
+      fetchJson<{ success: boolean; data: any[]; unread_count: number }>('/notifikasi'),
+
+    markRead: (id: number) =>
+      fetchJson<{ success: boolean }>(`/notifikasi/${id}/read`, { method: 'PUT' }),
+
+    sendBroadcast: (data: { target_role?: string; user_id?: number; judul: string; pesan: string; tipe?: string }) =>
+      fetchJson<{ success: boolean; message: string }>('/notifikasi/send', { method: 'POST', body: JSON.stringify(data) }),
+  },
+
 
   // ── Responden ──────────────────────────────────────────────────────────────
   responden: {
