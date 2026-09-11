@@ -14,7 +14,28 @@ const router = require('express').Router();
 const pool = require('../db/pool');
 const { authMiddleware, adminOnly } = require('../middleware/auth');
 
+// ─── GET /api/sekolah/options (Public for Registration Dropdown) ───────────
+
+router.get('/options', async (req, res) => {
+  try {
+    const [rows] = await pool.execute(`
+      SELECT
+        sp.id, sp.npsn, sp.nama, sp.jenjang,
+        k.nama AS kecamatan, kb.nama AS kabupaten
+      FROM satuan_pendidikan sp
+      JOIN kecamatan k ON sp.kecamatan_id = k.id
+      JOIN kabupaten kb ON k.kabupaten_id = kb.id
+      ORDER BY sp.nama ASC
+    `);
+    return res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error('[Sekolah] options error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 router.use(authMiddleware);
+
 
 // ─── GET /api/sekolah/kabupaten ──────────────────────────────────────────────
 router.get('/kabupaten', async (req, res) => {
@@ -49,32 +70,51 @@ router.get('/kecamatan', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const {
-      kabupaten_id, kecamatan_id, status, jenjang, search,
+      kabupaten_id, kecamatan_id, status, jenjang, search, kecamatan,
       page = 1, limit = 50
     } = req.query;
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
-    const kab = kabupaten_id ? parseInt(kabupaten_id) : null;
-    const kec = kecamatan_id ? parseInt(kecamatan_id) : null;
-    const searchPct = search ? `%${search}%` : null;
+    let whereClauses = ['1=1'];
+    let params = [];
+
+    if (kabupaten_id) {
+      whereClauses.push('kb.id = ?');
+      params.push(parseInt(kabupaten_id));
+    }
+
+    if (kecamatan_id) {
+      whereClauses.push('k.id = ?');
+      params.push(parseInt(kecamatan_id));
+    }
+
+    if (kecamatan && kecamatan.trim() !== '') {
+      const cleanKec = kecamatan.replace(/^Kec\.\s*/i, '').trim();
+      whereClauses.push('k.nama LIKE ?');
+      params.push(`%${cleanKec}%`);
+    }
+
+    if (search && search.trim() !== '') {
+      whereClauses.push('(sp.nama LIKE ? OR sp.npsn LIKE ? OR sp.alamat LIKE ?)');
+      const searchPct = `%${search.trim()}%`;
+      params.push(searchPct, searchPct, searchPct);
+    }
 
     // Untuk pengawas: batasi ke sekolah_id mereka sendiri jika ada, atau kabupaten/kecamatan_id
-    let extraWhere = '';
-    const extraParams = [];
     if (req.user.role === 'pengawas') {
       if (req.user.sekolah_id) {
-        extraWhere = ' AND sp.id = ?';
-        extraParams.push(req.user.sekolah_id);
+        whereClauses.push('sp.id = ?');
+        params.push(req.user.sekolah_id);
       } else if (req.user.kecamatan_id) {
-        extraWhere = ' AND sp.kecamatan_id = ?';
-        extraParams.push(req.user.kecamatan_id);
+        whereClauses.push('sp.kecamatan_id = ?');
+        params.push(req.user.kecamatan_id);
       } else if (req.user.kabupaten_id) {
-        extraWhere = ' AND k.kabupaten_id = ?';
-        extraParams.push(req.user.kabupaten_id);
+        whereClauses.push('k.kabupaten_id = ?');
+        params.push(req.user.kabupaten_id);
       }
     }
 
-    const params = [kab, kab, kec, kec, searchPct, searchPct, searchPct, ...extraParams, parseInt(limit), offset];
+    const whereSql = whereClauses.join(' AND ');
 
     const [rows] = await pool.execute(`
       SELECT
@@ -90,30 +130,18 @@ router.get('/', async (req, res) => {
       FROM satuan_pendidikan sp
       JOIN kecamatan k ON sp.kecamatan_id = k.id
       JOIN kabupaten kb ON k.kabupaten_id = kb.id
-      WHERE (? IS NULL OR kb.id = ?)
-        AND (? IS NULL OR k.id  = ?)
-        AND (? IS NULL OR (
-          sp.nama LIKE ? OR sp.npsn LIKE ?
-        ))
-        ${extraWhere}
+      WHERE ${whereSql}
       ORDER BY k.nama, sp.nama
       LIMIT ? OFFSET ?
-    `, params);
+    `, [...params, parseInt(limit), offset]);
 
-    // Count total
-    const countParams = [kab, kab, kec, kec, searchPct, searchPct, searchPct, ...extraParams];
     const [countRows] = await pool.execute(`
       SELECT COUNT(*) AS total
       FROM satuan_pendidikan sp
       JOIN kecamatan k ON sp.kecamatan_id = k.id
       JOIN kabupaten kb ON k.kabupaten_id = kb.id
-      WHERE (? IS NULL OR kb.id = ?)
-        AND (? IS NULL OR k.id  = ?)
-        AND (? IS NULL OR (
-          sp.nama LIKE ? OR sp.npsn LIKE ?
-        ))
-        ${extraWhere}
-    `, countParams);
+      WHERE ${whereSql}
+    `, params);
 
     return res.json({
       success: true,

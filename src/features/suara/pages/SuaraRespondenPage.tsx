@@ -14,7 +14,7 @@ import CustomSelect from '../../../shared/components/CustomSelect';
 
 interface SuaraRespondenProps {
   activeKecamatan: string | null;
-  userRole?: 'admin' | 'pengawas';
+  userRole?: 'admin' | 'pengawas' | 'sekolah';
 }
 
 interface LocalFeedback {
@@ -54,7 +54,7 @@ export default function SuaraResponden({ activeKecamatan, userRole = 'admin' }: 
 
   // Load school specific feedback from localStorage + defaults
   useEffect(() => {
-    if (userRole === 'pengawas') {
+    if (userRole === 'sekolah') {
       const stored = localStorage.getItem('bsan_school_feedbacks');
       if (stored) {
         setSchoolFeedbacks(JSON.parse(stored));
@@ -84,6 +84,7 @@ export default function SuaraResponden({ activeKecamatan, userRole = 'admin' }: 
       }
     }
   }, [userRole]);
+
 
   const handleSchoolSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -154,7 +155,8 @@ export default function SuaraResponden({ activeKecamatan, userRole = 'admin' }: 
   // ---------------------------------------------------
   // SCHOOL USER VIEW: SUBMISSION FORM & SUBMITTED LIST
   // ---------------------------------------------------
-  if (userRole === 'pengawas') {
+  if (userRole === 'sekolah') {
+
     return (
       <div className="space-y-6">
         {showToast && (

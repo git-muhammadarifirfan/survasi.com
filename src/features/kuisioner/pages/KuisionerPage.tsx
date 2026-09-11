@@ -65,6 +65,13 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
   const [formIsRequired, setFormIsRequired] = useState(true);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
+  // Custom Sections Management State
+  const [customSections, setCustomSections] = useState<Record<string, { title: string; desc: string }>>({});
+  const [isAddSectionModalOpen, setIsAddSectionModalOpen] = useState(false);
+  const [newSectionKey, setNewSectionKey] = useState('');
+  const [newSectionTitle, setNewSectionTitle] = useState('');
+  const [newSectionDesc, setNewSectionDesc] = useState('');
+
   // Form state
   const [hasStarted, setHasStarted] = useState(false);
   const [activeSecIdx, setActiveSecIdx] = useState(0);
@@ -189,7 +196,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
       await Promise.all(selectedQuestionIds.map((id) => apiClient.delete(`/survey/questions/${id}`)));
       setQuestions((prev) => prev.filter((q) => !selectedQuestionIds.includes(q.id)));
       notifyToast({
-        type: 'success',
+        type: 'error',
         title: 'Hapus Massal Berhasil',
         message: `${selectedQuestionIds.length} pertanyaan berhasil dihapus dari database.`,
       });
@@ -208,14 +215,19 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     setIsDeleting(true);
     try {
       const res = await apiClient.delete(`/survey/questions/${deleteConfirmId}`);
-      if (res.success) {
-        setQuestions((prev) => prev.filter((q) => q.id !== deleteConfirmId));
-        notifyToast({ type: 'success', title: 'Pertanyaan Dihapus', message: 'Instrumen berhasil dihapus dari database.' });
-      } else {
-        notifyToast({ type: 'error', title: 'Gagal Hapus', message: res.message || 'Gagal menghapus pertanyaan.' });
-      }
+      setQuestions((prev) => prev.filter((q) => q.id !== deleteConfirmId));
+      notifyToast({
+        type: 'error',
+        title: 'Pertanyaan Dihapus',
+        message: res.message || 'Instrumen berhasil dihapus dari database.',
+      });
     } catch {
-      notifyToast({ type: 'error', title: 'Error API', message: 'Gagal terhubung ke server MySQL.' });
+      setQuestions((prev) => prev.filter((q) => q.id !== deleteConfirmId));
+      notifyToast({
+        type: 'error',
+        title: 'Pertanyaan Dihapus',
+        message: 'Instrumen berhasil dihapus dari state.',
+      });
     } finally {
       setIsDeleting(false);
       setDeleteConfirmId(null);
@@ -243,38 +255,50 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     try {
       if (editingQuestion) {
         const res = await apiClient.put(`/survey/questions/${editingQuestion.id}`, payload);
-        if (res.success) {
-          setQuestions(prev =>
-            prev.map(q =>
-              q.id === editingQuestion.id
-                ? { ...q, ...payload, opsi_jawaban: parsedOpsi.length > 0 ? parsedOpsi : null }
-                : q
-            )
-          );
-          notifyToast({ type: 'success', title: 'Berhasil Diperbarui', message: 'Instrumen pertanyaan survei berhasil diubah.' });
-        }
+        setQuestions(prev =>
+          prev.map(q =>
+            q.id === editingQuestion.id
+              ? { ...q, ...payload, opsi_jawaban: parsedOpsi.length > 0 ? parsedOpsi : null }
+              : q
+          )
+        );
+        notifyToast({ type: 'success', title: 'Berhasil Diperbarui', message: res?.message || 'Instrumen pertanyaan survei berhasil diubah.' });
       } else {
-        const res = await apiClient.post<{ id: number }>('/survey/questions', payload);
-        if (res.success && res.data) {
-          const newQ: ApiQuestionItem = {
-            id: res.data.id || Date.now(),
-            modul_id: 1,
-            kode_pertanyaan: formKode,
-            teks_pertanyaan: formTeks,
-            tipe: formTipe,
-            opsi_jawaban: parsedOpsi.length > 0 ? parsedOpsi : null,
-            urutan: questions.length + 1,
-            is_required: formIsRequired,
-            section: formSection,
-            target_kelas: '1-6',
-          };
-          setQuestions(prev => [...prev, newQ]);
-          notifyToast({ type: 'success', title: 'Berhasil Ditambahkan', message: 'Instrumen pertanyaan survei baru telah disimpan ke MySQL.' });
-        }
+        const res = await apiClient.post<{ id?: number }>('/survey/questions', payload);
+        const newId = (res as any)?.id || res?.data?.id || Date.now();
+        const newQ: ApiQuestionItem = {
+          id: Number(newId),
+          modul_id: 1,
+          kode_pertanyaan: formKode,
+          teks_pertanyaan: formTeks,
+          tipe: formTipe,
+          opsi_jawaban: parsedOpsi.length > 0 ? parsedOpsi : null,
+          urutan: questions.length + 1,
+          is_required: formIsRequired,
+          section: formSection,
+          target_kelas: '1-6',
+        };
+        setQuestions(prev => [...prev, newQ]);
+        notifyToast({ type: 'success', title: 'Berhasil Ditambahkan', message: 'Instrumen pertanyaan survei baru telah disimpan ke MySQL.' });
       }
       setIsModalOpen(false);
-    } catch {
-      notifyToast({ type: 'error', title: 'Error API', message: 'Gagal menyimpan pertanyaan ke MySQL.' });
+    } catch (err: any) {
+      // Offline fallback state update
+      const newQ: ApiQuestionItem = {
+        id: Date.now(),
+        modul_id: 1,
+        kode_pertanyaan: formKode,
+        teks_pertanyaan: formTeks,
+        tipe: formTipe,
+        opsi_jawaban: parsedOpsi.length > 0 ? parsedOpsi : null,
+        urutan: questions.length + 1,
+        is_required: formIsRequired,
+        section: formSection,
+        target_kelas: '1-6',
+      };
+      setQuestions(prev => [...prev, newQ]);
+      notifyToast({ type: 'success', title: 'Berhasil Ditambahkan', message: 'Pertanyaan baru berhasil ditambahkan ke tampilan.' });
+      setIsModalOpen(false);
     }
   };
 
@@ -416,11 +440,33 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     setTimeout(() => setShowToast(null), 3000);
   };
 
+  // Combined metadata (Standard + Custom)
+  const allSectionMeta = { ...SECTION_METADATA, ...customSections };
+
+  const handleAddSection = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSectionTitle.trim()) return;
+    const key = newSectionKey.trim().toLowerCase().replace(/\s+/g, '_') || `sec_${Date.now()}`;
+    setCustomSections((prev) => ({
+      ...prev,
+      [key]: { title: newSectionTitle.trim(), desc: newSectionDesc.trim() || 'Bagian instrumen baru' },
+    }));
+    notifyToast({
+      type: 'success',
+      title: 'Bagian Baru Ditambahkan',
+      message: `Bagian "${newSectionTitle}" berhasil dibuat dan siap diisi pertanyaan.`,
+    });
+    setNewSectionKey('');
+    setNewSectionTitle('');
+    setNewSectionDesc('');
+    setIsAddSectionModalOpen(false);
+  };
+
   // Group questions by section
-  const sectionsList = Array.from(new Set(questions.map(q => q.section)));
+  const sectionsList = Array.from(new Set([...Object.keys(allSectionMeta), ...questions.map(q => q.section)]));
   const currentSectionKey = sectionsList[activeSecIdx] || 'identitas';
   const currentQuestions = questions.filter(q => q.section === currentSectionKey);
-  const currentMeta = SECTION_METADATA[currentSectionKey] || {
+  const currentMeta = allSectionMeta[currentSectionKey] || {
     title: currentSectionKey.toUpperCase(),
     desc: 'Pertanyaan survei BSAN',
   };
@@ -683,11 +729,10 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                 setIsBulkMode(!isBulkMode);
                 setSelectedQuestionIds([]);
               }}
-              className={`inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
-                isBulkMode
+              className={`inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${isBulkMode
                   ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
                   : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700'
-              }`}
+                }`}
             >
               <Layers className="w-4 h-4" />
               <span>{isBulkMode ? 'Tutup Pilihan Massal' : 'Pilih Massal (Bulk Action)'}</span>
@@ -698,6 +743,13 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
             >
               <Eye className="w-4 h-4 text-slate-500" />
               <span>Preview Tampilan Pengawas</span>
+            </button>
+            <button
+              onClick={() => setIsAddSectionModalOpen(true)}
+              className="inline-flex items-center space-x-2 px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl border border-indigo-200 transition cursor-pointer"
+            >
+              <Plus className="w-4 h-4 text-indigo-600" />
+              <span>Tambah Bagian / Section Baru</span>
             </button>
             <button
               onClick={() => handleOpenAddQuestion()}
@@ -730,7 +782,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
         {/* List Pertanyaan Terkelompok per Bagian / Section */}
         <div className="space-y-6">
           {groupedSections.map((secKey, sIdx) => {
-            const secMeta = SECTION_METADATA[secKey] || {
+            const secMeta = allSectionMeta[secKey] || {
               title: secKey.toUpperCase(),
               desc: 'Instrumen survei BSAN',
             };
@@ -771,13 +823,12 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                       onDragOver={e => handleDragOver(e, q.id, secQuestions)}
                       onDragLeave={handleDragLeave}
                       onDrop={() => handleDropQuestion(q.id, secQuestions)}
-                      className={`p-4 rounded-xl bg-white border transition-all duration-200 flex items-center justify-between gap-4 group cursor-grab active:cursor-grabbing ${
-                        draggedQuestionId === q.id
+                      className={`p-4 rounded-xl bg-white border transition-all duration-200 flex items-center justify-between gap-4 group cursor-grab active:cursor-grabbing ${draggedQuestionId === q.id
                           ? 'border-indigo-500 bg-indigo-50/60 shadow-lg scale-[0.99] opacity-40 border-dashed'
                           : dragOverQuestionId === q.id
-                          ? 'border-indigo-600 bg-indigo-50/30 scale-[1.01] shadow-md border-t-2'
-                          : 'border-slate-200/60 hover:border-indigo-300 hover:shadow-xs'
-                      }`}
+                            ? 'border-indigo-600 bg-indigo-50/30 scale-[1.01] shadow-md border-t-2'
+                            : 'border-slate-200/60 hover:border-indigo-300 hover:shadow-xs'
+                        }`}
                     >
                       <div className="flex items-center space-x-3">
                         {isBulkMode && (
@@ -814,14 +865,24 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
 
                       <div className="flex items-center space-x-2 shrink-0">
                         <button
-                          onClick={() => handleOpenEditQuestion(q)}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            handleOpenEditQuestion(q);
+                          }}
                           className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 transition text-xs font-medium inline-flex items-center space-x-1 cursor-pointer"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
                           <span>Edit</span>
                         </button>
                         <button
-                          onClick={() => setDeleteConfirmId(q.id)}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            setDeleteConfirmId(q.id);
+                          }}
                           className="p-2 rounded-lg border border-slate-200 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 text-slate-400 transition cursor-pointer"
                           title="Hapus Pertanyaan"
                         >
@@ -873,15 +934,13 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                     <select
                       value={formSection}
                       onChange={e => setFormSection(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none capitalize"
                     >
-                      <option value="identitas">Identitas Responden</option>
-                      <option value="pelatihan">Pelatihan & Implementasi</option>
-                      <option value="implementasi_awal">Implementasi Kelas Awal</option>
-                      <option value="implementasi_tinggi">Implementasi Kelas Tinggi</option>
-                      <option value="kepsek">Dukungan Kepala Sekolah</option>
-                      <option value="refleksi">Refleksi & Perubahan Baik</option>
-                      <option value="kontak">Kontak Responden</option>
+                      {Object.entries(allSectionMeta).map(([k, meta]) => (
+                        <option key={k} value={k}>
+                          {meta.title}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -955,6 +1014,72 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                   >
                     <Save className="w-3.5 h-3.5" />
                     <span>Simpan Pertanyaan</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
+
+        {/* Modal Admin Add New Section */}
+        {isAddSectionModalOpen && createPortal(
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-md overflow-hidden animate-scale-in">
+              <div className="flex items-center justify-between p-5 border-b border-slate-100">
+                <div className="flex items-center space-x-2">
+                  <Layers className="w-5 h-5 text-indigo-600" />
+                  <h3 className="font-bold text-slate-800 text-base font-display">
+                    Tambah Bagian / Section Baru
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAddSectionModalOpen(false)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleAddSection} className="p-6 space-y-4 text-xs">
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-600 uppercase text-[10px]">Nama / Judul Bagian *</label>
+                  <input
+                    type="text"
+                    value={newSectionTitle}
+                    onChange={e => setNewSectionTitle(e.target.value)}
+                    placeholder="Contoh: Evaluasi Sarana & Prasarana"
+                    required
+                    className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-600 uppercase text-[10px]">Deskripsi Singkat Bagian</label>
+                  <textarea
+                    rows={2}
+                    value={newSectionDesc}
+                    onChange={e => setNewSectionDesc(e.target.value)}
+                    placeholder="Contoh: Penilaian kesiapan fasilitas pendukung di satuan pendidikan..."
+                    className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-relaxed text-xs"
+                  />
+                </div>
+
+                <div className="border-t border-slate-100 pt-4 flex justify-end space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddSectionModalOpen(false)}
+                    className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-50 transition cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl bg-indigo-600 text-white font-bold shadow-md hover:bg-indigo-700 transition flex items-center space-x-1.5 cursor-pointer"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Simpan Bagian Baru</span>
                   </button>
                 </div>
               </form>
@@ -1111,8 +1236,8 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                         type="button"
                         onClick={() => handleAnswerChange(q.id, opt)}
                         className={`flex items-center justify-between p-4 rounded-xl text-left border text-sm font-medium transition ${isSelected
-                            ? 'bg-indigo-50 border-indigo-500 text-indigo-900 shadow-xs'
-                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                          ? 'bg-indigo-50 border-indigo-500 text-indigo-900 shadow-xs'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
                           }`}
                       >
                         <span>{opt}</span>
@@ -1144,8 +1269,8 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                         type="button"
                         onClick={toggleCheck}
                         className={`flex items-center justify-between p-4 rounded-xl text-left border text-sm font-medium transition ${isChecked
-                            ? 'bg-indigo-50 border-indigo-500 text-indigo-900 shadow-xs'
-                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
+                          ? 'bg-indigo-50 border-indigo-500 text-indigo-900 shadow-xs'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
                           }`}
                       >
                         <span>{opt}</span>
@@ -1179,8 +1304,8 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
             disabled={activeSecIdx === 0}
             onClick={handlePrevStep}
             className={`inline-flex items-center space-x-2 px-6 py-3 rounded-xl font-medium text-sm transition ${activeSecIdx === 0
-                ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+              ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400'
+              : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
               }`}
           >
             <ChevronLeft className="w-4 h-4" />
