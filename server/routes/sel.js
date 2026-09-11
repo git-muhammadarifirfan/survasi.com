@@ -42,6 +42,25 @@ router.get('/indikator', async (req, res) => {
   }
 });
 
+// ─── POST /api/sel/dimensi (Tambah Dimensi SEL Baru - Admin Only) ────────────
+router.post('/dimensi', adminOnly, async (req, res) => {
+  try {
+    const { kode, nama, modul_bsan_kode, urutan } = req.body;
+    if (!nama) {
+      return res.status(400).json({ success: false, message: 'Nama dimensi wajib diisi.' });
+    }
+    const dimKode = kode || nama.toLowerCase().replace(/\s+/g, '_');
+    const [result] = await pool.execute(
+      `INSERT INTO sel_dimensi (kode, nama, modul_bsan_kode, urutan) VALUES (?, ?, ?, ?)`,
+      [dimKode, nama, modul_bsan_kode || 'with_myself', urutan || 99]
+    );
+    return res.status(201).json({ success: true, message: 'Dimensi SEL berhasil disimpan.', id: result.insertId, kode: dimKode });
+  } catch (err) {
+    console.error('[SEL] add dimensi error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal menambah dimensi SEL ke MySQL.' });
+  }
+});
+
 // ─── POST /api/sel/indikator ─────────────────────────────────────────────────
 router.post('/indikator', adminOnly, async (req, res) => {
   try {
@@ -49,7 +68,7 @@ router.post('/indikator', adminOnly, async (req, res) => {
     const teksVal = deskripsi || teks;
     const [result] = await pool.execute(
       `INSERT INTO sel_indikator (kode, teks, subjek, konteks, catatan, dimensi_id, urutan) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [kode, teksVal, subjek, konteks || 'kelas', catatan || null, dimensi_id, urutan || 0]
+      [kode, teksVal, subjek, konteks || 'kelas', catatan || null, dimensi_id || 1, urutan || 0]
     );
     return res.status(201).json({ success: true, id: result.insertId });
   } catch (err) {

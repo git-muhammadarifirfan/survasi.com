@@ -247,7 +247,7 @@ export function getDimensiByModul(modul: BSANModul): SELDimensi[] {
 
 export interface SELIndikator {
   id: string;
-  dimensi: SELDimensi;
+  dimensi: SELDimensi | string;
   subjek: SELSubjek;
   konteks: SELKonteks;
   teks: string;

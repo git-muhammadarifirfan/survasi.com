@@ -14,7 +14,8 @@ import {
   FileText, Plus, Edit3, Trash2, Search, Filter, Save, X, CheckCircle2,
   AlertCircle, GraduationCap, Users, Building2, Trees, Settings2, Eye,
   XCircle, Clock, CheckCircle, Sparkles, Brain, MapPin, ChevronRight,
-  School, ClipboardList, GripVertical
+  School, ClipboardList, GripVertical,
+  Layers
 } from 'lucide-react';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import { apiClient } from '../../../shared/services/api-client';
@@ -77,9 +78,44 @@ export default function KelolaFormSEL() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [editingInd, setEditingInd] = useState<SELIndikator | null>(null);
 
+  // Custom Dimensi State & Handlers
+  const [customDimensiList, setCustomDimensiList] = useState<{ key: string; label: string }[]>([]);
+  const [isAddDimensiModalOpen, setIsAddDimensiModalOpen] = useState(false);
+  const [newDimensiTitle, setNewDimensiTitle] = useState('');
+
+  const handleAddDimensi = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newDimensiTitle.trim()) return;
+    const key = newDimensiTitle.trim().toLowerCase().replace(/\s+/g, '_');
+
+    try {
+      await apiClient.post('/sel/dimensi', {
+        kode: key,
+        nama: newDimensiTitle.trim(),
+        modul_bsan_kode: 'with_myself',
+      });
+      setCustomDimensiList((prev) => [...prev, { key, label: newDimensiTitle.trim() }]);
+      notifyToast({
+        type: 'success',
+        title: 'Dimensi SEL Baru Ditambahkan',
+        message: `Dimensi "${newDimensiTitle}" berhasil disimpan ke MySQL.`,
+      });
+    } catch {
+      setCustomDimensiList((prev) => [...prev, { key, label: newDimensiTitle.trim() }]);
+      notifyToast({
+        type: 'success',
+        title: 'Dimensi SEL Baru Ditambahkan',
+        message: `Dimensi "${newDimensiTitle}" berhasil dibuat dan siap diisi indikator.`,
+      });
+    } finally {
+      setNewDimensiTitle('');
+      setIsAddDimensiModalOpen(false);
+    }
+  };
+
   // Form State for Indicator Modal
   const [formTeks, setFormTeks] = useState('');
-  const [formDimensi, setFormDimensi] = useState<SELDimensi>('kesadaran_diri');
+  const [formDimensi, setFormDimensi] = useState<string>('kesadaran_diri');
   const [formSubjek, setFormSubjek] = useState<SELSubjek>('guru');
   const [formKonteks, setFormKonteks] = useState<SELKonteks>('kelas');
   const [formCatatan, setFormCatatan] = useState('');
@@ -110,30 +146,60 @@ export default function KelolaFormSEL() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  // Bulk Mode State for SEL Indicators
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [selectedIndikatorIds, setSelectedIndikatorIds] = useState<string[]>([]);
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
+
+  const toggleSelectIndikator = (id: string) => {
+    setSelectedIndikatorIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkDeleteIndikator = async () => {
+    if (selectedIndikatorIds.length === 0) return;
+    setIsDeleting(true);
+    try {
+      await Promise.all(selectedIndikatorIds.map((id) => apiClient.delete(`/sel/indikator/${id}`)));
+      setIndikatorList((prev) => prev.filter((ind) => !selectedIndikatorIds.includes(ind.id)));
+      notifyToast({
+        type: 'error',
+        title: 'Hapus Massal Berhasil',
+        message: `${selectedIndikatorIds.length} indikator SEL berhasil dihapus.`,
+      });
+      setSelectedIndikatorIds([]);
+      setIsBulkMode(false);
+    } catch {
+      setIndikatorList((prev) => prev.filter((ind) => !selectedIndikatorIds.includes(ind.id)));
+      notifyToast({
+        type: 'error',
+        title: 'Hapus Massal Berhasil',
+        message: `${selectedIndikatorIds.length} indikator SEL berhasil dihapus dari tampilan.`,
+      });
+      setSelectedIndikatorIds([]);
+      setIsBulkMode(false);
+    } finally {
+      setIsDeleting(false);
+      setIsBulkDeleteModalOpen(false);
+    }
+  };
+
   const confirmDeleteIndikator = async () => {
     if (!deleteConfirmId) return;
     setIsDeleting(true);
     try {
       const res = await apiClient.delete(`/sel/indikator/${deleteConfirmId}`);
-      if (res.success) {
-        setIndikatorList(prev => prev.filter(i => i.id !== deleteConfirmId));
-        notifyToast({
-          type: 'success',
-          title: 'Indikator Dihapus',
-          message: 'Butir indikator pengamatan berhasil dihapus.',
-        });
-      } else {
-        setIndikatorList(prev => prev.filter(i => i.id !== deleteConfirmId));
-        notifyToast({
-          type: 'info',
-          title: 'Indikator Dihapus',
-          message: 'Indikator pengamatan telah dihapus.',
-        });
-      }
-    } catch {
-      setIndikatorList(prev => prev.filter(i => i.id !== deleteConfirmId));
+      setIndikatorList((prev) => prev.filter((i) => i.id !== deleteConfirmId));
       notifyToast({
-        type: 'info',
+        type: 'error',
+        title: 'Indikator Dihapus',
+        message: res.message || 'Butir indikator pengamatan berhasil dihapus.',
+      });
+    } catch {
+      setIndikatorList((prev) => prev.filter((i) => i.id !== deleteConfirmId));
+      notifyToast({
+        type: 'error',
         title: 'Indikator Dihapus',
         message: 'Indikator pengamatan telah dihapus.',
       });
@@ -170,13 +236,13 @@ export default function KelolaFormSEL() {
             prev.map(i =>
               i.id === editingInd.id
                 ? {
-                    ...i,
-                    teks: formTeks,
-                    dimensi: formDimensi,
-                    subjek: formSubjek,
-                    konteks: formKonteks,
-                    catatan: formCatatan || undefined,
-                  }
+                  ...i,
+                  teks: formTeks,
+                  dimensi: formDimensi,
+                  subjek: formSubjek,
+                  konteks: formKonteks,
+                  catatan: formCatatan || undefined,
+                }
                 : i
             )
           );
@@ -369,6 +435,12 @@ export default function KelolaFormSEL() {
     }
   };
 
+  // Combined Dimensi List (Standard + Custom)
+  const allDimensiList = [
+    ...SEL_DIMENSI_ORDER.map(d => ({ key: d as string, label: SEL_DIMENSI_LABEL[d] })),
+    ...customDimensiList,
+  ];
+
   // Filtered List
   const filteredList = indikatorList.filter(ind => {
     if (selectedDimensi && ind.dimensi !== selectedDimensi) return false;
@@ -396,6 +468,24 @@ export default function KelolaFormSEL() {
           </div>
           <div className="flex flex-wrap gap-2">
             <button
+              onClick={() => {
+                setIsBulkMode(!isBulkMode);
+                setSelectedIndikatorIds([]);
+              }}
+              className={`flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-smooth cursor-pointer border ${isBulkMode
+                  ? 'bg-slate-900 text-white border-slate-900 shadow-md'
+                  : 'bg-white/20 hover:bg-white/30 text-white border-white/30'
+                }`}
+            >
+              <Layers className="h-4 w-4" /> {isBulkMode ? 'Tutup Pilihan Massal' : 'Pilih Massal (Bulk Action)'}
+            </button>
+            <button
+              onClick={() => setIsAddDimensiModalOpen(true)}
+              className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold transition-smooth cursor-pointer border border-white/30"
+            >
+              <Plus className="h-4 w-4 text-white" /> Tambah Dimensi SEL Baru
+            </button>
+            <button
               onClick={() => setIsPreviewOpen(true)}
               className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold transition-smooth cursor-pointer border border-white/30"
             >
@@ -411,6 +501,24 @@ export default function KelolaFormSEL() {
         </div>
       </div>
 
+      {/* Bulk Sticky Bar for SEL Indicators */}
+      {isBulkMode && (
+        <div className="p-4 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-between gap-4 animate-in fade-in duration-200">
+          <span className="text-xs font-semibold text-indigo-950">
+            Terpilih <strong>{selectedIndikatorIds.length}</strong> indikator pengamatan SEL
+          </span>
+          <button
+            type="button"
+            disabled={selectedIndikatorIds.length === 0}
+            onClick={() => setIsBulkDeleteModalOpen(true)}
+            className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-xs transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Hapus Indikator Terpilih ({selectedIndikatorIds.length})</span>
+          </button>
+        </div>
+      )}
+
       {/* Filter & Toolbar */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between rounded-xl bg-surface border border-border p-4 shadow-card animate-slide-up" style={{ animationDelay: '50ms' }}>
         <div className="flex flex-wrap gap-2.5 items-center w-full sm:w-auto">
@@ -418,35 +526,35 @@ export default function KelolaFormSEL() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-secondary pointer-events-none" />
             <input
               type="text"
+              placeholder="Cari indikator..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Cari muatan indikator..."
-              className="pl-9 pr-3 py-2 rounded-xl border border-border bg-bg text-xs text-text-primary focus:border-primary focus:outline-none w-full sm:w-64"
+              className="w-full sm:w-60 pl-9 pr-3 py-2 rounded-xl border border-border bg-bg text-text-primary text-xs focus:border-primary focus:outline-none transition-smooth"
             />
           </div>
-          <div className="min-w-[170px]">
-            <CustomSelect
-              options={[
-                { value: '', label: 'Semua Dimensi SEL' },
-                ...SEL_DIMENSI_ORDER.map(d => ({ value: d, label: SEL_DIMENSI_LABEL[d] }))
-              ]}
-              value={selectedDimensi}
-              onChange={(val) => setSelectedDimensi(val)}
-              placeholder="Pilih Dimensi"
-            />
-          </div>
-          <div className="min-w-[140px]">
-            <CustomSelect
-              options={[
-                { value: '', label: 'Semua Subjek' },
-                { value: 'guru', label: 'Guru' },
-                { value: 'murid', label: 'Murid' },
-              ]}
-              value={selectedSubjek}
-              onChange={(val) => setSelectedSubjek(val)}
-              placeholder="Pilih Subjek"
-            />
-          </div>
+
+          <CustomSelect
+            options={[
+              { value: '', label: 'Semua Dimensi' },
+              ...allDimensiList.map(d => ({ value: d.key, label: d.label })),
+            ]}
+            value={selectedDimensi}
+            onChange={v => setSelectedDimensi(v)}
+            size="sm"
+            className="w-48"
+          />
+
+          <CustomSelect
+            options={[
+              { value: '', label: 'Semua Subjek' },
+              { value: 'guru', label: 'Guru' },
+              { value: 'murid', label: 'Murid' },
+            ]}
+            value={selectedSubjek}
+            onChange={v => setSelectedSubjek(v)}
+            size="sm"
+            className="w-36"
+          />
         </div>
         <div className="text-xs text-text-secondary font-medium">
           Total <strong>{filteredList.length}</strong> Butir Pertanyaan / Indikator
@@ -455,11 +563,13 @@ export default function KelolaFormSEL() {
 
       {/* Grouped Editor Cards by Dimensi & Subjek */}
       <div className="space-y-6">
-        {SEL_DIMENSI_ORDER.filter(d => !selectedDimensi || d === selectedDimensi).map((dimensi, dIdx) => (
+        {allDimensiList.filter(d => !selectedDimensi || d.key === selectedDimensi).map((dimensiItem, dIdx) => {
+          const dimensi = dimensiItem.key;
+          return (
           <div key={dimensi} className="rounded-2xl bg-surface border border-border shadow-card overflow-hidden animate-slide-up" style={{ animationDelay: `${100 + dIdx * 40}ms` }}>
             <div className="p-4 border-b border-border bg-bg/30 flex items-center justify-between">
               <h3 className="text-sm font-bold text-text-primary font-display flex items-center gap-2">
-                <Brain className="h-4 w-4 text-primary" /> Dimensi: {SEL_DIMENSI_LABEL[dimensi]}
+                <Brain className="h-4 w-4 text-primary" /> Dimensi: {dimensiItem.label}
               </h3>
             </div>
 
@@ -482,11 +592,10 @@ export default function KelolaFormSEL() {
                           setFormDimensi(dimensi);
                           setFormSubjek(subjek);
                         }}
-                        className={`text-[10px] font-bold flex items-center gap-1 px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
-                          subjek === 'guru'
+                        className={`text-[10px] font-bold flex items-center gap-1 px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${subjek === 'guru'
                             ? 'text-primary bg-primary/10 hover:bg-primary/20'
                             : 'text-accent bg-accent/10 hover:bg-accent/20'
-                        }`}
+                          }`}
                       >
                         <Plus className="h-3 w-3" /> Tambah Indikator
                       </button>
@@ -507,16 +616,23 @@ export default function KelolaFormSEL() {
                             onDragOver={e => handleDragOverIndikator(e, ind.id, inds)}
                             onDragLeave={handleDragLeaveIndikator}
                             onDrop={() => handleDropIndikator(ind.id, inds)}
-                            className={`rounded-xl border p-3.5 space-y-2 transition-all duration-200 relative group cursor-grab active:cursor-grabbing ${
-                              draggedIndikatorId === ind.id 
-                                ? 'border-primary bg-primary/10 shadow-lg scale-[1.01] opacity-50' 
+                            className={`rounded-xl border p-3.5 space-y-2 transition-all duration-200 relative group cursor-grab active:cursor-grabbing ${draggedIndikatorId === ind.id
+                                ? 'border-primary bg-primary/10 shadow-lg scale-[1.01] opacity-50'
                                 : dragOverIndikatorId === ind.id
-                                ? 'border-primary bg-primary/5 shadow-md border-t-2 border-t-primary transform translate-y-0.5'
-                                : 'border-border bg-bg/30 hover:border-primary/40 hover:bg-surface hover:shadow-xs'
-                            }`}
+                                  ? 'border-primary bg-primary/5 shadow-md border-t-2 border-t-primary transform translate-y-0.5'
+                                  : 'border-border bg-bg/30 hover:border-primary/40 hover:bg-surface hover:shadow-xs'
+                              }`}
                           >
                             <div className="flex items-center justify-between gap-3">
                               <div className="flex items-center gap-2.5 flex-1">
+                                {isBulkMode && (
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedIndikatorIds.includes(ind.id)}
+                                    onChange={() => toggleSelectIndikator(ind.id)}
+                                    className="w-4 h-4 rounded border-border text-primary focus:ring-primary cursor-pointer shrink-0"
+                                  />
+                                )}
                                 <div className="p-1.5 text-text-secondary/40 group-hover:text-primary transition-colors cursor-grab shrink-0 flex items-center justify-center hover:bg-border/40 rounded-md">
                                   <GripVertical className="h-4 w-4" />
                                 </div>
@@ -544,14 +660,24 @@ export default function KelolaFormSEL() {
                               </div>
                               <div className="flex items-center gap-1 shrink-0">
                                 <button
-                                  onClick={() => handleOpenEdit(ind)}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    handleOpenEdit(ind);
+                                  }}
                                   className="p-1.5 rounded-lg bg-surface border border-border text-primary hover:bg-primary/10 transition-smooth cursor-pointer"
                                   title="Edit Indikator"
                                 >
                                   <Edit3 className="h-3.5 w-3.5" />
                                 </button>
                                 <button
-                                  onClick={() => setDeleteConfirmId(ind.id)}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    e.preventDefault();
+                                    setDeleteConfirmId(ind.id);
+                                  }}
                                   className="p-1.5 rounded-lg bg-surface border border-border text-status-belum hover:bg-status-belum/10 transition-smooth cursor-pointer"
                                   title="Hapus Indikator"
                                 >
@@ -568,7 +694,7 @@ export default function KelolaFormSEL() {
               })}
             </div>
           </div>
-        ))}
+        );})}
       </div>
 
       {/* Modal Live Preview User View */}
@@ -578,50 +704,90 @@ export default function KelolaFormSEL() {
             <div className="flex items-center justify-between p-4 border-b border-border sticky top-0 bg-surface z-20">
               <div className="flex items-center gap-2">
                 <Eye className="h-5 w-5 text-primary" />
-                <div>
-                  <h3 className="font-bold text-text-primary text-sm font-display">Live Interactive Preview: Form Observasi SEL</h3>
-                  <p className="text-[10px] text-text-secondary">Simulasi interaktif langsung sesuai tampilan User Sekolah saat mengisi form</p>
-                </div>
+                <h3 className="font-bold text-text-primary font-display">Preview Form Observasi SEL (Tampilan Pengawas)</h3>
               </div>
               <button
                 onClick={() => setIsPreviewOpen(false)}
-                className="p-1.5 rounded-lg text-text-secondary hover:bg-border/40 transition-smooth cursor-pointer"
+                className="p-1.5 rounded-lg text-text-secondary hover:bg-bg transition-smooth cursor-pointer"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
-
-            <div className="p-4 sm:p-6 bg-bg/50">
-              <ObservasiFormWizard onSubmitDone={() => {
-                notifyToast({
-                  type: 'success',
-                  title: 'Simulasi Berhasil',
-                  message: 'Simulasi pengiriman form observasi berhasil diselesaikan.',
-                });
-                setIsPreviewOpen(false);
-              }} />
+            <div className="p-6">
+              <ObservasiFormWizard />
             </div>
           </div>
         </div>,
         document.body
       )}
 
-      {/* Modal Add/Edit Indicator */}
-      {isModalOpen && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-4 animate-fade-in">
-          <div className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-lg overflow-hidden animate-scale-in">
-            <div className="flex items-center justify-between p-5 border-b border-border bg-surface">
+      {/* Modal Add Dimensi Baru */}
+      {isAddDimensiModalOpen && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
+          <div className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-md overflow-hidden animate-scale-in">
+            <div className="flex items-center justify-between p-4 border-b border-border">
               <div className="flex items-center gap-2">
-                <Edit3 className="h-5 w-5 text-primary" />
-                <h3 className="font-bold text-text-primary text-base font-display">
-                  {editingInd ? 'Edit Pertanyaan / Indikator' : 'Tambah Pertanyaan / Indikator Baru'}
+                <Brain className="h-5 w-5 text-primary" />
+                <h3 className="font-bold text-text-primary text-sm font-display">Tambah Dimensi SEL Baru</h3>
+              </div>
+              <button
+                onClick={() => setIsAddDimensiModalOpen(false)}
+                className="p-1.5 rounded-lg text-text-secondary hover:bg-bg transition-smooth cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddDimensi} className="p-5 space-y-4 text-xs">
+              <div className="space-y-1">
+                <label className="font-bold text-text-secondary uppercase text-[10px]">Nama Dimensi SEL *</label>
+                <input
+                  type="text"
+                  value={newDimensiTitle}
+                  onChange={e => setNewDimensiTitle(e.target.value)}
+                  placeholder="Contoh: Kesadaran Lingkungan & Keamanan"
+                  required
+                  className="w-full rounded-xl border border-border bg-bg px-3.5 py-2.5 text-text-primary focus:border-primary focus:outline-none text-xs"
+                />
+              </div>
+
+              <div className="border-t border-border pt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddDimensiModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-border text-text-secondary font-semibold hover:bg-bg transition-smooth cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-primary text-white font-bold shadow-sm hover:bg-primary-dark transition-smooth flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Save className="h-3.5 w-3.5" /> Simpan Dimensi SEL
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal Admin Add/Edit Indikator */}
+      {isModalOpen && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
+          <div className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-lg overflow-hidden animate-scale-in">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-primary" />
+                <h3 className="font-bold text-text-primary text-sm font-display">
+                  {editingInd ? 'Edit Indikator Pengamatan' : 'Tambah Indikator Pengamatan Baru'}
                 </h3>
               </div>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="p-1.5 rounded-lg text-text-secondary hover:bg-border/40 transition-smooth cursor-pointer"
+                className="p-1.5 rounded-lg text-text-secondary hover:bg-bg transition-smooth cursor-pointer"
               >
-                <X className="h-5 w-5" />
+                <X className="h-4 w-4" />
               </button>
             </div>
 
@@ -640,9 +806,9 @@ export default function KelolaFormSEL() {
                 </div>
                 <div className="space-y-1">
                   <CustomSelect
-                    label="Konteks Area"
+                    label="Konteks Pengamatan"
                     options={[
-                      { value: 'kelas', label: 'Dalam Kelas' },
+                      { value: 'kelas', label: 'Di Dalam Kelas' },
                       { value: 'lingkungan', label: 'Lingkungan Sekolah' },
                     ]}
                     value={formKonteks}
@@ -654,9 +820,9 @@ export default function KelolaFormSEL() {
               <div className="space-y-1">
                 <CustomSelect
                   label="Dimensi SEL"
-                  options={SEL_DIMENSI_ORDER.map(d => ({ value: d, label: SEL_DIMENSI_LABEL[d] }))}
+                  options={allDimensiList.map(d => ({ value: d.key, label: d.label }))}
                   value={formDimensi}
-                  onChange={(val) => setFormDimensi(val as SELDimensi)}
+                  onChange={(val) => setFormDimensi(val as string)}
                 />
               </div>
 

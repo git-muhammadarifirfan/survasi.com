@@ -92,7 +92,7 @@ export default function NotificationToastContainer() {
           error: {
             bgIcon: 'bg-rose-100 text-rose-600 border-rose-200',
             bar: 'bg-rose-500',
-            Icon: XCircle,
+            Icon: CheckCircle2,
           },
           warning: {
             bgIcon: 'bg-amber-100 text-amber-600 border-amber-200',
@@ -113,7 +113,7 @@ export default function NotificationToastContainer() {
             key={toast.id}
             onMouseEnter={() => setPausedIds((p) => ({ ...p, [toast.id]: true }))}
             onMouseLeave={() => setPausedIds((p) => ({ ...p, [toast.id]: false }))}
-            className="pointer-events-auto w-full bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/90 shadow-xl shadow-slate-900/10 overflow-hidden transition-all duration-300 animate-in slide-in-from-top-4 fade-in duration-200"
+            className="pointer-events-auto w-full bg-white rounded-2xl border border-slate-200 shadow-xl shadow-slate-900/10 overflow-hidden transition-all duration-300 animate-in slide-in-from-top-4 fade-in duration-200"
           >
             {/* Header / Main Row */}
             <div className="p-4 flex items-center justify-between gap-3">
@@ -157,12 +157,12 @@ export default function NotificationToastContainer() {
             {!isCollapsed && (
               <div className="px-4 pb-3 pt-1 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between text-[11px] text-slate-500">
                 <span>
-                  Message will close in <strong>{secondsLeft}s</strong>.{' '}
+                  Notifikasi akan menutup dalam <strong>{secondsLeft}s</strong>.{' '}
                   <button
                     onClick={() => setPausedIds((p) => ({ ...p, [toast.id]: !p[toast.id] }))}
                     className="font-bold text-slate-700 hover:underline cursor-pointer"
                   >
-                    {isPaused ? 'Click to resume' : 'Click to stop'}
+                    {isPaused ? 'Klik untuk lanjut' : 'Klik untuk jeda'}
                   </button>
                 </span>
               </div>

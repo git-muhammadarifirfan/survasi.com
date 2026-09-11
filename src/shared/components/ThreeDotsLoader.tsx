@@ -63,7 +63,7 @@ export const ThreeDotsLoader: React.FC<ThreeDotsLoaderProps> = ({
 
   if (fullScreen) {
     return (
-      <div className="fixed inset-0 z-[999999] flex flex-col items-center justify-center bg-white/95 backdrop-blur-md transition-opacity duration-300 ease-in-out">
+      <div className="fixed inset-0 z-[999999] flex flex-col items-center justify-center bg-white transition-opacity duration-300 ease-in-out">
         {content}
       </div>
     );

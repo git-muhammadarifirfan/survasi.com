@@ -109,9 +109,9 @@ export default function CustomSelect({
 
       {/* Popover Menu - Untitled UI Card & Section Style */}
       {isOpen && (
-        <div className="absolute right-0 left-0 top-full mt-2 z-[999] max-h-64 overflow-y-auto rounded-2xl border border-border/90 bg-surface/95 backdrop-blur-md p-1.5 shadow-xl shadow-slate-900/10 animate-in fade-in zoom-in-95 duration-150 text-xs">
+        <div className="absolute right-0 left-0 top-full mt-2 z-[999] max-h-64 overflow-y-auto rounded-2xl border border-border bg-surface p-1.5 shadow-xl shadow-slate-900/10 animate-in fade-in zoom-in-95 duration-150 text-xs">
           {enableSearch && options.length > 5 && (
-            <div className="p-1 border-b border-border/60 mb-1 sticky top-0 bg-surface/95 backdrop-blur-md z-10">
+            <div className="p-1 border-b border-border/60 mb-1 sticky top-0 bg-surface z-10">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-secondary stroke-[2]" />
                 <input
