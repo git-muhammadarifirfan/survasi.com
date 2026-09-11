@@ -46,8 +46,8 @@ const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Izinkan request tanpa origin (Postman, curl, dll) di development
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Izinkan request tanpa origin (Postman, curl) atau dari localhost manapun saat dev
+    if (!origin || allowedOrigins.includes(origin) || origin.startsWith('http://localhost:')) {
       callback(null, true);
     } else {
       callback(new Error(`CORS blocked: ${origin}`));
@@ -55,8 +55,9 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
 }));
+app.options('*', cors());
 
 // Body parser
 app.use(express.json({ limit: '10mb' }));
@@ -77,6 +78,8 @@ app.get('/health', (req, res) => {
 
 // ─── API Routes ───────────────────────────────────────────────────────────────
 app.use('/api/auth',       require('./routes/auth'));
+app.use('/api/users',      require('./routes/users'));
+app.use('/api/notifikasi', require('./routes/notifikasi'));
 app.use('/api/dashboard',  require('./routes/dashboard'));
 app.use('/api/sekolah',    require('./routes/sekolah'));
 app.use('/api/responden',  require('./routes/responden'));
@@ -86,6 +89,7 @@ app.use('/api/survey',     require('./routes/survey'));
 app.use('/api/suara',      require('./routes/suara'));
 app.use('/api/laporan',    require('./routes/laporan'));
 app.use('/api/setting',    require('./routes/setting'));
+
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────
 app.use((req, res) => {
@@ -100,11 +104,28 @@ app.use((err, req, res, _next) => {
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT || '3001');
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`\n🚀 BSAN Jatim API Server running on http://localhost:${PORT}`);
   console.log(`   ENV  : ${process.env.NODE_ENV || 'development'}`);
   console.log(`   DB   : ${process.env.DB_NAME}@${process.env.DB_HOST}:${process.env.DB_PORT || 3306}`);
   console.log(`   CORS : ${allowedOrigins.join(', ')}\n`);
+
+  // Auto-patch MySQL DB schema on startup to support 'school_select' type
+  try {
+    const pool = require('./db/pool');
+    await pool.execute(`
+      ALTER TABLE pertanyaan_survey
+      MODIFY COLUMN tipe VARCHAR(50) NOT NULL DEFAULT 'text'
+    `).catch(() => {});
+    await pool.execute(`
+      UPDATE pertanyaan_survey
+      SET tipe = 'school_select'
+      WHERE kode_pertanyaan = 'Q4' OR LOWER(teks_pertanyaan) LIKE '%asal sekolah%'
+    `).catch(() => {});
+    console.log('✓ Auto-patch MySQL: pertayaan_survey tipe & Q4 school_select updated.');
+  } catch (err) {
+    console.warn('[Server] DB auto-patch skipped:', err.message);
+  }
 });
 
 module.exports = app;

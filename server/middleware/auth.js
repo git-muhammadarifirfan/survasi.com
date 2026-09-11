@@ -18,7 +18,8 @@ function authMiddleware(req, res, next) {
 
   const token = authHeader.split(' ')[1];
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const secret = process.env.JWT_SECRET || 'survasi_jwt_secret_key_development_32chars_min';
+    const payload = jwt.verify(token, secret);
     req.user = payload;
     next();
   } catch (err) {
@@ -40,4 +41,21 @@ function adminOnly(req, res, next) {
   next();
 }
 
-module.exports = { authMiddleware, adminOnly };
+/**
+ * Middleware fleksibel: izinkan role yang berada dalam daftar allowedRoles.
+ * Contoh: roleGuard('admin', 'pengawas')
+ */
+function roleGuard(...allowedRoles) {
+  return (req, res, next) => {
+    if (!req.user || !allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: `Akses ditolak. Halaman/API ini hanya untuk role: ${allowedRoles.join(', ')}.`
+      });
+    }
+    next();
+  };
+}
+
+module.exports = { authMiddleware, adminOnly, roleGuard };
+

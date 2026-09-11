@@ -21,11 +21,11 @@
  * ═══════════════════════════════════════════════════════════════════════════════
  */
 
-'use strict';
-require('dotenv').config({ path: './server/.env' });
+import dotenv from 'dotenv';
+import mysql from 'mysql2/promise';
+import bcrypt from 'bcryptjs';
 
-const mysql  = require('mysql2/promise');
-const bcrypt = require('bcryptjs');
+dotenv.config({ path: './server/.env' });
 
 const BCRYPT_ROUNDS = 12;
 
@@ -46,7 +46,7 @@ async function main() {
     port:     parseInt(process.env.DB_PORT || '3306'),
     user:     process.env.DB_USER     || 'root',
     password: process.env.DB_PASS     || '',
-    database: process.env.DB_NAME     || 'bsan_jatim_monitoring',
+    database: process.env.DB_NAME     || 'db_survasi',
   });
 
   console.log('🔗 Connected to MySQL:', process.env.DB_NAME);

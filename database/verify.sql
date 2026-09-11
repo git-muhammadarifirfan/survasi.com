@@ -3,10 +3,10 @@
 -- Jalankan setelah semua seed data untuk memverifikasi integritas
 --
 -- @usage
---   mysql -u root -p bsan_jatim_monitoring < database/verify.sql
+--   mysql -u root -p db_survasi < database/verify.sql
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-USE bsan_jatim_monitoring;
+USE db_survasi;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 1. TABLE COUNT — Harus = 20
@@ -17,7 +17,7 @@ SELECT 'TABLE COUNT' AS test,
   20 AS expected,
   CASE WHEN COUNT(*) = 20 THEN '✓ PASS' ELSE '✗ FAIL' END AS result
 FROM information_schema.tables
-WHERE table_schema = 'bsan_jatim_monitoring'
+WHERE table_schema = 'db_survasi'
   AND table_type = 'BASE TABLE';
 
 
@@ -30,7 +30,7 @@ SELECT 'VIEW COUNT' AS test,
   3 AS expected,
   CASE WHEN COUNT(*) = 3 THEN '✓ PASS' ELSE '✗ FAIL' END AS result
 FROM information_schema.views
-WHERE table_schema = 'bsan_jatim_monitoring';
+WHERE table_schema = 'db_survasi';
 
 
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -42,7 +42,7 @@ SELECT 'FOREIGN KEY COUNT' AS test,
   '≥ 25' AS expected,
   CASE WHEN COUNT(*) >= 25 THEN '✓ PASS' ELSE '✗ FAIL' END AS result
 FROM information_schema.table_constraints
-WHERE table_schema = 'bsan_jatim_monitoring'
+WHERE table_schema = 'db_survasi'
   AND constraint_type = 'FOREIGN KEY';
 
 

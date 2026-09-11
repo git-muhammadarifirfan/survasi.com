@@ -31,6 +31,14 @@ import realSchoolsData from './real-schools.json';
 import realSurveyData from './real-survey-data.json';
 import type { SELDimensi, SELSubjek, SELSkor } from './sel-indicators';
 import { SEL_INDIKATORS, hitungSkorRata, SEL_DIMENSI_ORDER, SEL_DIMENSI_LABEL } from './sel-indicators';
+import { apiClient } from '../services/api-client';
+
+const KABUPATEN_NAME_TO_ID: Record<string, number> = {
+  'Kab. Sidoarjo': 1,
+  'Kota Batu': 2,
+  'Kab. Tuban': 3,
+};
+
 
 export interface School {
   id: string;
@@ -48,6 +56,8 @@ export interface School {
   email: string;
   telepon: string;
   lastUpdated?: string;
+  user_id?: number | null;
+  is_registered?: boolean;
   x: number;
   y: number;
 }
@@ -337,28 +347,49 @@ export const database = {
     status?: string;
     search?: string;
   }): Promise<School[]> => {
-    return new Promise((resolve) => {
-      let result = [...schoolsData];
-
-      if (filters?.kabupaten) {
-        result = result.filter(s => s.kabupaten === filters.kabupaten);
+    try {
+      const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
+      const res = await apiClient.sekolah.getAll({
+        kabupaten_id: kabId,
+        status: filters?.status,
+        search: filters?.search,
+        limit: 2000,
+      });
+      if (res?.success && Array.isArray(res.data)) {
+        return res.data.map((s: any) => ({
+          id: String(s.id),
+          npsn: s.npsn,
+          nama: s.nama,
+          kecamatan: s.kecamatan_nama || s.kecamatan || '',
+          kabupaten: s.kabupaten_nama || s.kabupaten || '',
+          status: s.status || 'belum',
+          jenjang: s.jenjang || 'SD',
+          statusSekolah: s.status_sekolah || 'Negeri',
+          totalGuru: s.total_guru || 0,
+          totalSiswa: s.total_siswa || 0,
+          akreditasi: s.akreditasi || 'A',
+          alamat: s.alamat || '',
+          email: s.email || '',
+          telepon: s.telepon || '',
+          user_id: s.user_id,
+          is_registered: Boolean(s.is_registered),
+          x: 0,
+          y: 0,
+        }));
       }
-      if (filters?.kecamatan) {
-        result = result.filter(s => s.kecamatan === filters.kecamatan);
-      }
-      if (filters?.status) {
-        result = result.filter(s => s.status === filters.status);
-      }
+    } catch (err) {
+      console.warn('[data-source] getSchools fallback:', err);
+    }
+    return schoolsData.filter(s => {
+      let match = true;
+      if (filters?.kabupaten && s.kabupaten !== filters.kabupaten) match = false;
+      if (filters?.kecamatan && s.kecamatan !== filters.kecamatan) match = false;
+      if (filters?.status && s.status !== filters.status) match = false;
       if (filters?.search) {
-        const query = filters.search.toLowerCase();
-        result = result.filter(s =>
-          s.nama.toLowerCase().includes(query) ||
-          s.npsn.includes(query) ||
-          s.kecamatan.toLowerCase().includes(query)
-        );
+        const q = filters.search.toLowerCase();
+        match = s.nama.toLowerCase().includes(q) || s.npsn.includes(q);
       }
-
-      setTimeout(() => resolve(result), 100);
+      return match;
     });
   },
 
@@ -367,24 +398,34 @@ export const database = {
     kecamatan?: string;
     search?: string;
   }): Promise<SurveyRespondent[]> => {
-    return new Promise((resolve) => {
-      let result = [...respondentsData];
-      if (filters?.kabupaten) {
-        result = result.filter(r => r.kabupaten === filters.kabupaten);
+    try {
+      const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
+      const res = await apiClient.responden.getAll({
+        kabupaten_id: kabId,
+        search: filters?.search,
+        limit: 200,
+      });
+      if (res?.success && Array.isArray(res.data)) {
+        return res.data.map((r: any) => ({
+          id: String(r.id),
+          timestamp: r.submitted_at ? String(r.submitted_at).slice(0, 19).replace('T', ' ') : '',
+          nama: r.nama,
+          jenisKelamin: r.jenis_kelamin,
+          posisi: r.posisi,
+          sekolah: r.sekolah,
+          npsn: r.npsn,
+          kabupaten: r.kabupaten,
+          kecamatan: r.kecamatan,
+          penerima: r.penerima_modul,
+          penyelenggara: r.penyelenggara_pelatihan || '-',
+          statusImplementasi: r.status_implementasi || 'belum',
+          kelasMengajar: r.kelas_mengajar || '-',
+        }));
       }
-      if (filters?.kecamatan) {
-        result = result.filter(r => r.kecamatan === filters.kecamatan);
-      }
-      if (filters?.search) {
-        const q = filters.search.toLowerCase();
-        result = result.filter(r =>
-          r.nama.toLowerCase().includes(q) ||
-          r.sekolah.toLowerCase().includes(q) ||
-          r.npsn.includes(q)
-        );
-      }
-      setTimeout(() => resolve(result), 100);
-    });
+    } catch (err) {
+      console.warn('[data-source] getRespondents fallback:', err);
+    }
+    return [];
   },
 
   getKabupatenStats: async (): Promise<KabupatenStat[]> => {
@@ -447,80 +488,81 @@ export const database = {
   },
 
   getModulProgress: async (filters?: { kabupaten?: string; kecamatan?: string }): Promise<ModulProgress[]> => {
-    return new Promise((resolve) => {
-      const targetKab = filters?.kabupaten || 'Kab. Sidoarjo';
-      const respondents = respondentsData.filter(r => {
-        let match = true;
-        if (targetKab && r.kabupaten !== targetKab) match = false;
-        if (filters?.kecamatan && r.kecamatan !== filters.kecamatan) match = false;
-        return match;
-      });
-
-      const totalResp = respondents.length || 1;
-      const penerimaCount = respondents.filter(r => r.penerima === 'Ya').length;
-      const implSudahCount = respondents.filter(r => r.statusImplementasi === 'sudah').length;
-      const implSebagianCount = respondents.filter(r => r.statusImplementasi === 'sebagian').length;
-
-      const baseRate = (penerimaCount / totalResp) * 100;
-      const implRate = ((implSudahCount + implSebagianCount * 0.5) / totalResp) * 100;
-
-      // Hitung skor rerata observasi SEL aktual per wilayah untuk 3 dimensi modul
-      const selSessions = SEL_MOCK_SESSIONS.filter(s => s.kabupaten === targetKab);
-      let selWithMyself = 70;
-      let selWithOthers = 68;
-      let selWithChallenges = 65;
-
-      if (selSessions.length > 0) {
-        const computed = selSessions.map(s => computeSELScore(s));
-        // With Myself: Kesadaran Diri & Regulasi Emosi
-        const wmAvg = computed.flatMap(c => c.dimensi.filter(d => d.dimensi === 'kesadaran_diri' || d.dimensi === 'regulasi_emosi'));
-        if (wmAvg.length > 0) {
-          selWithMyself = (wmAvg.reduce((sum, d) => sum + d.rataRata, 0) / wmAvg.length) * 20; // Skala 1-5 to %
-        }
-
-        // With Others: Kesadaran Sosial & Keterampilan Relasi
-        const woAvg = computed.flatMap(c => c.dimensi.filter(d => d.dimensi === 'kesadaran_sosial' || d.dimensi === 'keterampilan_relasi'));
-        if (woAvg.length > 0) {
-          selWithOthers = (woAvg.reduce((sum, d) => sum + d.rataRata, 0) / woAvg.length) * 20;
-        }
-
-        // With Our Challenges: Tanggung Jawab
-        const wcAvg = computed.flatMap(c => c.dimensi.filter(d => d.dimensi === 'tanggung_jawab'));
-        if (wcAvg.length > 0) {
-          selWithChallenges = (wcAvg.reduce((sum, d) => sum + d.rataRata, 0) / wcAvg.length) * 20;
-        }
+    try {
+      const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
+      const res = await apiClient.analisis.getModulProgress(kabId);
+      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+        return res.data.map(item => ({
+          id: item.id,
+          nama: item.nama,
+          progres: item.progres ?? 0,
+          totalPertanyaan: item.totalPertanyaan ?? 0,
+          terisi: item.terisi ?? 0,
+        }));
       }
+    } catch (err) {
+      console.warn('[data-source] getModulProgress fallback:', err);
+    }
 
-      // Ambil jumlah partisipasi real dari CSV per wilayah
-      const totalSemuaRespondenWilayah = respondents.length;
-      const sudahMengisiKuesionerCount = implSudahCount + implSebagianCount;
-
-      // Progres modul dihitung 40% Kuesioner Penerimaan + 30% Status Implementasi + 30% Hasil Observasi SEL Nyata
-      const progressList: ModulProgress[] = [
-        {
-          id: 'with_myself',
-          nama: 'With Myself: Dengan Diriku',
-          progres: Math.min(100, Math.round(baseRate * 0.40 + implRate * 0.30 + selWithMyself * 0.30)),
-          totalPertanyaan: totalSemuaRespondenWilayah,
-          terisi: sudahMengisiKuesionerCount,
-        },
-        {
-          id: 'with_others',
-          nama: 'With Others: Dengan Orang Lain',
-          progres: Math.min(100, Math.round(baseRate * 0.38 + implRate * 0.32 + selWithOthers * 0.30)),
-          totalPertanyaan: totalSemuaRespondenWilayah,
-          terisi: sudahMengisiKuesionerCount,
-        },
-        {
-          id: 'with_challenges',
-          nama: 'With Our Challenges: Dengan Tantangan Kita',
-          progres: Math.min(100, Math.round(baseRate * 0.35 + implRate * 0.35 + selWithChallenges * 0.30)),
-          totalPertanyaan: totalSemuaRespondenWilayah,
-          terisi: sudahMengisiKuesionerCount,
-        },
-      ];
-      setTimeout(() => resolve(progressList), 100);
+    const targetKab = filters?.kabupaten || 'Kab. Sidoarjo';
+    const respondents = respondentsData.filter(r => {
+      let match = true;
+      if (targetKab && r.kabupaten !== targetKab) match = false;
+      if (filters?.kecamatan && r.kecamatan !== filters.kecamatan) match = false;
+      return match;
     });
+
+    const totalResp = respondents.length || 1;
+    const penerimaCount = respondents.filter(r => r.penerima === 'Ya').length;
+    const implSudahCount = respondents.filter(r => r.statusImplementasi === 'sudah').length;
+    const implSebagianCount = respondents.filter(r => r.statusImplementasi === 'sebagian').length;
+
+    const baseRate = (penerimaCount / totalResp) * 100;
+    const implRate = ((implSudahCount + implSebagianCount * 0.5) / totalResp) * 100;
+
+    const selSessions = SEL_MOCK_SESSIONS.filter(s => s.kabupaten === targetKab);
+    let selWithMyself = 0;
+    let selWithOthers = 0;
+    let selWithChallenges = 0;
+
+    if (selSessions.length > 0) {
+      const computed = selSessions.map(s => computeSELScore(s));
+      const wmAvg = computed.flatMap(c => c.dimensi.filter(d => d.dimensi === 'kesadaran_diri' || d.dimensi === 'regulasi_emosi'));
+      if (wmAvg.length > 0) selWithMyself = (wmAvg.reduce((sum, d) => sum + d.rataRata, 0) / wmAvg.length) * 20;
+
+      const woAvg = computed.flatMap(c => c.dimensi.filter(d => d.dimensi === 'kesadaran_sosial' || d.dimensi === 'keterampilan_relasi'));
+      if (woAvg.length > 0) selWithOthers = (woAvg.reduce((sum, d) => sum + d.rataRata, 0) / woAvg.length) * 20;
+
+      const wcAvg = computed.flatMap(c => c.dimensi.filter(d => d.dimensi === 'tanggung_jawab'));
+      if (wcAvg.length > 0) selWithChallenges = (wcAvg.reduce((sum, d) => sum + d.rataRata, 0) / wcAvg.length) * 20;
+    }
+
+    const totalSemuaRespondenWilayah = respondents.length;
+    const sudahMengisiKuesionerCount = implSudahCount + implSebagianCount;
+
+    return [
+      {
+        id: 'with_myself',
+        nama: 'With Myself: Dengan Diriku',
+        progres: Math.min(100, Math.round(baseRate * 0.40 + implRate * 0.30 + selWithMyself * 0.30)),
+        totalPertanyaan: totalSemuaRespondenWilayah,
+        terisi: sudahMengisiKuesionerCount,
+      },
+      {
+        id: 'with_others',
+        nama: 'With Others: Dengan Orang Lain',
+        progres: Math.min(100, Math.round(baseRate * 0.38 + implRate * 0.32 + selWithOthers * 0.30)),
+        totalPertanyaan: totalSemuaRespondenWilayah,
+        terisi: sudahMengisiKuesionerCount,
+      },
+      {
+        id: 'with_challenges',
+        nama: 'With Our Challenges: Dengan Tantangan Kita',
+        progres: Math.min(100, Math.round(baseRate * 0.35 + implRate * 0.35 + selWithChallenges * 0.30)),
+        totalPertanyaan: totalSemuaRespondenWilayah,
+        terisi: sudahMengisiKuesionerCount,
+      },
+    ];
   },
 
   getTimeSeriesData: async (filters?: { kabupaten?: string; kecamatan?: string }): Promise<TimeSeriesPoint[]> => {
@@ -587,81 +629,114 @@ export const database = {
   },
 
   getGapFunnelData: async (filters?: { kabupaten?: string; kecamatan?: string }): Promise<FunnelStep[]> => {
-    return new Promise((resolve) => {
-      const filtered = schoolsData.filter(s => {
-        let match = true;
-        if (filters?.kabupaten && s.kabupaten !== filters.kabupaten) match = false;
-        if (filters?.kecamatan && s.kecamatan !== filters.kecamatan) match = false;
-        return match;
-      });
+    try {
+      const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
+      const res = await apiClient.analisis.getFunnel(kabId);
+      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('[data-source] getGapFunnelData fallback:', err);
+    }
 
-      const total = filtered.length;
-      const mengisi = filtered.filter(s => s.status === 'sudah' || s.status === 'sebagian').length;
-      const memenuhiM1 = Math.round(mengisi * 0.78);
-      const memenuhiM2 = Math.round(memenuhiM1 * 0.70);
-      const memenuhiM3 = Math.round(memenuhiM2 * 0.62);
-
-      const funnel: FunnelStep[] = [
-        { name: 'Total Sasaran Sekolah', schools: total, percentage: 100 },
-        { name: 'Mengisi Survei (Aktif)', schools: mengisi, percentage: total > 0 ? Math.round((mengisi / total) * 100) : 0 },
-        { name: 'Memenuhi Tahap 1 & 2', schools: memenuhiM1, percentage: total > 0 ? Math.round((memenuhiM1 / total) * 100) : 0 },
-        { name: 'Memenuhi Standar Mutu', schools: memenuhiM2, percentage: total > 0 ? Math.round((memenuhiM2 / total) * 100) : 0 },
-        { name: 'Lulus Kategori Utama', schools: memenuhiM3, percentage: total > 0 ? Math.round((memenuhiM3 / total) * 100) : 0 },
-      ];
-      setTimeout(() => resolve(funnel), 100);
+    const filtered = schoolsData.filter(s => {
+      let match = true;
+      if (filters?.kabupaten && s.kabupaten !== filters.kabupaten) match = false;
+      if (filters?.kecamatan && s.kecamatan !== filters.kecamatan) match = false;
+      return match;
     });
+
+    const total = filtered.length;
+    const mengisi = filtered.filter(s => s.status === 'sudah' || s.status === 'sebagian').length;
+    const memenuhiM1 = Math.round(mengisi * 0.78);
+    const memenuhiM2 = Math.round(memenuhiM1 * 0.70);
+    const memenuhiM3 = Math.round(memenuhiM2 * 0.62);
+
+    return [
+      { name: 'Total Sasaran Sekolah', schools: total, percentage: 100 },
+      { name: 'Mengisi Survei (Aktif)', schools: mengisi, percentage: total > 0 ? Math.round((mengisi / total) * 100) : 0 },
+      { name: 'Memenuhi Tahap 1 & 2', schools: memenuhiM1, percentage: total > 0 ? Math.round((memenuhiM1 / total) * 100) : 0 },
+      { name: 'Memenuhi Standar Mutu', schools: memenuhiM2, percentage: total > 0 ? Math.round((memenuhiM2 / total) * 100) : 0 },
+      { name: 'Lulus Kategori Utama', schools: memenuhiM3, percentage: total > 0 ? Math.round((memenuhiM3 / total) * 100) : 0 },
+    ];
   },
 
   getMatriksKuadranData: async (filters?: { kabupaten?: string; kecamatan?: string }): Promise<MatrixPoint[]> => {
-    return new Promise((resolve) => {
-      const filtered = schoolsData.filter(s => {
-        let match = true;
-        if (filters?.kabupaten && s.kabupaten !== filters.kabupaten) match = false;
-        if (filters?.kecamatan && s.kecamatan !== filters.kecamatan) match = false;
-        return match;
-      });
+    try {
+      const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
+      const res = await apiClient.analisis.getMatriks(kabId);
+      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+        return res.data.map((r: any, idx: number) => ({
+          id: String(idx + 1),
+          name: r.kecamatan,
+          kecamatan: r.kecamatan,
+          implementation: Number(r.implementasi_persen || 0),
+          readiness: Number(r.penerimaan_persen || 0),
+          status: (r.implementasi_persen >= 60 ? 'sudah' : r.implementasi_persen >= 30 ? 'sebagian' : 'belum') as any,
+        }));
+      }
+    } catch (err) {
+      console.warn('[data-source] getMatriksKuadranData fallback:', err);
+    }
 
-      const points: MatrixPoint[] = filtered.map((s, idx) => {
-        let implementation = 0;
-        let readiness = 0;
-        const seed = (s.npsn ? parseInt(s.npsn) : idx) % 100;
-
-        if (s.status === 'sudah') {
-          implementation = 60 + (seed % 35);
-          readiness = 65 + (seed % 30);
-        } else if (s.status === 'sebagian') {
-          implementation = 35 + (seed % 30);
-          readiness = 40 + (seed % 35);
-        } else {
-          implementation = 15 + (seed % 25);
-          readiness = 20 + (seed % 30);
-        }
-
-        return {
-          id: s.id,
-          name: s.nama,
-          kecamatan: s.kecamatan,
-          implementation,
-          readiness,
-          status: s.status
-        };
-      });
-
-      setTimeout(() => resolve(points.slice(0, 150)), 100);
+    const filtered = schoolsData.filter(s => {
+      let match = true;
+      if (filters?.kabupaten && s.kabupaten !== filters.kabupaten) match = false;
+      if (filters?.kecamatan && s.kecamatan !== filters.kecamatan) match = false;
+      return match;
     });
+
+    return filtered.map((s, idx) => {
+      let implementation = 0;
+      let readiness = 0;
+      const seed = (s.npsn ? parseInt(s.npsn) : idx) % 100;
+
+      if (s.status === 'sudah') {
+        implementation = 60 + (seed % 35);
+        readiness = 65 + (seed % 30);
+      } else if (s.status === 'sebagian') {
+        implementation = 35 + (seed % 30);
+        readiness = 40 + (seed % 35);
+      } else {
+        implementation = 15 + (seed % 25);
+        readiness = 20 + (seed % 30);
+      }
+
+      return {
+        id: s.id,
+        name: s.nama,
+        kecamatan: s.kecamatan,
+        implementation,
+        readiness,
+        status: s.status
+      };
+    }).slice(0, 150);
   },
 
   getTantanganData: async (filters?: { kabupaten?: string; kecamatan?: string }): Promise<ChallengeStat[]> => {
-    return new Promise((resolve) => {
-      const list: ChallengeStat[] = [
-        { category: 'Keterbatasan Perangkat Digital / Laptop', count: 348, percentage: 36.8, color: '#E5484D' },
-        { category: 'Jaringan Internet Tidak Stabil', count: 236, percentage: 25.0, color: '#F5A623' },
-        { category: 'Kurangnya Pelatihan Guru tentang BSAN', count: 155, percentage: 16.4, color: '#4A57C4' },
-        { category: 'Bahan Ajar Cetak Belum Lengkap', count: 121, percentage: 12.8, color: '#6C7AE0' },
-        { category: 'Kurang Kemitraan dari Orang Tua', count: 85, percentage: 9.0, color: '#2FB344' },
-      ];
-      setTimeout(() => resolve(list), 100);
-    });
+    try {
+      const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
+      const res = await apiClient.analisis.getTantangan(kabId);
+      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+        const colors = ['#E5484D', '#F5A623', '#4A57C4', '#6C7AE0', '#2FB344'];
+        return res.data.map((r: any, idx: number) => ({
+          category: r.kategori,
+          count: Number(r.jumlah || 0),
+          percentage: Number(r.persen || 0),
+          color: colors[idx % colors.length],
+        }));
+      }
+    } catch (err) {
+      console.warn('[data-source] getTantanganData fallback:', err);
+    }
+
+    return [
+      { category: 'Keterbatasan Perangkat Digital / Laptop', count: 348, percentage: 36.8, color: '#E5484D' },
+      { category: 'Jaringan Internet Tidak Stabil', count: 236, percentage: 25.0, color: '#F5A623' },
+      { category: 'Kurangnya Pelatihan Guru tentang BSAN', count: 155, percentage: 16.4, color: '#4A57C4' },
+      { category: 'Bahan Ajar Cetak Belum Lengkap', count: 121, percentage: 12.8, color: '#6C7AE0' },
+      { category: 'Kurang Kemitraan dari Orang Tua', count: 85, percentage: 9.0, color: '#2FB344' },
+    ];
   },
 
   getRecentActivities: async (filters?: { kabupaten?: string; kecamatan?: string }): Promise<{ schoolName: string; status: string; time: string }[]> => {
@@ -951,94 +1026,152 @@ export const database = {
     kabupaten?: string;
     kecamatan?: string;
   }): Promise<SELObservasiSession[]> => {
-    return new Promise(resolve => {
-      let result = [...selObservasiData];
-      if (filters?.kabupaten) result = result.filter(s => s.kabupaten === filters.kabupaten);
-      if (filters?.kecamatan) result = result.filter(s => s.kecamatan === filters.kecamatan);
-      setTimeout(() => resolve(result), 100);
-    });
+    try {
+      const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
+      const res = await apiClient.sel.getSesi(kabId);
+      if (res?.success && Array.isArray(res.data)) {
+        return res.data.map((r: any) => {
+          let parsedLokasi: string[] = [];
+          let parsedWaktu: string[] = [];
+          try {
+            parsedLokasi = typeof r.lokasi_diamati === 'string' ? JSON.parse(r.lokasi_diamati) : (Array.isArray(r.lokasi_diamati) ? r.lokasi_diamati : []);
+          } catch { }
+          try {
+            parsedWaktu = typeof r.waktu_pengamatan === 'string' ? JSON.parse(r.waktu_pengamatan) : (Array.isArray(r.waktu_pengamatan) ? r.waktu_pengamatan : []);
+          } catch { }
+
+          let parsedJawaban: SELJawaban[] = [];
+          if (Array.isArray(r.jawaban)) {
+            parsedJawaban = r.jawaban.map((j: any) => ({
+              indikatorId: j.indikatorId || j.indikator_kode || String(j.indikator_id),
+              skor: j.skor !== undefined ? j.skor : null,
+              catatan: j.catatan || '',
+            }));
+          } else if (typeof r.jawaban === 'string') {
+            try {
+              const raw = JSON.parse(r.jawaban);
+              if (Array.isArray(raw)) {
+                parsedJawaban = raw.map((j: any) => ({
+                  indikatorId: j.indikatorId || j.indikator_kode || String(j.indikator_id),
+                  skor: j.skor !== undefined ? j.skor : null,
+                  catatan: j.catatan || '',
+                }));
+              }
+            } catch { }
+          }
+
+          return {
+            id: String(r.id),
+            sekolahId: String(r.sekolah_id || r.id),
+            sekolahNama: r.sekolah_nama || r.nama || `SD ${r.kecamatan || ''}`,
+            kecamatan: r.kecamatan || '',
+            kabupaten: r.kabupaten || '',
+            observerNama: r.observer_nama || 'Pengawas',
+            tanggal: r.tanggal ? String(r.tanggal).slice(0, 10) : '',
+            lokasiDiamati: parsedLokasi,
+            waktuPengamatan: parsedWaktu,
+            jumlahSiswaL: r.jumlah_siswa_l || 0,
+            jumlahSiswaP: r.jumlah_siswa_p || 0,
+            siswaDisabilitasL: r.siswa_disabilitas_l || 0,
+            siswaDisabilitasP: r.siswa_disabilitas_p || 0,
+            jangkauanSiswa: r.jangkauan_siswa || 1,
+            kelasDiamati: r.kelas_diamati || '',
+            namaGuruInisial: r.guru_inisial || '',
+            jenisKelaminGuru: r.guru_jk || 'L',
+            mataPelajaran: r.mata_pelajaran || '',
+            jawaban: parsedJawaban,
+            status: r.status || 'submitted',
+          };
+        });
+      }
+    } catch (err) {
+      console.warn('[data-source] getSELObservations fallback:', err);
+    }
+    return [];
   },
 
   getSELScores: async (filters?: {
     kabupaten?: string;
     kecamatan?: string;
   }): Promise<SELSchoolScore[]> => {
-    return new Promise(resolve => {
-      let sessions = [...selObservasiData];
-      if (filters?.kabupaten) sessions = sessions.filter(s => s.kabupaten === filters.kabupaten);
-      if (filters?.kecamatan) sessions = sessions.filter(s => s.kecamatan === filters.kecamatan);
-      const scores = sessions.map(s => computeSELScore(s));
-      setTimeout(() => resolve(scores), 100);
-    });
+    try {
+      const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
+      const res = await apiClient.sel.getSesi(kabId);
+      if (res?.success && Array.isArray(res.data)) {
+        return res.data.map((r: any) => ({
+          sekolahId: String(r.sekolah_id || r.id),
+          sekolahNama: r.sekolah_nama || r.nama || `SD ${r.kecamatan}`,
+          kecamatan: r.kecamatan || 'Kec. Sidoarjo',
+          kabupaten: r.kabupaten || 'Kab. Sidoarjo',
+          tanggal: r.tanggal ? String(r.tanggal).slice(0, 10) : new Date().toISOString().slice(0, 10),
+          guruTotal: Number(r.guru_total || 0),
+          muridTotal: Number(r.murid_total || 0),
+          totalRata: Number(r.total_rata || 0),
+          dimensi: SEL_DIMENSI_ORDER.map(d => ({
+            dimensi: d,
+            label: SEL_DIMENSI_LABEL[d],
+            guruSkor: Number(r[`${d}_guru`] || r.guru_total || 0),
+            muridSkor: Number(r[`${d}_murid`] || r.murid_total || 0),
+            rataRata: Number(r[`${d}_rata`] || r.total_rata || 0),
+          })),
+          kuisionerScore: Number(r.kuisioner_score || 50),
+        }));
+      }
+    } catch (err) {
+      console.warn('[data-source] getSELScores fallback:', err);
+    }
+
+    return [];
   },
 
   getSELHeatmap: async (kabupaten?: string): Promise<SELHeatmapRow[]> => {
-    return new Promise(resolve => {
-      const sessions = kabupaten
-        ? selObservasiData.filter(s => s.kabupaten === kabupaten)
-        : selObservasiData;
-
-      const kecMap: Record<string, { scores: SELSchoolScore[]; kabupaten: string }> = {};
-      sessions.forEach(session => {
-        if (!kecMap[session.kecamatan]) {
-          kecMap[session.kecamatan] = { scores: [], kabupaten: session.kabupaten };
-        }
-        kecMap[session.kecamatan].scores.push(computeSELScore(session));
-      });
-
-      const rows: SELHeatmapRow[] = Object.entries(kecMap).map(([kec, { scores, kabupaten: kab }]) => {
-        const avg = (key: 'guruTotal' | 'muridTotal') =>
-          Math.round((scores.reduce((a, b) => a + b[key], 0) / scores.length) * 10) / 10;
-
-        const dimensiScores = SEL_DIMENSI_ORDER.reduce((acc, d) => {
-          const vals = scores.map(s => s.dimensi.find(dd => dd.dimensi === d)?.rataRata || 0);
-          acc[d] = Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10;
-          return acc;
-        }, {} as Record<SELDimensi, number>);
-
-        const rataRata = Math.round(
-          (Object.values(dimensiScores).reduce((a, b) => a + b, 0) / SEL_DIMENSI_ORDER.length) * 10
-        ) / 10;
-
-        return {
-          kecamatan: kec,
-          kabupaten: kab,
-          jumlahSekolah: scores.length,
-          dimensiScores,
-          rataRata,
-        };
-      });
-
-      setTimeout(() => resolve(rows.sort((a, b) => b.rataRata - a.rataRata)), 100);
-    });
+    try {
+      const kabId = kabupaten ? KABUPATEN_NAME_TO_ID[kabupaten] : undefined;
+      const res = await apiClient.sel.getHeatmap(kabId);
+      if (res?.success && Array.isArray(res.data)) {
+        return res.data.map((r: any) => ({
+          kecamatan: r.kecamatan,
+          kabupaten: r.kabupaten,
+          jumlahSekolah: Number(r.jumlah_sekolah || 0),
+          dimensiScores: {
+            kesadaran_diri: Number(r.kesadaran_diri || 0),
+            regulasi_emosi: Number(r.regulasi_emosi || 0),
+            kesadaran_sosial: Number(r.kesadaran_sosial || 0),
+            keterampilan_relasi: Number(r.keterampilan_relasi || 0),
+            tanggung_jawab: Number(r.tanggung_jawab || 0),
+          },
+          rataRata: Number(r.rata_rata || 0),
+        }));
+      }
+    } catch (err) {
+      console.warn('[data-source] getSELHeatmap fallback:', err);
+    }
+    return [];
   },
 
   getSELMatriksData: async (filters?: {
     kabupaten?: string;
     kecamatan?: string;
   }): Promise<SELMatriksPoint[]> => {
-    return new Promise(resolve => {
-      let sessions = [...selObservasiData];
-      if (filters?.kabupaten) sessions = sessions.filter(s => s.kabupaten === filters.kabupaten);
-      if (filters?.kecamatan) sessions = sessions.filter(s => s.kecamatan === filters.kecamatan);
-
-      const points: SELMatriksPoint[] = sessions.map(session => {
-        const score = computeSELScore(session);
-        const school = schoolsData.find(s => s.nama === session.sekolahNama || s.kecamatan === session.kecamatan);
-        return {
-          id: session.id,
-          name: session.sekolahNama,
-          kecamatan: session.kecamatan,
-          kuisionerScore: score.kuisionerScore,
-          selScore: score.totalRata,
-          guruSkor: score.guruTotal,
-          muridSkor: score.muridTotal,
-          status: school?.status || 'belum',
-        };
-      });
-
-      setTimeout(() => resolve(points), 100);
-    });
+    try {
+      const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
+      const res = await apiClient.sel.getMatriks(kabId);
+      if (res?.success && Array.isArray(res.data)) {
+        return res.data.map((r: any, idx: number) => ({
+          id: String(r.id || idx + 1),
+          name: r.sekolah_nama || r.nama || r.kecamatan,
+          kecamatan: r.kecamatan,
+          kuisionerScore: Number(r.kuisioner_score || 0),
+          selScore: Number(r.sel_score || 0),
+          guruSkor: Number(r.guru_skor || 0),
+          muridSkor: Number(r.murid_skor || 0),
+          status: (r.status || 'belum') as any,
+        }));
+      }
+    } catch (err) {
+      console.warn('[data-source] getSELMatriksData fallback:', err);
+    }
+    return [];
   },
 
   getSELSummaryStats: async (): Promise<{
@@ -1048,15 +1181,28 @@ export const database = {
     butuhIntervensi: number;
     topSekolah: string;
   }> => {
-    return new Promise(resolve => {
-      const scores = selObservasiData.map(s => computeSELScore(s));
-      const totalDiobservasi = scores.length;
-      const rataGuruAll = Math.round((scores.reduce((a, b) => a + b.guruTotal, 0) / totalDiobservasi) * 10) / 10;
-      const rataMuridAll = Math.round((scores.reduce((a, b) => a + b.muridTotal, 0) / totalDiobservasi) * 10) / 10;
-      const butuhIntervensi = scores.filter(s => s.totalRata < 2.5).length;
-      const topSekolah = scores.sort((a, b) => b.totalRata - a.totalRata)[0]?.sekolahNama || '-';
-      setTimeout(() => resolve({ totalDiobservasi, rataGuruAll, rataMuridAll, butuhIntervensi, topSekolah }), 100);
-    });
+    try {
+      const res = await apiClient.sel.getSummary();
+      if (res?.success && res.data) {
+        return {
+          totalDiobservasi: Number(res.data.total_sesi ?? res.data.total_diobservasi ?? 0),
+          rataGuruAll: Number(res.data.rata_guru ?? res.data.rata_guru_all ?? 0),
+          rataMuridAll: Number(res.data.rata_murid ?? res.data.rata_murid_all ?? 0),
+          butuhIntervensi: Number(res.data.butuh_intervensi ?? 0),
+          topSekolah: res.data.top_sekolah || '-',
+        };
+      }
+    } catch (err) {
+      console.warn('[data-source] getSELSummaryStats fallback:', err);
+    }
+
+    const scores = selObservasiData.map(s => computeSELScore(s));
+    const totalDiobservasi = scores.length;
+    const rataGuruAll = Math.round((scores.reduce((a, b) => a + b.guruTotal, 0) / (totalDiobservasi || 1)) * 10) / 10;
+    const rataMuridAll = Math.round((scores.reduce((a, b) => a + b.muridTotal, 0) / (totalDiobservasi || 1)) * 10) / 10;
+    const butuhIntervensi = scores.filter(s => s.totalRata < 2.5).length;
+    const topSekolah = scores.sort((a, b) => b.totalRata - a.totalRata)[0]?.sekolahNama || '-';
+    return { totalDiobservasi, rataGuruAll, rataMuridAll, butuhIntervensi, topSekolah };
   },
 
   saveObservasiSEL: async (session: Omit<SELObservasiSession, 'id'>): Promise<SELObservasiSession> => {

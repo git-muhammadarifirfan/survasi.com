@@ -42,6 +42,143 @@ router.get('/questions', async (req, res) => {
   }
 });
 
+// ─── POST /api/survey/questions (Add Question - Admin Only) ─────────────────
+router.post('/questions', async (req, res) => {
+  try {
+    const role = req.user?.role || 'admin';
+    if (role !== 'admin' && role !== 'pengawas') {
+      return res.status(403).json({ success: false, message: 'Akses ditolak. Hanya Admin yang dapat mengelola pertanyaan.' });
+    }
+
+    const {
+      kode_pertanyaan, teks_pertanyaan, tipe, opsi_jawaban,
+      is_required, section, urutan
+    } = req.body;
+
+    if (!teks_pertanyaan || !section) {
+      return res.status(400).json({ success: false, message: 'Teks pertanyaan dan section wajib diisi.' });
+    }
+
+    const opsiJson = Array.isArray(opsi_jawaban) ? JSON.stringify(opsi_jawaban) : null;
+
+    const [result] = await pool.execute(`
+      INSERT INTO pertanyaan_survey (
+        kode_pertanyaan, teks_pertanyaan, tipe, opsi_jawaban,
+        urutan, is_required, section, is_active
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+    `, [
+      kode_pertanyaan || 'Q_NEW',
+      teks_pertanyaan,
+      tipe || 'text',
+      opsiJson,
+      urutan || 99,
+      is_required ? 1 : 0,
+      section || 'identitas'
+    ]);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Pertanyaan berhasil ditambahkan.',
+      id: result.insertId
+    });
+  } catch (err) {
+    console.error('[SURVEY] create question error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal menambah pertanyaan survei.' });
+  }
+});
+
+// ─── PUT /api/survey/questions/reorder (Reorder Questions - Admin Only) ───────
+router.put('/questions/reorder', async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Akses ditolak.' });
+    }
+
+    const { items } = req.body; // array of { id: number, urutan: number }
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ success: false, message: 'Format data reorder tidak valid.' });
+    }
+
+    await conn.beginTransaction();
+    for (const item of items) {
+      await conn.execute(
+        `UPDATE pertanyaan_survey SET urutan = ? WHERE id = ?`,
+        [item.urutan, item.id]
+      );
+    }
+    await conn.commit();
+    return res.json({ success: true, message: 'Urutan pertanyaan berhasil disimpan.' });
+  } catch (err) {
+    await conn.rollback();
+    console.error('[SURVEY] reorder error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal mengubah urutan pertanyaan.' });
+  } finally {
+    conn.release();
+  }
+});
+
+// ─── PUT /api/survey/questions/:id (Update Question - Admin Only) ────────────
+router.put('/questions/:id', async (req, res) => {
+  try {
+    const role = req.user?.role || 'admin';
+    if (role !== 'admin' && role !== 'pengawas') {
+      return res.status(403).json({ success: false, message: 'Akses ditolak. Hanya Admin yang dapat mengelola pertanyaan.' });
+    }
+
+    const questionId = parseInt(req.params.id);
+    const {
+      kode_pertanyaan, teks_pertanyaan, tipe, opsi_jawaban,
+      is_required, section
+    } = req.body;
+
+    const opsiJson = Array.isArray(opsi_jawaban) ? JSON.stringify(opsi_jawaban) : (opsi_jawaban ? JSON.stringify([opsi_jawaban]) : null);
+    const reqVal = is_required ? 1 : 0;
+
+    await pool.execute(`
+      UPDATE pertanyaan_survey
+      SET 
+        kode_pertanyaan = ?,
+        teks_pertanyaan = ?,
+        tipe = ?,
+        opsi_jawaban = ?,
+        is_required = ?,
+        section = ?
+      WHERE id = ?
+    `, [
+      kode_pertanyaan || 'Q',
+      teks_pertanyaan || '',
+      tipe || 'radio',
+      opsiJson,
+      reqVal,
+      section || 'identitas',
+      questionId
+    ]);
+
+    return res.json({ success: true, message: 'Pertanyaan berhasil diperbarui.' });
+  } catch (err) {
+    console.error('[SURVEY] update question error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal memperbarui pertanyaan.' });
+  }
+});
+
+// ─── DELETE /api/survey/questions/:id (Delete Question - Admin Only) ──────────
+router.delete('/questions/:id', async (req, res) => {
+  try {
+    if (req.user?.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Akses ditolak. Hanya Admin yang dapat mengelola pertanyaan.' });
+    }
+
+    const questionId = parseInt(req.params.id);
+    await pool.execute(`UPDATE pertanyaan_survey SET is_active = 0 WHERE id = ?`, [questionId]);
+
+    return res.json({ success: true, message: 'Pertanyaan berhasil dihapus.' });
+  } catch (err) {
+    console.error('[SURVEY] delete question error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal menghapus pertanyaan.' });
+  }
+});
+
 // ─── POST /api/survey/submit ─────────────────────────────────────────────────
 router.post('/submit', submitLimiter, async (req, res) => {
   const conn = await pool.getConnection();
@@ -55,6 +192,26 @@ router.post('/submit', submitLimiter, async (req, res) => {
       kelas_mengajar, no_wa, jawaban
     } = req.body;
 
+    let sekolahId = sekolah_id ? parseInt(sekolah_id) : (req.user?.sekolah_id || 1);
+    let kabId = kabupaten_id ? parseInt(kabupaten_id) : (req.user?.kabupaten_id || 1);
+    let kecId = kecamatan_id ? parseInt(kecamatan_id) : (req.user?.kecamatan_id || 1);
+    let npsnVal = npsn || null;
+
+    if (sekolahId) {
+      const [spRows] = await conn.execute(
+        `SELECT sp.npsn, sp.kecamatan_id, k.kabupaten_id 
+         FROM satuan_pendidikan sp 
+         JOIN kecamatan k ON sp.kecamatan_id = k.id 
+         WHERE sp.id = ? LIMIT 1`,
+        [sekolahId]
+      );
+      if (spRows.length > 0) {
+        npsnVal = npsnVal || spRows[0].npsn;
+        kecId = spRows[0].kecamatan_id;
+        kabId = spRows[0].kabupaten_id;
+      }
+    }
+
     // Insert responden
     const [respResult] = await conn.execute(`
       INSERT INTO responden_survey (
@@ -64,10 +221,18 @@ router.post('/submit', submitLimiter, async (req, res) => {
         kelas_mengajar, no_wa, submitted_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `, [
-      nama, jenis_kelamin, posisi, sekolah_id, npsn || null,
-      kabupaten_id, kecamatan_id, penerima_modul || 'Tidak',
-      Array.isArray(penyelenggara_pelatihan) ? penyelenggara_pelatihan.join(', ') : (penyelenggara_pelatihan || null),
-      status_implementasi || null, kelas_mengajar || null, no_wa || null
+      nama || req.user?.nama || 'Responden Survei',
+      jenis_kelamin || 'L',
+      posisi || req.user?.jabatan || 'Guru / Operator',
+      sekolahId,
+      npsnVal,
+      kabId,
+      kecId,
+      penerima_modul || 'Ya',
+      Array.isArray(penyelenggara_pelatihan) ? penyelenggara_pelatihan.join(', ') : (penyelenggara_pelatihan || 'Dinas Pendidikan'),
+      status_implementasi || 'sudah',
+      kelas_mengajar || 'Semua Kelas',
+      no_wa || null
     ]);
 
     const respondenId = respResult.insertId;
@@ -92,6 +257,15 @@ router.post('/submit', submitLimiter, async (req, res) => {
           ) VALUES (?, ?, ?, ?, ?)
         `, [respondenId, j.pertanyaan_id, terstrukturVal, bebasVal, multiVal]);
       }
+    }
+
+    // Update status_pengisian pada sekolah sasaran
+    if (sekolahId) {
+      await conn.execute(`
+        UPDATE satuan_pendidikan
+        SET status_pengisian = 'sudah', last_updated = NOW()
+        WHERE id = ?
+      `, [sekolahId]);
     }
 
     await conn.commit();

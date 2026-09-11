@@ -113,7 +113,7 @@ export default function TantanganImplementasi({ activeKecamatan }: TantanganImpl
                   );
                 })}
               </div>
-              
+
               {/* AI Insight Box */}
               <div className="pt-1">
                 <div className="rounded-2xl bg-gradient-to-r from-indigo-50 via-purple-50 to-indigo-50 border border-indigo-100 p-5">
@@ -122,10 +122,10 @@ export default function TantanganImplementasi({ activeKecamatan }: TantanganImpl
                     <h4 className="text-xs font-black text-slate-900 font-display uppercase tracking-wider">AI Insight & Rekomendasi</h4>
                   </div>
                   <p className="text-xs text-slate-600 leading-relaxed font-medium">
-                    Berdasarkan analisis data sentimen dari {challengeData[0]?.count || 0} laporan teratas, 
-                    <strong className="text-indigo-600"> {challengeData[0]?.category} </strong> 
-                    merupakan hambatan terbesar di lapangan. Rekomendasi tindakan prioritas untuk 
-                    Dinas Pendidikan {selectedKab || 'Provinsi'} adalah segera melakukan alokasi ulang anggaran BOS Kinerja 
+                    Berdasarkan analisis data sentimen dari {challengeData[0]?.count || 0} laporan teratas,
+                    <strong className="text-indigo-600"> {challengeData[0]?.category} </strong>
+                    merupakan hambatan terbesar di lapangan. Rekomendasi tindakan prioritas untuk
+                    Dinas Pendidikan {selectedKab || 'Provinsi'} adalah segera melakukan alokasi ulang anggaran BOS Kinerja
                     untuk penguatan infrastruktur digital, serta menggandeng CSR perusahaan lokal.
                   </p>
                 </div>

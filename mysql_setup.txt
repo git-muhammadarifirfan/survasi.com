@@ -1,299 +1,182 @@
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║          PANDUAN SETUP DATABASE MYSQL — BSAN JAWA TIMUR MONITORING           ║
-║                              survasi.com / v1.0                              ║
+║             PANDUAN SETUP DATABASE MYSQL DARI NOL (db_survasi)               ║
+║                                  survasi.com                                 ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
-Panduan lengkap untuk setup database MySQL dari nol hingga siap production.
-Jalankan langkah-langkah ini secara BERURUTAN.
+Panduan ini berisi langkah-langkah lengkap membuat dan mengisi database MySQL 'db_survasi'
+mulai dari NOL (Fresh Install / Database Kosong) hingga backend & frontend dapat berjalan.
+
+Ikuti petunjuk di bawah secara BERURUTAN!
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PRASYARAT
+LANGKAH 0 — PRASYARAT APLIKASI & TERMINAL
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  ✓ MySQL 8.0+ atau MariaDB 10.5+ sudah terinstall
-  ✓ Node.js 18+ sudah terinstall
-  ✓ Akses ke MySQL sebagai root (atau user dengan hak CREATE DATABASE)
+1. Pastikan Service MySQL sudah berjalan di komputer kamu (XAMPP / MySQL Server / MariaDB).
+2. Pastikan Node.js (v18 atau lebih baru) sudah terinstall.
+3. Buka Terminal / Command Prompt (cmd) / PowerShell di folder utama project:
+   `F:\1.PROJECT\survasi.com`
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LANGKAH 1 — BUAT DATABASE USER (Opsional, direkomendasikan)
+LANGKAH 1 — BUAT DATABASE & USER MYSQL (Via MySQL CLI)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Login ke MySQL sebagai root:
-    mysql -u root -p
+Buka Terminal/CMD, lalu masuk ke prompt MySQL sebagai root:
+  mysql -u root -p
 
-  Jalankan perintah berikut (ganti 'password_aman' dengan password yang kuat):
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  CREATE USER 'bsan_user'@'localhost' IDENTIFIED BY 'password_aman';     │
-  │  GRANT ALL PRIVILEGES ON bsan_jatim_monitoring.* TO 'bsan_user'@'%';   │
-  │  FLUSH PRIVILEGES;                                                       │
-  │  EXIT;                                                                   │
-  └──────────────────────────────────────────────────────────────────────────┘
+(Tekan Enter, lalu masukkan password root MySQL kamu).
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LANGKAH 2 — INISIALISASI SCHEMA DATABASE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Di dalam prompt `mysql>`, jalankan perintah SQL berikut satu per satu:
 
-  Jalankan dari root folder project (F:\1.PROJECT\survasi.com):
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  mysql -u root -p < database/schema.sql                                 │
-  └──────────────────────────────────────────────────────────────────────────┘
+  -- 1. Buat Database Baru 'db_survasi'
+  CREATE DATABASE IF NOT EXISTS db_survasi
+    CHARACTER SET utf8mb4
+    COLLATE utf8mb4_unicode_ci;
 
-  Ini akan membuat database 'bsan_jatim_monitoring' dengan:
-    - 20 tabel utama (users, satuan_pendidikan, responden_survey, dll)
-    - 3 views (v_kecamatan_stats, v_kabupaten_stats, v_sel_sesi_scores)
-    - Trigger untuk update otomatis
-    - Index dan Foreign Key constraints
+  -- 2. (Opsional) Buat User khusus untuk aplikasi
+  CREATE USER IF NOT EXISTS 'bsan_user'@'localhost' IDENTIFIED BY 'password_aman';
+  GRANT ALL PRIVILEGES ON db_survasi.* TO 'bsan_user'@'%';
+  FLUSH PRIVILEGES;
+
+  -- 3. Keluar dari MySQL CLI
+  EXIT;
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LANGKAH 3 — IMPORT DATA AWAL (SEED)
+LANGKAH 2 — IMPORT STRUCTURE (SCHEMA DDL)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Jalankan berurutan:
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  mysql -u root -p bsan_jatim_monitoring < database/seed.sql             │
-  │  mysql -u root -p bsan_jatim_monitoring < database/seed-sel-indikator.sql │
-  │  mysql -u root -p bsan_jatim_monitoring < database/seed-pertanyaan.sql  │
-  └──────────────────────────────────────────────────────────────────────────┘
+Jalankan perintah ini di Terminal / CMD (dari folder root project `F:\1.PROJECT\survasi.com`):
 
-  seed.sql berisi:
-    - Data provinsi, kabupaten (Sidoarjo, Batu, Tuban), kecamatan
-    - 3 modul BSAN & 5 dimensi SEL
-    - 2 akun default (admin + pengawas demo)
+  mysql -u root -p db_survasi < database/schema.sql
+
+(Sistem akan membuat 20 tabel utama, 3 views, trigger, dan foreign keys secara otomatis).
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LANGKAH 4 — IMPORT DATA SEKOLAH & RESPONDEN
+LANGKAH 3 — IMPORT DATA REFERENSI (SEED DATA)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  (File besar — mungkin butuh beberapa menit)
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  mysql -u root -p bsan_jatim_monitoring < database/import-sekolah.sql  │
-  │  mysql -u root -p bsan_jatim_monitoring < database/import-responden.sql│
-  └──────────────────────────────────────────────────────────────────────────┘
+Jalankan perintah berikut secara BERURUTAN:
+
+  -- 1. Import Data Wilayah, Modul BSAN, Dimensi SEL, & User Admin Default
+  mysql -u root -p db_survasi < database/seed.sql
+
+  -- 2. Import 55 Indikator Observasi SEL (Guru & Murid)
+  mysql -u root -p db_survasi < database/seed-sel-indikator.sql
+
+  -- 3. Import 37 Pertanyaan Kuisioner Survey BSAN
+  mysql -u root -p db_survasi < database/seed-pertanyaan.sql
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LANGKAH 5 — SETUP AKUN PENGAWAS (per Sekolah)
+LANGKAH 4 — IMPORT MASTER DATA SEKOLAH & RESPONDEN
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Setiap sekolah mendapat 1 akun pengawas dengan:
-    Login    : NPSN sekolah
-    Password : kata_pertama_nama_sekolah_lowercase + 4_digit_terakhir_NPSN
+Import data master sekolah (200+ SD/MI) dan data sampel responden:
 
-  Contoh Password:
-    Nama: "SDN Candi 1"    NPSN: 20512345  →  password: sdn2345
-    Nama: "MI Al-Hidayah"  NPSN: 60712100  →  password: mi2100
-    Nama: "SMP Negeri 1"   NPSN: 20502100  →  password: smp2100
-    Nama: "SDN Waru 2"     NPSN: 20510002  →  password: sdn0002
+  -- 1. Import Master Data Sekolah
+  mysql -u root -p db_survasi < database/import-sekolah.sql
 
-  Install dependencies backend dulu (jika belum):
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  cd server                                                               │
-  │  npm install                                                             │
-  │  cd ..                                                                   │
-  └──────────────────────────────────────────────────────────────────────────┘
+  -- 2. Import Data Responden Survey
+  mysql -u root -p db_survasi < database/import-responden.sql
 
-  Copy dan isi file .env backend:
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  copy server\.env.example server\.env                                   │
-  │  (edit server\.env sesuai konfigurasi MySQL kamu)                       │
-  └──────────────────────────────────────────────────────────────────────────┘
-
-  Jalankan script generator:
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  node database/generate-pengawas-accounts.js                            │
-  └──────────────────────────────────────────────────────────────────────────┘
-
-  Script akan auto-generate akun untuk semua sekolah yang belum punya akun.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LANGKAH 6 — VERIFIKASI DATABASE
+LANGKAH 5 — AUTO-GENERATE AKUN PENGAWAS SEKOLAH (NPSN)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  mysql -u root -p bsan_jatim_monitoring < database/verify.sql          │
-  └──────────────────────────────────────────────────────────────────────────┘
+Setiap sekolah di database akan otomatis dibuatkan akun pengawas login berbasis NPSN.
 
-  Semua baris harus menunjukkan ✓ PASS.
+1. Masuk ke folder backend server dan install dependency:
+   cd server
+   npm install
+   cd ..
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LANGKAH 7 — JALANKAN BACKEND API SERVER
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. Salin file konfigurasi .env backend (jika belum ada):
+   copy server\.env.example server\.env
 
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  cd server                                                               │
-  │  npm install     (pertama kali)                                          │
-  │  npm run dev     (development — auto-restart)                            │
-  │  npm start       (production)                                            │
-  └──────────────────────────────────────────────────────────────────────────┘
+3. Buka file `server\.env` dengan Text Editor/VS Code dan sesuaikan password MySQL kamu:
+   DB_HOST=localhost
+   DB_PORT=3306
+   DB_USER=root           <-- Sesuaikan user MySQL kamu
+   DB_PASS=password_kamu  <-- Sesuaikan password MySQL kamu
+   DB_NAME=db_survasi
 
-  Server akan jalan di: http://localhost:3001
-  Health check      :  http://localhost:3001/health
+4. Jalankan script generator akun pengawas dari root project:
+   node database/generate-pengawas-accounts.js
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LANGKAH 8 — JALANKAN FRONTEND
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   (Script akan memproses semua sekolah dan menggenerate password hash Bcrypt).
 
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  (dari root project — terminal terpisah)                                 │
-  │  npm run dev                                                             │
-  └──────────────────────────────────────────────────────────────────────────┘
-
-  Frontend akan jalan di: http://localhost:5173
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-AKUN DEFAULT SETELAH SETUP
+LANGKAH 6 — VERIFIKASI HASIL IMPORT DATABASE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  ┌─────────────────────────────────────────────────────────────────────────┐
-  │  ADMIN                                                                  │
-  │  Email    : admin@survasi.com                                           │
-  │  Password : admin                                                       │
-  │  Role     : admin (CRUD semua data + analisis)                          │
-  │─────────────────────────────────────────────────────────────────────────│
-  │  PENGAWAS DEMO                                                          │
-  │  Email    : pengawas@survasi.com                                        │
-  │  Password : pengawas                                                    │
-  │  Role     : pengawas (input/adjust data sekolah)                        │
-  │─────────────────────────────────────────────────────────────────────────│
-  │  PENGAWAS PER SEKOLAH (generate via script)                             │
-  │  Login    : NPSN sekolah (mis. 20512345)                                │
-  │  Password : kata_pertama_lowercase + 4_digit_akhir_npsn                 │
-  │  Contoh   : SDN Candi 1 / NPSN 20512345 → login: 20512345 pw: sdn2345  │
-  └─────────────────────────────────────────────────────────────────────────┘
+Jalankan script verifikasi untuk memastikan semua tabel & data terisi dengan sempurna:
 
-  ⚠ PENTING: Ganti semua password default sebelum go-live production!
+  mysql -u root -p db_survasi < database/verify.sql
+
+Pastikan seluruh indikator pengujian pada output Terminal mengembalikan status `✓ PASS`.
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-KONFIGURASI FILE .ENV
+LANGKAH 7 — JALANKAN SERVER BACKEND & FRONTEND
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Backend (server/.env):
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  DB_HOST=localhost                                                        │
-  │  DB_PORT=3306                                                             │
-  │  DB_USER=bsan_user                                                        │
-  │  DB_PASS=password_aman                                                   │
-  │  DB_NAME=bsan_jatim_monitoring                                            │
-  │  JWT_SECRET=random_64_chars_string                                        │
-  │  JWT_EXPIRES_IN=8h                                                        │
-  │  PORT=3001                                                                │
-  │  NODE_ENV=production                                                      │
-  │  CORS_ORIGINS=http://localhost:5173,https://survasi.com                   │
-  └──────────────────────────────────────────────────────────────────────────┘
+1. Jalankan Backend Server API (Terminal 1):
+   cd server
+   npm run dev
 
-  Frontend (.env.local di root project):
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  VITE_API_BASE_URL=http://localhost:3001/api                             │
-  └──────────────────────────────────────────────────────────────────────────┘
+   Server akan berjalan di: http://localhost:3001
+   Health Check Status   : http://localhost:3001/health
 
-  Generate JWT_SECRET:
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │  node -e "console.log(require('crypto').randomBytes(64).toString('hex'))│
-  └──────────────────────────────────────────────────────────────────────────┘
+2. Jalankan Frontend Web Application (Terminal 2 - New Window):
+   npm run dev
+
+   Buka Browser di: http://localhost:5173
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-API ENDPOINTS REFERENCE
+INFORMASI AKUN LOGIN UNTUK DICOBA
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  BASE URL: http://localhost:3001/api
+1. AKUN ADMIN UTAMA (Akses Penuh Seluruh Sistem):
+   Email    : admin@survasi.com
+   Password : admin
+   Role     : admin
 
-  Auth:
-    POST   /auth/login            → Login (email atau NPSN)
-    POST   /auth/logout           → Logout
-    GET    /auth/me               → Profil user aktif
-    PUT    /auth/password         → Ganti password
+2. AKUN PENGAWAS DEMO:
+   Email    : pengawas@survasi.com
+   Password : pengawas
+   Role     : pengawas
 
-  Dashboard:
-    GET    /dashboard/summary         → KPI cards
-    GET    /dashboard/regional-stats  → Chart per kecamatan
-    GET    /dashboard/kabupaten-stats → Chart per kabupaten
-    GET    /dashboard/activities      → Aktivitas terbaru
-    GET    /dashboard/follow-up       → Sekolah belum mengisi
-    GET    /dashboard/timeseries      → Trend 7 hari
+3. AKUN PENGAWAS / KEPALA SEKOLAH (Hasil Generate NPSN):
+   Login    : NPSN Sekolah (Contoh: 20539940)
+   Password : kata_pertama_nama_sekolah_lowercase + 4_digit_akhir_NPSN
+   Contoh   :
+     - SDN Candi 1    / NPSN: 20512345 ➔ Login: 20512345 | Password: sdn2345
+     - SD AL FALAH    / NPSN: 20539940 ➔ Login: 20539940 | Password: sd9940
+     - MI Al-Hidayah  / NPSN: 60712100 ➔ Login: 60712100 | Password: mi2100
 
-  Sekolah (Master Data):
-    GET    /sekolah                   → List (filter, search, pagination)
-    GET    /sekolah/:id               → Detail sekolah
-    PUT    /sekolah/:id               → Update (admin only)
-    GET    /sekolah/kabupaten         → Dropdown kabupaten
-    GET    /sekolah/kecamatan         → Dropdown kecamatan
-
-  Responden:
-    GET    /responden                 → List responden
-    GET    /responden/summary         → KPI responden
-    GET    /responden/distribusi      → Distribusi posisi
-    GET    /responden/export          → Export semua data
-
-  Analisis:
-    GET    /analisis/modul-progress   → Ring chart modul BSAN
-    GET    /analisis/modul-detail     → Breakdown dimensi SEL
-    GET    /analisis/proporsi         → Proporsi & distribusi modul
-    GET    /analisis/funnel           → Gap funnel 5 tahap
-    GET    /analisis/matriks          → Matriks 4 kuadran
-    GET    /analisis/tantangan        → Top tantangan implementasi
-
-  SEL:
-    GET    /sel/indikator             → Master indikator SEL
-    POST   /sel/indikator             → Tambah indikator (admin)
-    PUT    /sel/indikator/:id         → Edit indikator (admin)
-    DELETE /sel/indikator/:id         → Hapus indikator (admin)
-    POST   /sel/sesi                  → Submit sesi observasi
-    GET    /sel/sesi                  → List sesi observasi
-    GET    /sel/analisis/heatmap      → Heatmap skor kecamatan
-    GET    /sel/analisis/radar/:id    → Radar benchmarking sekolah
-    GET    /sel/analisis/summary      → KPI SEL
-    GET    /sel/analisis/matriks      → Matriks SEL vs kuisioner
-
-  Suara Responden:
-    GET    /suara                     → List komentar
-    POST   /suara                     → Tambah feedback
-    GET    /suara/sentimen            → Distribusi sentimen
-    GET    /suara/narasi-q33          → Narasi hal baik
-    GET    /suara/narasi-q35          → Narasi relevansi BSAN
-
-  Laporan:
-    GET    /laporan/rekap             → Data summary untuk export
-    GET    /laporan/history           → Riwayat export
-    POST   /laporan/generate          → Buat export job
-
-  Setting:
-    GET    /setting/profile           → Profil user
-    PUT    /setting/profile           → Update profil
-    GET    /setting/preferences       → Preferensi
-    PUT    /setting/preferences       → Update preferensi
-    GET    /setting/notifikasi        → List notifikasi
-    GET    /setting/notifikasi/unread-count → Badge count
-    PUT    /setting/notifikasi/:id/read → Mark read
-    PUT    /setting/notifikasi/read-all → Mark all read
-    GET    /setting/users             → Daftar user (admin)
-    POST   /setting/users             → Buat user baru (admin)
-    PUT    /setting/users/:id/toggle  → Toggle aktif/nonaktif (admin)
-    GET    /setting/activity-log      → Log aktivitas
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-TROUBLESHOOTING
+SOLUSI TROUBLESHOOTING & ERROR POPULER
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Error "Access denied for user":
-    → Periksa DB_USER dan DB_PASS di server/.env
+1. Error: "Access denied for user 'root'@'localhost'"
+   ➔ Password MySQL root kamu salah. Sesuaikan `-p` dengan password yang benar.
 
-  Error "Unknown database bsan_jatim_monitoring":
-    → Jalankan dulu langkah 2 (schema.sql)
+2. Error: "Unknown database 'db_survasi'"
+   ➔ Kamu belum membuat database di Langkah 1 (`CREATE DATABASE db_survasi;`).
 
-  Error "Table doesn't exist":
-    → Jalankan semua file seed secara berurutan
+3. Error: "Table 'db_survasi.users' doesn't exist"
+   ➔ Langkah 2 (`schema.sql`) belum dijalankan atau gagal.
 
-  Error CORS di browser:
-    → Pastikan CORS_ORIGINS di server/.env mencantumkan URL frontend
-
-  Login gagal "Email/NPSN atau password salah":
-    → Pastikan seed.sql sudah dijalankan
-    → Coba login dengan: admin@survasi.com / admin
-
-  Script generate-pengawas gagal "bcryptjs not found":
-    → cd server && npm install && cd ..
-    → node database/generate-pengawas-accounts.js
+4. Error: "bcryptjs not found" saat running generator
+   ➔ Jalankan command `cd server && npm install` terlebih dahulu.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Dokumentasi lengkap: database/README.md
-Kontak          : admin@survasi.com
+Dokumentasi Arsitektur Lanjutan : database/README.md
+Repository Project               : https://github.com/git-muhammadarifirfan/survasi.com.git

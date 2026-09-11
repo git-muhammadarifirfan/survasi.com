@@ -29,11 +29,23 @@ async function fetchJson<T>(endpoint: string, options?: RequestInit): Promise<T>
 
   const response = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
 
-  // Auto-redirect on unauthorized
-  if (response.status === 401) {
+  // Auto-redirect on unauthorized (kecuali endpoint login)
+  if (response.status === 401 && !endpoint.startsWith('/auth/login')) {
     localStorage.removeItem(TOKEN_KEY);
     window.location.href = '/login';
     throw new Error('Sesi berakhir. Silakan login kembali.');
+  }
+
+  // Handle 429 Too Many Requests (Rate Limiting / Throttling)
+  if (response.status === 429) {
+    const errorData = await response.json().catch(() => ({ message: 'Terlalu banyak permintaan.' }));
+    const msg = errorData.message || 'Batas pengiriman server terlampaui. Mohon tunggu beberapa saat.';
+    window.dispatchEvent(
+      new CustomEvent('bsan_rate_limit_exceeded', {
+        detail: { message: msg },
+      })
+    );
+    throw new Error(msg);
   }
 
   const data = await response.json().catch(() => ({ message: response.statusText }));
@@ -60,6 +72,19 @@ export const apiClient = {
       body: data ? JSON.stringify(data) : undefined,
     }),
 
+  /** Generic PUT request wrapper */
+  put: <T = any>(endpoint: string, data?: any) =>
+    fetchJson<ApiResponse<T>>(endpoint, {
+      method: 'PUT',
+      body: data ? JSON.stringify(data) : undefined,
+    }),
+
+  /** Generic DELETE request wrapper */
+  delete: <T = any>(endpoint: string) =>
+    fetchJson<ApiResponse<T>>(endpoint, {
+      method: 'DELETE',
+    }),
+
   // ── Auth ──────────────────────────────────────────────────────────────────
   auth: {
     /** Login dengan email atau NPSN sekolah */
@@ -67,6 +92,20 @@ export const apiClient = {
       fetchJson<{ success: boolean; token: string; user: any }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify(credentials),
+      }),
+
+    /** Registrasi akun sekolah baru */
+    registerSekolah: (payload: { nama: string; email: string; password: string; sekolah_id: number }) =>
+      fetchJson<{ success: boolean; token: string; user: any; message: string }>('/auth/register-sekolah', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    /** Registrasi akun pengawas baru */
+    registerPengawas: (payload: { nama: string; email: string; password: string }) =>
+      fetchJson<{ success: boolean; token: string; user: any; message: string }>('/auth/register-pengawas', {
+        method: 'POST',
+        body: JSON.stringify(payload),
       }),
 
     logout: () =>
@@ -83,6 +122,7 @@ export const apiClient = {
         body: JSON.stringify(payload),
       }),
   },
+
 
   // ── Dashboard ──────────────────────────────────────────────────────────────
   dashboard: {
@@ -136,7 +176,52 @@ export const apiClient = {
 
     getKecamatan: (kabupatenId?: number) =>
       fetchJson<ApiResponse<any[]>>(`/sekolah/kecamatan${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
+
+    getOptions: () =>
+      fetchJson<ApiResponse<any[]>>('/sekolah/options'),
+
+    sendReminder: (id: number | string) =>
+      fetchJson<{ success: boolean; is_registered: boolean; message: string }>(`/sekolah/${id}/reminder`, { method: 'POST' }),
+
+    getAnswers: (id: number | string) =>
+      fetchJson<{ success: boolean; responden?: any; data: Array<{ id: number; kode: string; pertanyaan: string; section: string; tipe: string; jawaban: string }> }>(`/sekolah/${id}/answers`),
   },
+
+  // ── Users Management (Admin) ───────────────────────────────────────────────
+  users: {
+    getAll: (params?: { role?: string; search?: string; page?: number; limit?: number }) => {
+      const query = new URLSearchParams(
+        Object.fromEntries(Object.entries(params || {}).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))
+      ).toString();
+      return fetchJson<ListResponse<any>>(`/users?${query}`);
+    },
+
+    create: (data: any) =>
+      fetchJson<{ success: boolean; id: number; message: string }>('/users', { method: 'POST', body: JSON.stringify(data) }),
+
+    update: (id: number, data: any) =>
+      fetchJson<{ success: boolean; message: string }>(`/users/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+    toggleStatus: (id: number, isActive: boolean) =>
+      fetchJson<{ success: boolean; message: string }>(`/users/${id}/status`, { method: 'PUT', body: JSON.stringify({ is_active: isActive }) }),
+
+    delete: (id: number) =>
+      fetchJson<{ success: boolean; message: string }>(`/users/${id}`, { method: 'DELETE' }),
+  },
+
+
+  // ── Notifikasi ─────────────────────────────────────────────────────────────
+  notifikasi: {
+    getAll: () =>
+      fetchJson<{ success: boolean; data: any[]; unread_count: number }>('/notifikasi'),
+
+    markRead: (id: number) =>
+      fetchJson<{ success: boolean }>(`/notifikasi/${id}/read`, { method: 'PUT' }),
+
+    sendBroadcast: (data: { target_role?: string; user_id?: number; judul: string; pesan: string; tipe?: string }) =>
+      fetchJson<{ success: boolean; message: string }>('/notifikasi/send', { method: 'POST', body: JSON.stringify(data) }),
+  },
+
 
   // ── Responden ──────────────────────────────────────────────────────────────
   responden: {
@@ -183,6 +268,32 @@ export const apiClient = {
     getIndikator: () =>
       fetchJson<ApiResponse<any[]>>('/sel/indikator'),
 
+    getDimensi: () =>
+      fetchJson<ApiResponse<any[]>>('/sel/dimensi'),
+
+    createDimensi: (data: { kode?: string; nama: string; modul_bsan_kode?: string; urutan?: number }) =>
+      fetchJson<{ success: boolean; id: number; message: string }>('/sel/dimensi', { method: 'POST', body: JSON.stringify(data) }),
+
+    getKonteks: (kategori?: string, all?: boolean) => {
+      const params = new URLSearchParams();
+      if (kategori) params.append('kategori', kategori);
+      if (all) params.append('all', 'true');
+      const q = params.toString();
+      return fetchJson<ApiResponse<any[]>>(`/sel/konteks${q ? `?${q}` : ''}`);
+    },
+
+    createKonteks: (data: { kategori: string; label: string; value_code?: string; urutan?: number }) =>
+      fetchJson<{ success: boolean; id: number; message: string }>('/sel/konteks', { method: 'POST', body: JSON.stringify(data) }),
+
+    updateKonteks: (id: number, data: any) =>
+      fetchJson<{ success: boolean; message: string }>(`/sel/konteks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+    reorderKonteks: (items: { id: number; urutan: number }[]) =>
+      fetchJson<{ success: boolean; message: string }>('/sel/konteks/reorder', { method: 'PUT', body: JSON.stringify({ items }) }),
+
+    deleteKonteks: (id: number) =>
+      fetchJson<{ success: boolean; message: string }>(`/sel/konteks/${id}`, { method: 'DELETE' }),
+
     createIndikator: (data: any) =>
       fetchJson<{ success: boolean; id: number }>('/sel/indikator', { method: 'POST', body: JSON.stringify(data) }),
 
@@ -193,7 +304,7 @@ export const apiClient = {
       fetchJson<{ success: boolean }>(`/sel/indikator/${id}`, { method: 'DELETE' }),
 
     submitSesi: (payload: any) =>
-      fetchJson<{ success: boolean; sesi_id: number }>('/sel/sesi', { method: 'POST', body: JSON.stringify(payload) }),
+      fetchJson<{ success: boolean; sesi_id: number; message?: string }>('/sel/sesi', { method: 'POST', body: JSON.stringify(payload) }),
 
     getSesi: (kabupatenId?: number) =>
       fetchJson<ApiResponse<any[]>>(`/sel/sesi${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),

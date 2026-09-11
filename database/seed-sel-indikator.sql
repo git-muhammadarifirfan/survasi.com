@@ -11,10 +11,10 @@
 --   Jalankan setelah seed.sql (membutuhkan data sel_dimensi)
 --
 -- @usage
---   mysql -u root -p bsan_jatim_monitoring < database/seed-sel-indikator.sql
+--   mysql -u root -p db_survasi < database/seed-sel-indikator.sql
 -- ═══════════════════════════════════════════════════════════════════════════════
 
-USE bsan_jatim_monitoring;
+USE db_survasi;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- GURU — Kesadaran Diri (dimensi_id = 1)

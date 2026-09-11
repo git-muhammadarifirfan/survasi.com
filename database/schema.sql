@@ -28,11 +28,11 @@
 -- DATABASE CREATION
 -- ─────────────────────────────────────────────────────────────────────────────
 
-CREATE DATABASE IF NOT EXISTS bsan_jatim_monitoring
+CREATE DATABASE IF NOT EXISTS db_survasi
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
-USE bsan_jatim_monitoring;
+USE db_survasi;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- SECTION 1: WILAYAH HIERARCHY

@@ -2,7 +2,7 @@
 -- IMPORT MASTER DATA SATUAN PENDIDIKAN — BSAN JAWA TIMUR
 -- ═══════════════════════════════════════════════════════════════
 
-USE bsan_jatim_monitoring;
+USE db_survasi;
 
 INSERT INTO satuan_pendidikan (npsn, nama, kecamatan_id, jenjang, status_sekolah, akreditasi, alamat, email, telepon, total_guru, total_siswa, latitude, longitude, status_pengisian)
 VALUES

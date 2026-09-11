@@ -12,7 +12,7 @@ const pool = mysql.createPool({
   port: parseInt(process.env.DB_PORT || '3306'),
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASS || '',
-  database: process.env.DB_NAME || 'bsan_jatim_monitoring',
+  database: process.env.DB_NAME || 'db_survasi',
   waitForConnections: true,
   connectionLimit: 25,              // Max 25 simultaneous active DB connections
   maxIdle: 10,                      // Keep up to 10 idle connections for immediate reuse
