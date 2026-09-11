@@ -179,6 +179,12 @@ export const apiClient = {
 
     getOptions: () =>
       fetchJson<ApiResponse<any[]>>('/sekolah/options'),
+
+    sendReminder: (id: number | string) =>
+      fetchJson<{ success: boolean; is_registered: boolean; message: string }>(`/sekolah/${id}/reminder`, { method: 'POST' }),
+
+    getAnswers: (id: number | string) =>
+      fetchJson<{ success: boolean; responden?: any; data: Array<{ id: number; kode: string; pertanyaan: string; section: string; tipe: string; jawaban: string }> }>(`/sekolah/${id}/answers`),
   },
 
   // ── Users Management (Admin) ───────────────────────────────────────────────
@@ -262,6 +268,32 @@ export const apiClient = {
     getIndikator: () =>
       fetchJson<ApiResponse<any[]>>('/sel/indikator'),
 
+    getDimensi: () =>
+      fetchJson<ApiResponse<any[]>>('/sel/dimensi'),
+
+    createDimensi: (data: { kode?: string; nama: string; modul_bsan_kode?: string; urutan?: number }) =>
+      fetchJson<{ success: boolean; id: number; message: string }>('/sel/dimensi', { method: 'POST', body: JSON.stringify(data) }),
+
+    getKonteks: (kategori?: string, all?: boolean) => {
+      const params = new URLSearchParams();
+      if (kategori) params.append('kategori', kategori);
+      if (all) params.append('all', 'true');
+      const q = params.toString();
+      return fetchJson<ApiResponse<any[]>>(`/sel/konteks${q ? `?${q}` : ''}`);
+    },
+
+    createKonteks: (data: { kategori: string; label: string; value_code?: string; urutan?: number }) =>
+      fetchJson<{ success: boolean; id: number; message: string }>('/sel/konteks', { method: 'POST', body: JSON.stringify(data) }),
+
+    updateKonteks: (id: number, data: any) =>
+      fetchJson<{ success: boolean; message: string }>(`/sel/konteks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+    reorderKonteks: (items: { id: number; urutan: number }[]) =>
+      fetchJson<{ success: boolean; message: string }>('/sel/konteks/reorder', { method: 'PUT', body: JSON.stringify({ items }) }),
+
+    deleteKonteks: (id: number) =>
+      fetchJson<{ success: boolean; message: string }>(`/sel/konteks/${id}`, { method: 'DELETE' }),
+
     createIndikator: (data: any) =>
       fetchJson<{ success: boolean; id: number }>('/sel/indikator', { method: 'POST', body: JSON.stringify(data) }),
 
@@ -272,7 +304,7 @@ export const apiClient = {
       fetchJson<{ success: boolean }>(`/sel/indikator/${id}`, { method: 'DELETE' }),
 
     submitSesi: (payload: any) =>
-      fetchJson<{ success: boolean; sesi_id: number }>('/sel/sesi', { method: 'POST', body: JSON.stringify(payload) }),
+      fetchJson<{ success: boolean; sesi_id: number; message?: string }>('/sel/sesi', { method: 'POST', body: JSON.stringify(payload) }),
 
     getSesi: (kabupatenId?: number) =>
       fetchJson<ApiResponse<any[]>>(`/sel/sesi${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),

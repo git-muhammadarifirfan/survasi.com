@@ -44,7 +44,7 @@ export default function DataSatuanPendidikan({ userRole = 'admin' }: DataSatuanP
   const { data: schoolsResponse, isLoading, isError } = useQuery({
     queryKey: ['schoolsProfiles', selectedKec, searchVal, currentPage],
     queryFn: () => apiClient.sekolah.getAll({
-      kecamatan: selectedKec || undefined,
+      kecamatan_id: selectedKec ? Number(selectedKec) : undefined,
       search: searchVal || undefined,
       page: currentPage,
       limit: perPage,

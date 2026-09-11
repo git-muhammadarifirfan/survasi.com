@@ -62,7 +62,7 @@ interface Announcement {
 interface DashboardProps {
   activeKecamatan: string | null;
   setActiveKecamatan: (kec: string | null) => void;
-  userRole: 'admin' | 'pengawas';
+  userRole: 'admin' | 'pengawas' | 'sekolah';
 }
 
 export default function Dashboard({ activeKecamatan, setActiveKecamatan, userRole }: DashboardProps) {
@@ -165,8 +165,8 @@ export default function Dashboard({ activeKecamatan, setActiveKecamatan, userRol
     },
   });
 
-  // ─── SCHOOL USER DASHBOARD ───
-  if (userRole === 'pengawas') {
+  // ─── USER DASHBOARD (Pengawas & Sekolah) ───
+  if (userRole === 'pengawas' || userRole === 'sekolah') {
     const mockProgresses = [100, 75, 40];
     return (
       <div className="space-y-6">

@@ -126,12 +126,23 @@ router.get('/', async (req, res) => {
         sp.last_updated,
         k.nama   AS kecamatan,
         kb.id    AS kabupaten_id,
-        kb.nama  AS kabupaten
+        kb.nama  AS kabupaten,
+        MAX(u.id)     AS user_id,
+        MAX(CASE WHEN u.id IS NOT NULL THEN 1 ELSE 0 END) AS is_registered
       FROM satuan_pendidikan sp
       JOIN kecamatan k ON sp.kecamatan_id = k.id
       JOIN kabupaten kb ON k.kabupaten_id = kb.id
+      LEFT JOIN users u ON (u.sekolah_id = sp.id OR (sp.email IS NOT NULL AND u.email = sp.email) OR u.email = CONCAT(sp.npsn, '@survasi.com')) AND u.is_active = TRUE
       WHERE ${whereSql}
-      ORDER BY k.nama, sp.nama
+      GROUP BY sp.id, sp.npsn, sp.nama, sp.jenjang, sp.status_sekolah, sp.akreditasi, sp.alamat, sp.email, sp.telepon, sp.total_guru, sp.total_siswa, sp.latitude, sp.longitude, sp.status_pengisian, sp.last_updated, k.nama, kb.id, kb.nama
+      ORDER BY 
+        CASE 
+          WHEN sp.status_pengisian = 'sudah' THEN 1
+          WHEN sp.status_pengisian = 'sebagian' THEN 2
+          ELSE 3
+        END ASC,
+        sp.last_updated DESC,
+        sp.nama ASC
       LIMIT ? OFFSET ?
     `, [...params, parseInt(limit), offset]);
 
@@ -196,6 +207,115 @@ router.put('/:id', adminOnly, async (req, res) => {
   } catch (err) {
     console.error('[Sekolah] update error:', err);
     return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── POST /api/sekolah/:id/reminder (Send Real Reminder to School) ──────────
+router.post('/:id/reminder', adminOnly, async (req, res) => {
+  try {
+    const sekolahId = parseInt(req.params.id);
+
+    const [rows] = await pool.execute(`
+      SELECT sp.id, sp.nama AS sekolah_nama, sp.email AS sekolah_email, u.id AS user_id, u.email AS user_email
+      FROM satuan_pendidikan sp
+      LEFT JOIN users u ON (u.sekolah_id = sp.id OR (sp.email IS NOT NULL AND u.email = sp.email) OR u.email = CONCAT(sp.npsn, '@survasi.com')) AND u.is_active = TRUE
+      WHERE sp.id = ?
+    `, [sekolahId]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Sekolah tidak ditemukan.' });
+    }
+
+    const school = rows[0];
+    if (!school.user_id) {
+      return res.status(400).json({
+        success: false,
+        is_registered: false,
+        message: `Sekolah ${school.sekolah_nama} belum memiliki akun terdaftar atau email terhubung. Admin tidak dapat mengirimkan reminder.`
+      });
+    }
+
+    await pool.execute(`
+      INSERT INTO notifikasi (user_id, judul, pesan, tipe)
+      VALUES (?, ?, ?, 'survey_reminder')
+    `, [
+      school.user_id,
+      'Pengingat Pengisian Kuesioner BSAN',
+      `Yth. Tim Pengelola ${school.sekolah_nama}, mohon untuk segera melengkapi Formulir Kuesioner Monitoring BSAN.`
+    ]);
+
+    return res.json({
+      success: true,
+      is_registered: true,
+      message: `Pengingat survei berhasil dikirimkan ke akun ${school.sekolah_nama}!`
+    });
+
+  } catch (err) {
+    console.error('[Sekolah] Send reminder error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal mengirimkan pengingat.' });
+  }
+});
+
+// ─── GET /api/sekolah/:id/answers (Get Real Survey Answers from MySQL) ──────
+router.get('/:id/answers', async (req, res) => {
+  try {
+    const sekolahId = parseInt(req.params.id);
+
+    // Fetch latest responden for this school
+    const [respRows] = await pool.execute(`
+      SELECT id, nama, jenis_kelamin, posisi, submitted_at
+      FROM responden_survey
+      WHERE sekolah_id = ?
+      ORDER BY submitted_at DESC, id DESC
+      LIMIT 1
+    `, [sekolahId]);
+
+    const responden = respRows.length > 0 ? respRows[0] : null;
+
+    // Fetch all active questions along with actual answers (if any)
+    const [rows] = await pool.execute(`
+      SELECT 
+        ps.id AS pertanyaan_id,
+        ps.kode_pertanyaan,
+        ps.teks_pertanyaan,
+        ps.tipe,
+        ps.section,
+        js.jawaban_terstruktur,
+        js.jawaban_bebas,
+        js.jawaban_multi
+      FROM pertanyaan_survey ps
+      LEFT JOIN jawaban_survey js ON ps.id = js.pertanyaan_id AND js.responden_id = ?
+      WHERE ps.is_active = 1
+      ORDER BY ps.urutan ASC
+    `, [responden ? responden.id : 0]);
+
+    const data = rows.map(r => {
+      let val = r.jawaban_terstruktur || r.jawaban_bebas || null;
+      if (!val && r.jawaban_multi) {
+        try {
+          val = JSON.parse(r.jawaban_multi).join(', ');
+        } catch {
+          val = r.jawaban_multi;
+        }
+      }
+      return {
+        id: r.pertanyaan_id,
+        kode: r.kode_pertanyaan,
+        pertanyaan: r.teks_pertanyaan,
+        section: r.section,
+        tipe: r.tipe,
+        jawaban: val || 'Belum diisi oleh responden'
+      };
+    });
+
+    return res.json({
+      success: true,
+      responden,
+      data
+    });
+  } catch (err) {
+    console.error('[Sekolah] Get answers error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal memuat jawaban responden.' });
   }
 });
 

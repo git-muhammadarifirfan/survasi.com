@@ -108,12 +108,12 @@ function AppContent({
 
                 {/* Pengawas & Admin Routes */}
                 <Route path="/responden" element={<RoleGuard userRole={userRole} allowedRoles={['admin', 'pengawas']}><DataResponden activeKecamatan={activeKecamatan} setActiveKecamatan={setActiveKecamatan} searchTerm={searchTerm} onSearchChange={setSearchTerm} /></RoleGuard>} />
-                <Route path="/observasi-sel" element={<RoleGuard userRole={userRole} allowedRoles={['admin', 'pengawas']}><ObservasiSEL userRole={userRole} /></RoleGuard>} />
+                <Route path="/observasi-sel" element={<RoleGuard userRole={userRole} allowedRoles={['admin', 'pengawas']}><ObservasiSEL userRole={userRole as 'admin' | 'pengawas'} /></RoleGuard>} />
                 <Route path="/analisis-sel" element={<RoleGuard userRole={userRole} allowedRoles={['admin', 'pengawas']}><AnalisisSEL /></RoleGuard>} />
 
 
                 {/* Sekolah & Admin Routes (Form Kuisioner BSAN) */}
-                <Route path="/kuisioner" element={<RoleGuard userRole={userRole} allowedRoles={['admin', 'sekolah']}><Kuisioner userRole={userRole} /></RoleGuard>} />
+                <Route path="/kuisioner" element={<RoleGuard userRole={userRole} allowedRoles={['admin', 'sekolah']}><Kuisioner userRole={userRole as 'admin' | 'pengawas' | 'sekolah'} /></RoleGuard>} />
 
                 {/* Fallback wildcard */}
                 <Route path="*" element={<Navigate to="/" replace />} />
@@ -174,6 +174,7 @@ export default function App() {
     setTimeout(() => {
       clearToken();
       localStorage.removeItem('bsan_user_role');
+      localStorage.removeItem('bsan_user_profile');
       setIsLoggedIn(false);
       setIsAuthTransitioning(false);
       notifyToast({
@@ -191,6 +192,9 @@ export default function App() {
       setUserRole(role);
       setIsLoggedIn(true);
       localStorage.setItem('bsan_user_role', role);
+      if (window.location.pathname !== '/') {
+        window.history.pushState(null, '', '/');
+      }
       setIsAuthTransitioning(false);
       notifyToast({
         type: 'success',

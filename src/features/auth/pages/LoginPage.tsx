@@ -65,6 +65,9 @@ export default function Login({ onLogin }: LoginProps) {
 
       if (res.success && res.token) {
         saveToken(res.token);
+        if (res.user) {
+          localStorage.setItem('bsan_user_profile', JSON.stringify(res.user));
+        }
         onLogin(res.user, res.user.role as 'admin' | 'pengawas' | 'sekolah');
       } else {
         setError('Login gagal. Periksa kembali email/NPSN dan password Anda.');
