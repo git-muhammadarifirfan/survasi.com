@@ -77,6 +77,8 @@ app.get('/health', (req, res) => {
 
 // ─── API Routes ───────────────────────────────────────────────────────────────
 app.use('/api/auth',       require('./routes/auth'));
+app.use('/api/users',      require('./routes/users'));
+app.use('/api/notifikasi', require('./routes/notifikasi'));
 app.use('/api/dashboard',  require('./routes/dashboard'));
 app.use('/api/sekolah',    require('./routes/sekolah'));
 app.use('/api/responden',  require('./routes/responden'));
@@ -86,6 +88,7 @@ app.use('/api/survey',     require('./routes/survey'));
 app.use('/api/suara',      require('./routes/suara'));
 app.use('/api/laporan',    require('./routes/laporan'));
 app.use('/api/setting',    require('./routes/setting'));
+
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────
 app.use((req, res) => {
