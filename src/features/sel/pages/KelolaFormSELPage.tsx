@@ -621,16 +621,15 @@ export default function KelolaFormSEL() {
   return (
     <div className="space-y-6 max-w-[1400px] mx-auto animate-fade-in">
       {/* Header Banner */}
-      <div className="rounded-2xl bg-gradient-to-r from-primary via-[#5a6bd4] to-accent p-6 text-white shadow-lg relative overflow-hidden animate-slide-up">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -mr-16 -mt-16" />
-        <div className="relative z-10 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="rounded-2xl bg-surface border border-border p-6 shadow-card animate-slide-up">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="p-3 bg-white/20 rounded-2xl shadow-inner">
-              <Settings2 className="h-6 w-6 text-white" />
+            <div className="p-3 bg-primary/10 text-primary rounded-2xl shrink-0">
+              <Settings2 className="h-6 w-6" />
             </div>
             <div>
-              <h2 className="text-xl font-bold font-display">Manajemen Form Observasi SEL</h2>
-              <p className="text-white/70 text-xs mt-0.5">
+              <h2 className="text-xl font-bold font-display text-text-primary">Manajemen Form Observasi SEL</h2>
+              <p className="text-text-secondary text-xs mt-0.5">
                 Pengaturan pertanyaan indikator dan opsi dimensi pengamatan lapangan
               </p>
             </div>

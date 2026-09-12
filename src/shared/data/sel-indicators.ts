@@ -18,10 +18,10 @@ export const SEL_DIMENSI_LABEL: Record<SELDimensi, string> = {
 };
 
 export const SEL_SKOR_LABEL: Record<SELSkor, { label: string; emoji: string; color: string }> = {
-  1: { label: 'Tidak Terlihat',   emoji: '❌', color: '#EF4444' },
-  2: { label: 'Kadang Terlihat',  emoji: '🌗', color: '#F59E0B' },
-  3: { label: 'Sering Terlihat',  emoji: '✅', color: '#10B981' },
-  4: { label: 'Konsisten Terlihat', emoji: '🌟', color: '#4A57C4' },
+  1: { label: 'Tidak Terlihat',   emoji: '1', color: '#EF4444' },
+  2: { label: 'Kadang Terlihat',  emoji: '2', color: '#F59E0B' },
+  3: { label: 'Sering Terlihat',  emoji: '3', color: '#10B981' },
+  4: { label: 'Konsisten Terlihat', emoji: '4', color: '#0D9488' },
 };
 
 // ────────────────────────────────────────────────────────────

@@ -939,24 +939,23 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
           </div>
         )}
 
-        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-6 lg:p-8 shadow-xl border border-indigo-500/20 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />
-          <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+        <div className="bg-surface text-text-primary rounded-2xl p-6 lg:p-8 shadow-card border border-border">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
             <div className="space-y-3 max-w-2xl">
-              <div className="inline-flex items-center space-x-2 px-3 py-1 bg-indigo-500/20 backdrop-blur-md rounded-full text-[11px] font-semibold text-indigo-300 border border-indigo-400/20">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <div className="inline-flex items-center space-x-2 px-3 py-1 bg-primary/10 rounded-full text-[11px] font-semibold text-primary border border-primary/20">
+                <ShieldCheck className="w-3.5 h-3.5 text-primary" />
                 <span>Instrumen Resmi Evaluasi Mutu BSAN Jawa Timur</span>
               </div>
-              <h1 className="text-2xl lg:text-3xl font-bold tracking-tight text-white font-display">
+              <h1 className="text-2xl lg:text-3xl font-bold tracking-tight text-text-primary font-display">
                 Kuesioner Monitoring BSAN
               </h1>
-              <p className="text-slate-300 text-xs lg:text-sm leading-relaxed">
+              <p className="text-text-secondary text-xs lg:text-sm leading-relaxed">
                 Ukur efektivitas, hambatan, serta adopsi modul Budaya Sekolah Aman dan Nyaman secara langsung.
               </p>
               
-              <div className="flex flex-wrap items-center gap-4 pt-1 text-xs text-slate-300">
-                <span className="flex items-center gap-1.5 font-medium bg-white/5 px-3 py-1.5 rounded-xl border border-white/10">
-                  <FileText className="w-3.5 h-3.5 text-indigo-400" /> {questions.length} Instrumen Soal
+              <div className="flex flex-wrap items-center gap-4 pt-1 text-xs text-text-secondary">
+                <span className="flex items-center gap-1.5 font-medium bg-bg px-3 py-1.5 rounded-xl border border-border">
+                  <FileText className="w-3.5 h-3.5 text-primary" /> {questions.length} Instrumen Soal
                 </span>
                 <span className="flex items-center gap-1.5 font-medium bg-white/5 px-3 py-1.5 rounded-xl border border-white/10">
                   <Save className="w-3.5 h-3.5 text-emerald-400" /> Draft Otomatis
