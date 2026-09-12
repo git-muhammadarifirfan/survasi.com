@@ -25,17 +25,51 @@
 
 require('dotenv').config();
 
-const express = require('express');
-const cors    = require('cors');
-const morgan  = require('morgan');
-const helmet  = require('helmet');
+const express     = require('express');
+const cors        = require('cors');
+const morgan      = require('morgan');
+const helmet      = require('helmet');
+const compression = require('compression');
+const hpp         = require('hpp');
 const { globalLimiter } = require('./middleware/rateLimiter');
 
 const app = express();
 
-// ─── Security Headers (Helmet) & Rate Limiting ────────────────────────────────
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+// Trust reverse proxy (Nginx / Cloudflare) to get real client IP for rate limiters
+app.set('trust proxy', 1);
+
+// ─── HTTP Response Compression (Gzip / Brotli) ──────────────────────────────
+app.use(compression({
+  level: 6,
+  threshold: 1024, // Compress responses larger than 1KB
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
+  }
+}));
+
+// ─── Security Headers (Helmet) & Anti-HPP ────────────────────────────────────
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+      imgSrc: ["'self'", "data:", "blob:", "https:", "http:"],
+      connectSrc: ["'self'", "https:", "http:", "ws:", "wss:"],
+      frameSrc: ["'self'"],
+      objectSrc: ["'none'"],
+    }
+  },
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+  noSniff: true,
+  xssFilter: true,
+}));
 app.disable('x-powered-by'); // Sembunyikan header Express
+app.use(hpp()); // HTTP Parameter Pollution protection
 app.use('/api', globalLimiter); // Apply Rate Limiting ke semua endpoint /api
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
@@ -110,9 +144,11 @@ app.listen(PORT, async () => {
   console.log(`   DB   : ${process.env.DB_NAME}@${process.env.DB_HOST}:${process.env.DB_PORT || 3306}`);
   console.log(`   CORS : ${allowedOrigins.join(', ')}\n`);
 
-  // Auto-patch MySQL DB schema on startup to support 'school_select' type
+  // Auto-patch MySQL DB schema on startup (deleted_at soft-delete & school_select type)
   try {
     const pool = require('./db/pool');
+    
+    // Auto-patch 'school_select' type
     await pool.execute(`
       ALTER TABLE pertanyaan_survey
       MODIFY COLUMN tipe VARCHAR(50) NOT NULL DEFAULT 'text'
@@ -122,7 +158,27 @@ app.listen(PORT, async () => {
       SET tipe = 'school_select'
       WHERE kode_pertanyaan = 'Q4' OR LOWER(teks_pertanyaan) LIKE '%asal sekolah%'
     `).catch(() => {});
-    console.log('✓ Auto-patch MySQL: pertayaan_survey tipe & Q4 school_select updated.');
+
+    // Auto-patch 'deleted_at' soft-delete column across key tables
+    const tables = [
+      'users',
+      'satuan_pendidikan',
+      'responden_survey',
+      'sel_sesi_observasi',
+      'sel_indikator',
+      'pertanyaan_survey',
+      'suara_responden',
+      'tantangan_implementasi'
+    ];
+
+    for (const table of tables) {
+      await pool.execute(`
+        ALTER TABLE ${table}
+        ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL
+      `).catch(() => {}); // Ignored if column already exists
+    }
+
+    console.log('✓ Auto-patch MySQL: Soft delete (deleted_at) columns & Q4 school_select active.');
   } catch (err) {
     console.warn('[Server] DB auto-patch skipped:', err.message);
   }

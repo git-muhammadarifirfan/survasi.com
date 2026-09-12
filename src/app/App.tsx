@@ -35,7 +35,14 @@ const UserManagementPage = lazy(() => import('../features/users/pages/UserManage
 const SurveyManagementPage = lazy(() => import('../features/survey/pages/SurveyManagementPage'));
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { refetchOnWindowFocus: false, staleTime: 1000 * 60 * 5 } },
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      staleTime: 1000 * 60 * 5, // 5 minutes fresh cache
+      gcTime: 1000 * 60 * 15,    // 15 minutes garbage collection
+      retry: 1,
+    },
+  },
 });
 
 function AppContent({

@@ -23,7 +23,7 @@ router.get('/', async (req, res) => {
     const { role, search, page = 1, limit = 50 } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
-    let whereClauses = ['1=1'];
+    let whereClauses = ['u.deleted_at IS NULL'];
     let params = [];
 
     if (role && ['admin', 'pengawas', 'sekolah'].includes(role)) {
@@ -206,7 +206,7 @@ router.put('/:id/status', async (req, res) => {
   }
 });
 
-// ─── DELETE /api/users/:id ───────────────────────────────────────────────────
+// ─── DELETE /api/users/:id (Soft Delete) ──────────────────────────────────────
 router.delete('/:id', async (req, res) => {
   try {
     const userId = req.params.id;
@@ -214,14 +214,25 @@ router.delete('/:id', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Anda tidak dapat menghapus akun Anda sendiri.' });
     }
 
-    // Explicitly disconnect sekolah_id / user integration before deletion
-    await pool.execute('UPDATE users SET sekolah_id = NULL WHERE id = ?', [userId]).catch(() => {});
-    await pool.execute('DELETE FROM users WHERE id = ?', [userId]);
+    // Soft delete user
+    await pool.execute('UPDATE users SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [userId]);
 
-    return res.json({ success: true, message: 'User berhasil dihapus dan integrasi sekolah telah diputuskan.' });
+    return res.json({ success: true, message: 'User berhasil dihapus (soft delete). Data masih bisa dipulihkan jika diperlukan.' });
   } catch (err) {
     console.error('[Users] Delete error:', err);
     return res.status(500).json({ success: false, message: 'Gagal menghapus user.' });
+  }
+});
+
+// ─── POST /api/users/:id/restore (Restore Soft-Deleted User) ─────────────────
+router.post('/:id/restore', async (req, res) => {
+  try {
+    const userId = req.params.id;
+    await pool.execute('UPDATE users SET deleted_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [userId]);
+    return res.json({ success: true, message: 'User berhasil dipulihkan (restore).' });
+  } catch (err) {
+    console.error('[Users] Restore error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal memulihkan user.' });
   }
 });
 

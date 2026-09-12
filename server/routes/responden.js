@@ -29,7 +29,7 @@ router.get('/summary', async (req, res) => {
         SUM(CASE WHEN rs.status_implementasi = 'sudah' THEN 1 ELSE 0 END) AS implementasi_penuh,
         COUNT(DISTINCT rs.sekolah_id) AS sekolah_terlibat
       FROM responden_survey rs
-      WHERE (? IS NULL OR rs.kabupaten_id = ?)
+      WHERE (? IS NULL OR rs.kabupaten_id = ?) AND rs.deleted_at IS NULL
     `, [kabupatenId, kabupatenId]);
 
     return res.json({ success: true, data: rows[0] });
@@ -50,7 +50,7 @@ router.get('/distribusi', async (req, res) => {
         COUNT(*) AS jumlah,
         ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 1) AS persen
       FROM responden_survey rs
-      WHERE (? IS NULL OR rs.kabupaten_id = ?)
+      WHERE (? IS NULL OR rs.kabupaten_id = ?) AND rs.deleted_at IS NULL
       GROUP BY rs.posisi
       ORDER BY jumlah DESC
     `, [kabupatenId, kabupatenId]);
@@ -78,7 +78,7 @@ router.get('/export', async (req, res) => {
       JOIN satuan_pendidikan sp ON rs.sekolah_id = sp.id
       JOIN kecamatan k ON rs.kecamatan_id = k.id
       JOIN kabupaten kb ON rs.kabupaten_id = kb.id
-      WHERE (? IS NULL OR kb.id = ?)
+      WHERE (? IS NULL OR kb.id = ?) AND rs.deleted_at IS NULL
       ORDER BY kb.nama, k.nama, sp.nama, rs.nama
     `, [kabupatenId, kabupatenId]);
 
@@ -119,7 +119,8 @@ router.get('/', async (req, res) => {
       JOIN satuan_pendidikan sp ON rs.sekolah_id = sp.id
       JOIN kecamatan k ON rs.kecamatan_id = k.id
       JOIN kabupaten kb ON rs.kabupaten_id = kb.id
-      WHERE (? IS NULL OR kb.id = ?)
+      WHERE rs.deleted_at IS NULL
+        AND (? IS NULL OR kb.id = ?)
         AND (? IS NULL OR k.id  = ?)
         AND (? IS NULL OR rs.penerima_modul = ?)
         AND (? IS NULL OR rs.status_implementasi = ?)
@@ -138,7 +139,8 @@ router.get('/', async (req, res) => {
       JOIN satuan_pendidikan sp ON rs.sekolah_id = sp.id
       JOIN kecamatan k ON rs.kecamatan_id = k.id
       JOIN kabupaten kb ON rs.kabupaten_id = kb.id
-      WHERE (? IS NULL OR kb.id = ?)
+      WHERE rs.deleted_at IS NULL
+        AND (? IS NULL OR kb.id = ?)
         AND (? IS NULL OR k.id  = ?)
         AND (? IS NULL OR rs.penerima_modul = ?)
         AND (? IS NULL OR rs.status_implementasi = ?)
@@ -157,6 +159,30 @@ router.get('/', async (req, res) => {
   } catch (err) {
     console.error('[Responden] list error:', err);
     return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── DELETE /api/responden/:id (Soft Delete) ─────────────────────────────────
+router.delete('/:id', async (req, res) => {
+  try {
+    const respId = req.params.id;
+    await pool.execute('UPDATE responden_survey SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', [respId]);
+    return res.json({ success: true, message: 'Data responden berhasil dihapus (soft delete). Data dapat dipulihkan jika diperlukan.' });
+  } catch (err) {
+    console.error('[Responden] Delete error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal menghapus responden.' });
+  }
+});
+
+// ─── POST /api/responden/:id/restore (Restore Soft-Deleted Responden) ────────
+router.post('/:id/restore', async (req, res) => {
+  try {
+    const respId = req.params.id;
+    await pool.execute('UPDATE responden_survey SET deleted_at = NULL WHERE id = ?', [respId]);
+    return res.json({ success: true, message: 'Data responden berhasil dipulihkan (restore).' });
+  } catch (err) {
+    console.error('[Responden] Restore error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal memulihkan responden.' });
   }
 });
 
