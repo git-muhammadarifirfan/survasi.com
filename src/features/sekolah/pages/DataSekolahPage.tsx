@@ -8,9 +8,11 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '../../../shared/services/api-client';
-import { KECAMATAN_LIST } from '../../../shared/data/data-source';
+import { database } from '../../../shared/data/data-source';
 import { Search, Filter, Building2, CheckCircle2, Award, Users, ChevronLeft, ChevronRight, Phone, Mail, Save, X, Edit, MapPin } from 'lucide-react';
 import CustomSelect from '../../../shared/components/CustomSelect';
+import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
+import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
 
 interface DataSatuanPendidikanProps {
   userRole?: 'admin' | 'pengawas' | 'sekolah';
@@ -37,8 +39,14 @@ export default function DataSatuanPendidikan({ userRole = 'admin' }: DataSatuanP
   const [currentPage, setCurrentPage] = useState(1);
   const perPage = 12;
 
+  const { data: dbKecamatanList = [] } = useQuery({
+    queryKey: ['db-kecamatan-sekolah'],
+    queryFn: () => database.getKecamatanList(),
+    staleTime: 5 * 60 * 1000,
+  });
+
   // Query real MySQL API for master data sekolah
-  const { data: schoolsResponse, isLoading, isError } = useQuery({
+  const { data: schoolsResponse, isLoading, isError, refetch } = useQuery({
     queryKey: ['schoolsProfiles', selectedKec, searchVal, currentPage],
     queryFn: () => apiClient.sekolah.getAll({
       kecamatan_id: selectedKec ? Number(selectedKec) : undefined,
@@ -52,9 +60,16 @@ export default function DataSatuanPendidikan({ userRole = 'admin' }: DataSatuanP
   const totalItems = schoolsResponse?.total || schools.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / perPage));
 
-  // ---------------------------------------------------
-  // DIREKTORI SATUAN PENDIDIKAN (ALL ROLES: ADMIN, PENGAWAS, SEKOLAH)
-  // ---------------------------------------------------
+  if (isError) {
+    return (
+      <ConnectionErrorCard
+        title="Gagal Memuat Data Sekolah"
+        message="Gagal terhubung ke server."
+        onRetry={() => refetch()}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -87,7 +102,7 @@ export default function DataSatuanPendidikan({ userRole = 'admin' }: DataSatuanP
             <CustomSelect
               options={[
                 { value: '', label: 'Semua Kecamatan' },
-                ...KECAMATAN_LIST.map((k) => ({ value: `Kec. ${k}`, label: `Kec. ${k}` }))
+                ...dbKecamatanList.map((k) => ({ value: k.nama, label: `Kec. ${k.nama.replace(/^Kec\.\s*/i, '')}` }))
               ]}
               value={selectedKec}
               onChange={(val) => { setSelectedKec(val); setCurrentPage(1); }}
@@ -101,9 +116,9 @@ export default function DataSatuanPendidikan({ userRole = 'admin' }: DataSatuanP
       {/* Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {isLoading ? (
-          <div className="col-span-full py-16 text-center text-sm text-text-secondary animate-pulse">Memuat profil sekolah dari database...</div>
-        ) : isError ? (
-          <div className="col-span-full py-16 text-center text-sm text-status-belum font-semibold">Gagal memuat data sekolah.</div>
+          <div className="col-span-full py-16 text-center">
+            <ThreeDotsLoader text="Memuat profil sekolah..." />
+          </div>
         ) : schools.length === 0 ? (
           <div className="col-span-full py-16 text-center text-sm text-text-secondary">Tidak ditemukan profil sekolah.</div>
         ) : (

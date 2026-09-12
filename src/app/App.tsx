@@ -10,6 +10,7 @@ import ThreeDotsLoader from '../shared/components/ThreeDotsLoader';
 import ThrottleToast from '../shared/components/ThrottleToast';
 import NotificationToastContainer, { notifyToast } from '../shared/components/NotificationToast';
 import RoleGuard, { type UserRole } from '../shared/components/RoleGuard';
+import { OfflineGlobalBanner } from '../shared/components/ConnectionErrorCard';
 
 
 // Lazy Loaded Feature Pages
@@ -45,7 +46,6 @@ function AppContent({
   setActiveKecamatan,
   searchTerm,
   setSearchTerm,
-  handleSwitchRole,
   handleLogout
 }: {
   userRole: UserRole;
@@ -55,7 +55,6 @@ function AppContent({
   setActiveKecamatan: (val: string | null) => void;
   searchTerm: string;
   setSearchTerm: (val: string) => void;
-  handleSwitchRole: (role: UserRole) => void;
   handleLogout: () => void;
 }) {
   useEffect(() => {
@@ -80,7 +79,6 @@ function AppContent({
           searchTerm={searchTerm}
           onSearchChange={setSearchTerm}
           userRole={userRole}
-          onSwitchRole={handleSwitchRole}
           onLogout={handleLogout}
         />
         <main className="flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar">
@@ -108,7 +106,6 @@ function AppContent({
                 <Route path="/responden" element={<RoleGuard userRole={userRole} allowedRoles={['admin', 'pengawas']}><DataResponden activeKecamatan={activeKecamatan} setActiveKecamatan={setActiveKecamatan} searchTerm={searchTerm} onSearchChange={setSearchTerm} /></RoleGuard>} />
                 <Route path="/observasi-sel" element={<RoleGuard userRole={userRole} allowedRoles={['admin', 'pengawas']}><ObservasiSEL userRole={userRole as 'admin' | 'pengawas'} /></RoleGuard>} />
                 <Route path="/analisis-sel" element={<RoleGuard userRole={userRole} allowedRoles={['admin', 'pengawas']}><AnalisisSEL /></RoleGuard>} />
-
 
                 {/* Sekolah & Admin Routes (Form Kuisioner BSAN) */}
                 <Route path="/kuisioner" element={<RoleGuard userRole={userRole} allowedRoles={['admin', 'sekolah']}><Kuisioner userRole={userRole as 'admin' | 'pengawas' | 'sekolah'} /></RoleGuard>} />
@@ -156,16 +153,6 @@ export default function App() {
     }
   }, []);
 
-  const handleSwitchRole = (role: UserRole) => {
-    setUserRole(role);
-    localStorage.setItem('bsan_user_role', role);
-    notifyToast({
-      type: 'info',
-      title: 'Peran Diubah',
-      message: `Akses aktif Anda sekarang adalah ${role.toUpperCase()}.`,
-    });
-  };
-
   const handleLogout = () => {
     setTransitionText('Mengakhiri Sesi & Keluar Account...');
     setIsAuthTransitioning(true);
@@ -183,50 +170,76 @@ export default function App() {
     }, 1000);
   };
 
+  // Store pending login user info for toast after navigation
+  const [pendingLoginUser, setPendingLoginUser] = useState<any>(null);
+
   const handleLogin = (user: any, role: UserRole) => {
     setTransitionText('Menyiapkan Dashboard & Autentikasi Account...');
     setIsAuthTransitioning(true);
+    setPendingLoginUser(user);
     setTimeout(() => {
       setUserRole(role);
-      setIsLoggedIn(true);
       localStorage.setItem('bsan_user_role', role);
-      if (window.location.pathname !== '/') {
-        window.history.pushState(null, '', '/');
-      }
+      setIsLoggedIn(true);
       setIsAuthTransitioning(false);
+    }, 1000);
+  };
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <Router>
+        <OfflineGlobalBanner />
+        <NotificationToastContainer />
+        {isAuthTransitioning && <ThreeDotsLoader fullScreen={true} text={transitionText} size="lg" />}
+        <Suspense fallback={<ThreeDotsLoader fullScreen={true} text="Memuat Halaman..." />}>
+          <Routes>
+            {/* Public Auth Routes — redirect to dashboard if already logged in */}
+            <Route path="/login" element={isLoggedIn ? <Navigate to="/" replace /> : <Login onLogin={handleLogin} />} />
+            <Route path="/register" element={isLoggedIn ? <Navigate to="/" replace /> : <Login onLogin={handleLogin} />} />
+            <Route path="/forgot-password" element={isLoggedIn ? <Navigate to="/" replace /> : <Login onLogin={handleLogin} />} />
+            <Route path="/verify-otp" element={isLoggedIn ? <Navigate to="/" replace /> : <Login onLogin={handleLogin} />} />
+
+            {/* Protected App Routes */}
+            <Route
+              path="/*"
+              element={
+                !isLoggedIn ? (
+                  <Navigate to="/login" replace />
+                ) : (
+                  <AppContent 
+                    userRole={userRole}
+                    sidebarOpen={sidebarOpen}
+                    setSidebarOpen={setSidebarOpen}
+                    activeKecamatan={activeKecamatan}
+                    setActiveKecamatan={setActiveKecamatan}
+                    searchTerm={searchTerm}
+                    setSearchTerm={setSearchTerm}
+                    handleLogout={handleLogout}
+                  />
+                )
+              }
+            />
+          </Routes>
+        </Suspense>
+        {/* Show welcome toast after successful login navigation */}
+        <LoginToastTrigger user={pendingLoginUser} isLoggedIn={isLoggedIn} onDone={() => setPendingLoginUser(null)} />
+      </Router>
+    </QueryClientProvider>
+  );
+}
+
+/** Tiny helper to fire welcome toast after login state settles */
+function LoginToastTrigger({ user, isLoggedIn, onDone }: { user: any; isLoggedIn: boolean; onDone: () => void }) {
+  useEffect(() => {
+    if (user && isLoggedIn) {
       notifyToast({
         type: 'success',
         title: 'Login Berhasil!',
         message: `Selamat datang kembali, ${user?.nama || 'Pengguna'}!`,
       });
-    }, 1000);
-  };
-
-  return (
-    <>
-      <NotificationToastContainer />
-      {isAuthTransitioning && <ThreeDotsLoader fullScreen={true} text={transitionText} size="lg" />}
-      {!isLoggedIn ? (
-        <Suspense fallback={<ThreeDotsLoader fullScreen={true} text="Memuat Halaman Login..." />}>
-          <Login onLogin={handleLogin} />
-        </Suspense>
-      ) : (
-        <QueryClientProvider client={queryClient}>
-          <Router>
-            <AppContent 
-              userRole={userRole}
-              sidebarOpen={sidebarOpen}
-              setSidebarOpen={setSidebarOpen}
-              activeKecamatan={activeKecamatan}
-              setActiveKecamatan={setActiveKecamatan}
-              searchTerm={searchTerm}
-              setSearchTerm={setSearchTerm}
-              handleSwitchRole={handleSwitchRole}
-              handleLogout={handleLogout}
-            />
-          </Router>
-        </QueryClientProvider>
-      )}
-    </>
-  );
+      onDone();
+    }
+  }, [user, isLoggedIn]);
+  return null;
 }
+

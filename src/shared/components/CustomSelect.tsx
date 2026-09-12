@@ -109,7 +109,7 @@ export default function CustomSelect({
 
       {/* Popover Menu - Untitled UI Card & Section Style */}
       {isOpen && (
-        <div className="absolute right-0 left-0 top-full mt-2 z-[999] max-h-64 overflow-y-auto rounded-2xl border border-border bg-surface p-1.5 shadow-xl shadow-slate-900/10 animate-in fade-in zoom-in-95 duration-150 text-xs">
+        <div className="absolute right-0 left-0 top-full mt-2 z-[999999] max-h-64 overflow-y-auto rounded-2xl border border-border bg-surface p-1.5 shadow-xl shadow-slate-900/10 animate-in fade-in zoom-in-95 duration-150 text-xs">
           {enableSearch && options.length > 5 && (
             <div className="p-1 border-b border-border/60 mb-1 sticky top-0 bg-surface z-10">
               <div className="relative">
@@ -136,7 +136,13 @@ export default function CustomSelect({
                     {opt.dividerBefore && <div className="h-px bg-border/60 my-1" />}
                     <button
                       type="button"
-                      onClick={() => {
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
                         onChange(opt.value);
                         setIsOpen(false);
                         setSearch('');

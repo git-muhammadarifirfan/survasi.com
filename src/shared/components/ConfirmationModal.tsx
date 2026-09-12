@@ -40,18 +40,18 @@ export default function ConfirmationModal({
       Icon: AlertTriangle,
     },
     info: {
-      iconBg: 'bg-indigo-50 text-indigo-600 border-indigo-100',
-      buttonBg: 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20',
+      iconBg: 'bg-teal-50 text-teal-600 border-teal-100',
+      buttonBg: 'bg-teal-600 hover:bg-teal-700 text-white shadow-teal-600/20',
       Icon: AlertTriangle,
     },
     primary: {
-      iconBg: 'bg-indigo-50 text-indigo-600 border-indigo-100',
-      buttonBg: 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20',
+      iconBg: 'bg-teal-50 text-teal-600 border-teal-100',
+      buttonBg: 'bg-teal-600 hover:bg-teal-700 text-white shadow-teal-600/20',
       Icon: AlertTriangle,
     },
     purple: {
-      iconBg: 'bg-purple-50 text-purple-600 border-purple-100',
-      buttonBg: 'bg-purple-600 hover:bg-purple-700 text-white shadow-purple-600/20',
+      iconBg: 'bg-emerald-50 text-emerald-600 border-emerald-100',
+      buttonBg: 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20',
       Icon: AlertTriangle,
     },
   }[variant];

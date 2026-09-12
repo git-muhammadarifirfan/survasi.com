@@ -27,7 +27,7 @@ export function LoadingIndicator({
     <div className={`inline-flex items-center gap-2.5 ${className}`}>
       {type === 'line-spinner' && (
         <svg
-          className={`animate-spin ${colorClass || 'text-indigo-600'} ${sizeClasses}`}
+          className={`animate-spin ${colorClass || 'text-teal-600'} ${sizeClasses}`}
           style={colorStyle}
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
@@ -44,15 +44,15 @@ export function LoadingIndicator({
 
       {type === 'line-simple' && (
         <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden relative">
-          <div className="w-1/2 h-full bg-indigo-600 rounded-full animate-[shimmer_1.5s_infinite]" style={colorStyle} />
+          <div className="w-1/2 h-full bg-teal-600 rounded-full animate-[shimmer_1.5s_infinite]" style={colorStyle} />
         </div>
       )}
 
       {type === 'dot-circle' && (
         <div className="flex items-center gap-1">
-          <div className="w-2 h-2 rounded-full bg-indigo-600 animate-bounce [animation-delay:-0.3s]" style={colorStyle} />
-          <div className="w-2 h-2 rounded-full bg-indigo-600 animate-bounce [animation-delay:-0.15s]" style={colorStyle} />
-          <div className="w-2 h-2 rounded-full bg-indigo-600 animate-bounce" style={colorStyle} />
+          <div className="w-2 h-2 rounded-full bg-teal-600 animate-bounce [animation-delay:-0.3s]" style={colorStyle} />
+          <div className="w-2 h-2 rounded-full bg-teal-600 animate-bounce [animation-delay:-0.15s]" style={colorStyle} />
+          <div className="w-2 h-2 rounded-full bg-teal-600 animate-bounce" style={colorStyle} />
         </div>
       )}
 
