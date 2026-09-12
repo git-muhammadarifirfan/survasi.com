@@ -258,7 +258,13 @@ export default function Login({ onLogin }: LoginProps) {
         message: `Kode verifikasi OTP 6-digit telah dikirimkan ke email ${regEmail}. Silakan periksa kotak masuk (inbox) atau folder spam email Anda.`,
       });
     } catch (err: any) {
-      setError(err.message || 'Pendaftaran gagal. Silakan periksa data Anda dan coba lagi.');
+      const errMsg = err.message || 'Pendaftaran gagal. Silakan periksa data Anda dan coba lagi.';
+      setError(errMsg);
+      notifyToast({
+        type: 'warning',
+        title: 'Pendaftaran Tidak Dapat Dilanjutkan',
+        message: errMsg,
+      });
     } finally {
       setIsLoading(false);
     }

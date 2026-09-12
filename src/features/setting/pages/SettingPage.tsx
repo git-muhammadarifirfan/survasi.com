@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
   User, Shield, Bell, Globe, Save, Lock, Key, RefreshCw, Check, CheckCircle2,
-  AlertCircle, Eye, EyeOff, Laptop, Building2, Phone, Mail, FileText, BadgeCheck
+  AlertCircle, Eye, EyeOff, Laptop, Building2, Phone, Mail, FileText, BadgeCheck,
+  Send, Sparkles, ArrowRight, RotateCcw
 } from 'lucide-react';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import { notifyToast } from '../../../shared/components/NotificationToast';
@@ -25,14 +26,15 @@ export default function Setting() {
     jabatan: '',
   });
 
-  // Security & Password Form State
-  const [passwords, setPasswords] = useState({
-    old: '',
-    new: '',
-    confirm: '',
-  });
-  const [showPass, setShowPass] = useState({ old: false, new: false, confirm: false });
-  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  // Security & OTP Password State
+  const [securityStep, setSecurityStep] = useState<'input_pass' | 'verify_otp'>('input_pass');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [showPass, setShowPass] = useState({ new: false, confirm: false });
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+  const [resendTimer, setResendTimer] = useState(0);
 
   // Notification Preferences State
   const [notif, setNotif] = useState({
@@ -48,6 +50,15 @@ export default function Setting() {
     theme: 'light',
     autoSaveInterval: 30,
   });
+
+  // Resend Timer Countdown Effect
+  useEffect(() => {
+    let timer: any;
+    if (resendTimer > 0) {
+      timer = setTimeout(() => setResendTimer(resendTimer - 1), 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [resendTimer]);
 
   // Load User Configuration & Profile from Database
   useEffect(() => {
@@ -101,7 +112,7 @@ export default function Setting() {
               jabatan: parsed.jabatan || '',
             });
             setUserRole(parsed.role || 'admin');
-          } catch { }
+          } catch {}
         }
       } finally {
         if (isMounted) setIsLoading(false);
@@ -127,7 +138,7 @@ export default function Setting() {
     return { score: 100, label: 'Sangat Kuat', color: 'bg-emerald-500' };
   };
 
-  const pwdStrength = computePasswordStrength(passwords.new);
+  const pwdStrength = computePasswordStrength(newPassword);
 
   // Handle Profile Update Submission
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -142,13 +153,12 @@ export default function Setting() {
       });
 
       if (res?.success) {
-        // Local state sync
         const updatedProfile = {
           ...profile,
           role: userRole,
         };
         localStorage.setItem('bsan_user_profile', JSON.stringify(updatedProfile));
-
+        
         notifyToast({
           type: 'success',
           title: 'Profil Berhasil Diperbarui',
@@ -172,51 +182,94 @@ export default function Setting() {
     }
   };
 
-  // Handle Password Change Submission
-  const handleChangePassword = async (e: React.FormEvent) => {
+  // STEP 1: Request OTP Email for Change Password
+  const handleRequestPasswordOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!passwords.old) {
-      notifyToast({ type: 'warning', title: 'Perhatian', message: 'Masukkan kata sandi lama Anda.' });
-      return;
-    }
-    if (!passwords.new || passwords.new.length < 6) {
+    if (!newPassword || newPassword.length < 6) {
       notifyToast({ type: 'warning', title: 'Perhatian', message: 'Kata sandi baru minimal 6 karakter.' });
       return;
     }
-    if (passwords.new !== passwords.confirm) {
-      notifyToast({ type: 'error', title: 'Validasi Gagal', message: 'Konfirmasi kata sandi baru tidak cocok.' });
+    if (newPassword !== confirmPassword) {
+      notifyToast({ type: 'error', title: 'Validasi Gagal', message: 'Konfirmasi kata sandi tidak cocok.' });
       return;
     }
 
-    setIsChangingPassword(true);
-    try {
-      const res = await apiClient.auth.changePassword({
-        current_password: passwords.old,
-        new_password: passwords.new,
-      });
+    if (!profile.email) {
+      notifyToast({ type: 'error', title: 'Email Tidak Ditemukan', message: 'Alamat email profil Anda tidak valid.' });
+      return;
+    }
 
+    setIsSendingOtp(true);
+    try {
+      const res = await apiClient.auth.forgotPassword({ email: profile.email });
       if (res?.success) {
-        setPasswords({ old: '', new: '', confirm: '' });
+        setSecurityStep('verify_otp');
+        setResendTimer(30);
         notifyToast({
-          type: 'success',
-          title: 'Sandi Diubah',
-          message: 'Kata sandi akun Anda telah berhasil diperbarui.',
+          type: 'info',
+          title: 'Kode OTP Dikirim',
+          message: `Kode verifikasi 6-digit telah dikirimkan ke email ${profile.email}. Silakan cek inbox/spam Anda.`,
         });
       } else {
         notifyToast({
           type: 'error',
-          title: 'Gagal Mengubah Sandi',
-          message: res?.message || 'Password lama tidak sesuai.',
+          title: 'Gagal Mengirim OTP',
+          message: res?.message || 'Gagal mengirimkan kode OTP verifikasi ke email.',
         });
       }
     } catch (err: any) {
       notifyToast({
         type: 'error',
-        title: 'Error Server',
-        message: err.message || 'Terjadi kesalahan pada server.',
+        title: 'Gagal Mengirim OTP',
+        message: err.message || 'Gagal terhubung ke server pengirim email.',
       });
     } finally {
-      setIsChangingPassword(false);
+      setIsSendingOtp(false);
+    }
+  };
+
+  // STEP 2: Verify OTP & Save New Password
+  const handleVerifyOtpAndChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanOtp = otpCode.trim();
+    if (!cleanOtp || cleanOtp.length < 6) {
+      notifyToast({ type: 'warning', title: 'Perhatian', message: 'Masukkan 6-digit kode OTP dengan lengkap.' });
+      return;
+    }
+
+    setIsVerifyingOtp(true);
+    try {
+      const res = await apiClient.auth.resetPassword({
+        email: profile.email,
+        otp_code: cleanOtp,
+        new_password: newPassword,
+      });
+
+      if (res?.success) {
+        setSecurityStep('input_pass');
+        setNewPassword('');
+        setConfirmPassword('');
+        setOtpCode('');
+        notifyToast({
+          type: 'success',
+          title: 'Kata Sandi Diperbarui!',
+          message: 'Kata sandi akun Anda telah berhasil diperbarui di database.',
+        });
+      } else {
+        notifyToast({
+          type: 'error',
+          title: 'Verifikasi Gagal',
+          message: res?.message || 'Kode OTP salah atau sudah kedaluwarsa.',
+        });
+      }
+    } catch (err: any) {
+      notifyToast({
+        type: 'error',
+        title: 'Gagal Verifikasi',
+        message: err.message || 'Kode OTP salah atau sudah kedaluwarsa.',
+      });
+    } finally {
+      setIsVerifyingOtp(false);
     }
   };
 
@@ -271,7 +324,7 @@ export default function Setting() {
             <span>Pengaturan Akun & Profil Stakeholder</span>
           </h2>
           <p className="text-xs text-text-secondary mt-0.5">
-            Kelola profil identitas, keamanan akun, dan preferensi dasbor sistem.
+            Kelola profil identitas, keamanan akun via OTP email, dan preferensi dasbor sistem.
           </p>
         </div>
 
@@ -294,7 +347,7 @@ export default function Setting() {
         <div className="lg:col-span-4 xl:col-span-3 rounded-2xl bg-surface p-3 shadow-card border border-border space-y-1 h-fit">
           {[
             { id: 'profile', label: 'Profil Pengguna', icon: User, desc: 'Identitas & Peran' },
-            { id: 'security', label: 'Keamanan & Sandi', icon: Shield, desc: 'Kata Sandi & Akses' },
+            { id: 'security', label: 'Keamanan & Sandi (OTP)', icon: Shield, desc: 'Verifikasi Email OTP' },
             { id: 'notif', label: 'Kanal Notifikasi', icon: Bell, desc: 'Email Alert & Laporan' },
             { id: 'pref', label: 'Preferensi Dasbor', icon: Globe, desc: 'Bahasa & Autotimer' },
           ].map((tab) => {
@@ -305,10 +358,11 @@ export default function Setting() {
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id as SettingTabType)}
-                className={`w-full flex items-center space-x-3 p-3 rounded-xl text-xs font-semibold transition-all cursor-pointer ${isActive
-                  ? 'bg-primary text-white shadow-md shadow-primary/20 scale-[1.01]'
-                  : 'text-text-secondary hover:bg-bg hover:text-text-primary'
-                  }`}
+                className={`w-full flex items-center space-x-3 p-3 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                  isActive
+                    ? 'bg-primary text-white shadow-md shadow-primary/20 scale-[1.01]'
+                    : 'text-text-secondary hover:bg-bg hover:text-text-primary'
+                }`}
               >
                 <div className={`p-2 rounded-lg ${isActive ? 'bg-white/20 text-white' : 'bg-bg text-text-secondary'}`}>
                   <Icon className="h-4 w-4" />
@@ -337,6 +391,7 @@ export default function Setting() {
                   <User className="h-4 w-4 text-primary" />
                   <span>Informasi Identitas Diri</span>
                 </h3>
+                <span className="text-[10px] text-text-secondary">Terhubung ke Database</span>
               </div>
 
               {/* Profile Card Header */}
@@ -471,106 +526,209 @@ export default function Setting() {
           )}
 
           {/* ═══════════════════════════════════════════════════════════════
-              TAB 2: KEAMANAN & SANDI
+              TAB 2: KEAMANAN & SANDI (VERIFIKASI KODE OTP EMAIL)
              ═══════════════════════════════════════════════════════════════ */}
           {activeTab === 'security' && (
-            <form onSubmit={handleChangePassword} className="space-y-6 text-xs animate-fade-in">
+            <div className="space-y-6 text-xs animate-fade-in">
               <div className="flex items-center justify-between border-b border-border pb-3">
                 <h3 className="font-bold text-sm text-text-primary font-display flex items-center space-x-2">
                   <Shield className="h-4 w-4 text-primary" />
-                  <span>Keamanan Akun & Perubahan Kata Sandi</span>
+                  <span>Perubahan Kata Sandi Berbasis Verifikasi OTP Email</span>
                 </h3>
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary border border-primary/20">
+                  Brevo Mailer Protected
+                </span>
               </div>
 
-              <div className="space-y-4 max-w-md">
-                <div className="space-y-1">
-                  <label className="font-bold text-text-secondary uppercase text-[10px]">Kata Sandi Saat Ini *</label>
-                  <div className="relative">
-                    <input
-                      type={showPass.old ? 'text' : 'password'}
-                      required
-                      value={passwords.old}
-                      onChange={(e) => setPasswords({ ...passwords, old: e.target.value })}
-                      placeholder="Masukkan sandi lama"
-                      className="w-full rounded-xl border border-border bg-bg pl-3 pr-10 py-2.5 text-xs text-text-primary focus:border-primary focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPass({ ...showPass, old: !showPass.old })}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
-                    >
-                      {showPass.old ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
+              <div className="p-4 rounded-2xl bg-primary/5 border border-primary/20 space-y-1 text-text-primary">
+                <p className="font-bold text-xs flex items-center gap-1.5 text-primary">
+                  <Mail className="h-4 w-4" />
+                  <span>Keamanan Verifikasi Email 2-Langkah</span>
+                </p>
+                <p className="text-[11px] text-text-secondary leading-relaxed">
+                  Demi keamanan akun Anda, perubahan kata sandi membutuhkan verifikasi <strong>Kode OTP 6-Digit</strong> yang akan dikirimkan langsung ke alamat email terdaftar: <strong>{profile.email}</strong>.
+                </p>
+              </div>
 
-                <div className="space-y-1">
-                  <label className="font-bold text-text-secondary uppercase text-[10px]">Kata Sandi Baru *</label>
-                  <div className="relative">
+              {/* STEP 1: FORM INPUT KATA SANDI BARU & TOMBOL KIRIM OTP */}
+              {securityStep === 'input_pass' && (
+                <form onSubmit={handleRequestPasswordOtp} className="space-y-4 max-w-md animate-fade-in">
+                  <div className="space-y-1">
+                    <label className="font-bold text-text-secondary uppercase text-[10px]">Email Terdaftar Akun</label>
                     <input
-                      type={showPass.new ? 'text' : 'password'}
-                      required
-                      value={passwords.new}
-                      onChange={(e) => setPasswords({ ...passwords, new: e.target.value })}
-                      placeholder="Minimal 6 karakter"
-                      className="w-full rounded-xl border border-border bg-bg pl-3 pr-10 py-2.5 text-xs text-text-primary focus:border-primary focus:outline-none"
+                      type="email"
+                      disabled
+                      value={profile.email}
+                      className="w-full rounded-xl border border-border bg-border/30 px-3 py-2.5 text-xs text-text-secondary font-medium cursor-not-allowed"
                     />
-                    <button
-                      type="button"
-                      onClick={() => setShowPass({ ...showPass, new: !showPass.new })}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
-                    >
-                      {showPass.new ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
                   </div>
 
-                  {passwords.new && (
-                    <div className="pt-2 space-y-1 animate-fade-in">
-                      <div className="flex justify-between items-center text-[10px] font-bold">
-                        <span className="text-text-secondary uppercase">Kekuatan Sandi:</span>
-                        <span className="text-text-primary">{pwdStrength.label}</span>
-                      </div>
-                      <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
-                        <div
-                          className={`h-full ${pwdStrength.color} transition-all duration-300`}
-                          style={{ width: `${pwdStrength.score}%` }}
-                        />
-                      </div>
+                  <div className="space-y-1">
+                    <label className="font-bold text-text-secondary uppercase text-[10px]">Kata Sandi Baru *</label>
+                    <div className="relative">
+                      <input
+                        type={showPass.new ? 'text' : 'password'}
+                        required
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="Minimal 6 karakter"
+                        className="w-full rounded-xl border border-border bg-bg pl-3 pr-10 py-2.5 text-xs text-text-primary focus:border-primary focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPass({ ...showPass, new: !showPass.new })}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
+                      >
+                        {showPass.new ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
                     </div>
-                  )}
-                </div>
 
-                <div className="space-y-1">
-                  <label className="font-bold text-text-secondary uppercase text-[10px]">Konfirmasi Kata Sandi Baru *</label>
-                  <div className="relative">
-                    <input
-                      type={showPass.confirm ? 'text' : 'password'}
-                      required
-                      value={passwords.confirm}
-                      onChange={(e) => setPasswords({ ...passwords, confirm: e.target.value })}
-                      placeholder="Ulangi kata sandi baru"
-                      className="w-full rounded-xl border border-border bg-bg pl-3 pr-10 py-2.5 text-xs text-text-primary focus:border-primary focus:outline-none"
-                    />
+                    {newPassword && (
+                      <div className="pt-2 space-y-1 animate-fade-in">
+                        <div className="flex justify-between items-center text-[10px] font-bold">
+                          <span className="text-text-secondary uppercase">Kekuatan Sandi:</span>
+                          <span className="text-text-primary">{pwdStrength.label}</span>
+                        </div>
+                        <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${pwdStrength.color} transition-all duration-300`}
+                            style={{ width: `${pwdStrength.score}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="font-bold text-text-secondary uppercase text-[10px]">Konfirmasi Kata Sandi Baru *</label>
+                    <div className="relative">
+                      <input
+                        type={showPass.confirm ? 'text' : 'password'}
+                        required
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="Ulangi kata sandi baru"
+                        className="w-full rounded-xl border border-border bg-bg pl-3 pr-10 py-2.5 text-xs text-text-primary focus:border-primary focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPass({ ...showPass, confirm: !showPass.confirm })}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
+                      >
+                        {showPass.confirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="pt-2">
                     <button
-                      type="button"
-                      onClick={() => setShowPass({ ...showPass, confirm: !showPass.confirm })}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
+                      type="submit"
+                      disabled={isSendingOtp}
+                      className="w-full flex items-center justify-center space-x-2 rounded-2xl bg-primary hover:bg-primary-dark disabled:bg-primary/70 text-white py-3 font-bold shadow-lg shadow-primary/20 transition-all cursor-pointer hover:scale-[1.01]"
                     >
-                      {showPass.confirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      {isSendingOtp ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                          <span>Mengirim Kode OTP ke Email...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="h-4 w-4" />
+                          <span>Kirim Kode OTP Verifikasi Ke Email</span>
+                        </>
+                      )}
                     </button>
                   </div>
-                </div>
-              </div>
+                </form>
+              )}
+
+              {/* STEP 2: VERIFIKASI KODE OTP 6-DIGIT */}
+              {securityStep === 'verify_otp' && (
+                <form onSubmit={handleVerifyOtpAndChangePassword} className="space-y-4 max-w-md animate-fade-in">
+                  <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-950 space-y-1">
+                    <p className="font-bold text-xs flex items-center gap-1.5 text-emerald-700">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      <span>Kode OTP 6-Digit Telah Dikirim!</span>
+                    </p>
+                    <p className="text-[11px] text-emerald-900 leading-relaxed">
+                      Silakan buka email <strong>{profile.email}</strong> dan masukkan 6-digit kode OTP di bawah ini untuk mengonfirmasi perubahan kata sandi baru Anda.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="font-bold text-text-secondary uppercase text-[10px]">Kode OTP 6-Digit Verifikasi *</label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={6}
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
+                      placeholder="Contoh: 849201"
+                      className="w-full text-center tracking-[8px] font-mono text-lg font-black rounded-xl border border-border bg-bg py-2.5 text-text-primary focus:border-primary focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setSecurityStep('input_pass')}
+                      className="text-text-secondary hover:text-text-primary font-medium flex items-center gap-1 cursor-pointer"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      <span>Ubah kata sandi baru</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={resendTimer > 0 || isSendingOtp}
+                      onClick={handleRequestPasswordOtp}
+                      className="text-primary hover:underline font-bold disabled:text-text-secondary disabled:no-underline cursor-pointer"
+                    >
+                      {resendTimer > 0 ? `Kirim ulang OTP (${resendTimer}s)` : 'Kirim ulang OTP'}
+                    </button>
+                  </div>
+
+                  <div className="pt-2 flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSecurityStep('input_pass');
+                        setOtpCode('');
+                      }}
+                      className="flex-1 py-2.5 rounded-2xl border border-border text-text-secondary hover:bg-bg font-bold cursor-pointer transition"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isVerifyingOtp}
+                      className="flex-2 flex items-center justify-center space-x-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-600/70 text-white py-2.5 font-bold shadow-lg shadow-emerald-600/20 transition-all cursor-pointer hover:scale-[1.01]"
+                    >
+                      {isVerifyingOtp ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 animate-spin" />
+                          <span>Memverifikasi...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Key className="h-4 w-4" />
+                          <span>Verifikasi & Simpan Sandi</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
 
               {/* Active Session Card */}
-              <div className="space-y-2 pt-2 border-t border-border">
+              <div className="space-y-2 pt-4 border-t border-border">
                 <h4 className="font-bold text-xs text-text-primary uppercase tracking-wider">Perangkat & Sesi Aktif</h4>
                 <div className="p-3.5 rounded-xl bg-bg/40 border border-border flex items-center justify-between">
                   <div className="flex items-center space-x-3">
                     <Laptop className="h-5 w-5 text-primary shrink-0" />
                     <div>
                       <p className="font-bold text-text-primary text-xs">Sesi Login Perangkat Saat Ini</p>
-                      <p className="text-[10px] text-text-secondary">Terautentikasi via Token JWT • Terproteksi</p>
+                      <p className="text-[10px] text-text-secondary">Terautentikasi via Token JWT • Terproteksi Brevo OTP</p>
                     </div>
                   </div>
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
@@ -578,28 +736,7 @@ export default function Setting() {
                   </span>
                 </div>
               </div>
-
-              {/* Submit Button */}
-              <div className="flex items-center justify-end pt-4 border-t border-border">
-                <button
-                  type="submit"
-                  disabled={isChangingPassword}
-                  className="flex items-center space-x-2 rounded-2xl bg-primary hover:bg-primary-dark disabled:bg-primary/70 text-white px-6 py-2.5 font-bold shadow-lg shadow-primary/20 transition-all cursor-pointer hover:scale-[1.01]"
-                >
-                  {isChangingPassword ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      <span>Memperbarui...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Key className="h-4 w-4" />
-                      <span>Perbarui Kata Sandi</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
+            </div>
           )}
 
           {/* ═══════════════════════════════════════════════════════════════
