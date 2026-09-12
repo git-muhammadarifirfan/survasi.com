@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# AUTOMATED DEPLOYMENT SCRIPT — BSAN JAWA TIMUR (CLOUDPANEL VM)
+# AUTOMATED DEPLOYMENT SCRIPT — BSAN JAWA TIMUR (DOCKER & CLOUDPANEL VM)
 # ==============================================================================
 set -e
 
@@ -40,22 +40,28 @@ EOF
 echo "🗄️ Importing Complete MySQL Database (schema & all data) into dbsurvasi..."
 if [ -f "database/production_dump.sql" ]; then
     mysql -u survasi -padmin.id01 dbsurvasi < database/production_dump.sql 2>/dev/null || true
-else
-    mysql -u survasi -padmin.id01 dbsurvasi < database/schema.sql 2>/dev/null || true
-    mysql -u survasi -padmin.id01 dbsurvasi < database/seed.sql 2>/dev/null || true
+elif [ -f "export_db/import_ke_production.sql" ]; then
+    mysql -u survasi -padmin.id01 dbsurvasi < export_db/import_ke_production.sql 2>/dev/null || true
 fi
 
-# 5. Install Dependencies & Build Frontend
-echo "📦 Installing npm dependencies & building production bundle..."
-npm install -g pnpm pm2 2>/dev/null || true
-pnpm install || npm install
-pnpm build || npm run build
+# 5. Check for Docker support
+if command -v docker &> /dev/null && docker info &> /dev/null; then
+    echo "🐳 Docker Engine detected! Deploying via Docker Compose (Container 1: Nginx Web, Container 2: Express API)..."
+    docker compose -f deployment/docker-compose.yml up -d --build
+    echo "✅ DOCKER CONTAINERS DEPLOYED & RUNNING!"
+else
+    echo "⚡ Deploying via Native CloudPanel PM2 & Node Engine..."
+    echo "📦 Installing npm dependencies & building production bundle..."
+    npm install -g pnpm pm2 2>/dev/null || true
+    pnpm install || npm install
+    pnpm build || npm run build
 
-# 6. Install Server Dependencies & Start PM2
-cd server
-npm install
-pm2 start ../deployment/ecosystem.config.cjs 2>/dev/null || pm2 restart bsan-jatim-api 2>/dev/null || node index.js &
-pm2 save 2>/dev/null || true
+    # 6. Install Server Dependencies & Start PM2
+    cd server
+    npm install
+    pm2 start ../deployment/ecosystem.config.cjs 2>/dev/null || pm2 restart bsan-jatim-api 2>/dev/null || node index.js &
+    pm2 save 2>/dev/null || true
+fi
 
 echo -e "\n✅ DEPLOYMENT COMPLETED SUCCESSFULLY!"
 echo "🌐 Site is live on https://survasi.com"
