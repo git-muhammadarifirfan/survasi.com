@@ -25,7 +25,7 @@ export const ThreeDotsLoader: React.FC<ThreeDotsLoaderProps> = ({
     <div className={`flex flex-col items-center justify-center space-y-4 ${className}`}>
       {type === 'line-spinner' && (
         <svg
-          className={`animate-spin text-indigo-600 ${spinnerSizes}`}
+          className={`animate-spin text-teal-600 ${spinnerSizes}`}
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
           viewBox="0 0 24 24"
@@ -41,15 +41,15 @@ export const ThreeDotsLoader: React.FC<ThreeDotsLoaderProps> = ({
 
       {type === 'line-simple' && (
         <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden relative border border-slate-200/60">
-          <div className="w-1/2 h-full bg-indigo-600 rounded-full animate-[shimmer_1.5s_infinite]" />
+          <div className="w-1/2 h-full bg-teal-600 rounded-full animate-[shimmer_1.5s_infinite]" />
         </div>
       )}
 
       {type === 'dot-circle' && (
         <div className="flex items-center space-x-2">
-          <div className="w-3.5 h-3.5 rounded-full bg-indigo-600 animate-bounce [animation-delay:-0.3s] shadow-xs" />
-          <div className="w-3.5 h-3.5 rounded-full bg-indigo-500 animate-bounce [animation-delay:-0.15s] shadow-xs" />
-          <div className="w-3.5 h-3.5 rounded-full bg-indigo-400 animate-bounce shadow-xs" />
+          <div className="w-3.5 h-3.5 rounded-full bg-teal-600 animate-bounce [animation-delay:-0.3s] shadow-xs" />
+          <div className="w-3.5 h-3.5 rounded-full bg-teal-500 animate-bounce [animation-delay:-0.15s] shadow-xs" />
+          <div className="w-3.5 h-3.5 rounded-full bg-teal-400 animate-bounce shadow-xs" />
         </div>
       )}
 
