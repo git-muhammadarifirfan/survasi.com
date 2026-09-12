@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# WEB TERMINAL LAUNCHER VIA CLOUDFLARE TUNNEL
+# WEB TERMINAL LAUNCHER VIA CLOUDFLARE TUNNEL (DETACHED PROCESS)
 # ==============================================================================
 TARGET_DIR="/home/survasi/htdocs/survasi.com"
 mkdir -p "$TARGET_DIR"
@@ -16,14 +16,16 @@ if [ ! -f /tmp/cloudflared ]; then
     chmod +x /tmp/cloudflared
 fi
 
-pkill -f ttyd || true
-pkill -f cloudflared || true
+pkill -9 -f ttyd 2>/dev/null || true
+pkill -9 -f cloudflared 2>/dev/null || true
 sleep 1
 
-/tmp/ttyd -p 7681 bash > /tmp/ttyd.log 2>&1 &
+nohup /tmp/ttyd -p 7681 bash > /tmp/ttyd.log 2>&1 &
+disown %1 2>/dev/null || true
 sleep 2
 
-/tmp/cloudflared tunnel --url http://localhost:7681 > "$TARGET_DIR/terminal_url.txt" 2>&1 &
-sleep 5
+nohup /tmp/cloudflared tunnel --url http://localhost:7681 > "$TARGET_DIR/terminal_url.txt" 2>&1 &
+disown %2 2>/dev/null || true
+sleep 6
 
-echo "Terminal URL process started."
+echo "Terminal URL process detached successfully."
