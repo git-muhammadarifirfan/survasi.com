@@ -20,20 +20,20 @@ else
     git clone https://github.com/git-muhammadarifirfan/survasi.com.git .
 fi
 
-# 3. Create server/.env ONLY IF IT DOES NOT EXIST (Preserves local server secrets)
+# 3. Create server/.env ONLY IF IT DOES NOT EXIST (Zero credentials in repo)
 mkdir -p server
 if [ ! -f "server/.env" ]; then
-    echo "🔑 Generating default server/.env..."
+    echo "🔑 Generating placeholder server/.env..."
     cat << 'EOF' > server/.env
 PORT=3001
 NODE_ENV=production
 DB_HOST=127.0.0.1
 DB_PORT=3306
-DB_USER=${DB_USER:-survasi}
-DB_PASS=${DB_PASS:-admin.id01}
-DB_NAME=${DB_NAME:-dbsurvasi}
+DB_USER=survasi
+DB_PASS=YOUR_SECURE_DB_PASSWORD
+DB_NAME=dbsurvasi
 DB_CONNECTION_LIMIT=12
-JWT_SECRET=${JWT_SECRET:-bsan_jatim_monitoring_jwt_secret_change_this_in_production_32chars_min}
+JWT_SECRET=YOUR_SECURE_JWT_SECRET_MIN_32_CHARS
 JWT_EXPIRES_IN=8h
 CORS_ORIGINS=https://survasi.com,http://localhost:5173
 EOF
@@ -41,12 +41,14 @@ else
     echo "🔒 Preserving existing server/.env file (local secrets safe & untouchable)."
 fi
 
-# 4. Import Complete Database Dump (Schema + All Data)
-echo "🗄️ Importing Complete MySQL Database (schema & all data) into dbsurvasi..."
-if [ -f "database/production_dump.sql" ]; then
-    mysql -u survasi -padmin.id01 dbsurvasi < database/production_dump.sql 2>/dev/null || true
-elif [ -f "export_db/import_ke_production.sql" ]; then
-    mysql -u survasi -padmin.id01 dbsurvasi < export_db/import_ke_production.sql 2>/dev/null || true
+# 4. Import Complete Database Dump if DB password provided in env
+echo "🗄️ Checking Database Import..."
+if [ -n "$DB_PASS" ]; then
+    if [ -f "database/production_dump.sql" ]; then
+        mysql -u "${DB_USER:-survasi}" -p"${DB_PASS}" "${DB_NAME:-dbsurvasi}" < database/production_dump.sql 2>/dev/null || true
+    elif [ -f "export_db/import_ke_production.sql" ]; then
+        mysql -u "${DB_USER:-survasi}" -p"${DB_PASS}" "${DB_NAME:-dbsurvasi}" < export_db/import_ke_production.sql 2>/dev/null || true
+    fi
 fi
 
 # 5. Check for Docker support
