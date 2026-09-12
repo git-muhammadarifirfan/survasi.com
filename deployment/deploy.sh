@@ -20,21 +20,26 @@ else
     git clone https://github.com/git-muhammadarifirfan/survasi.com.git .
 fi
 
-# 3. Create / Update server/.env
+# 3. Create server/.env ONLY IF IT DOES NOT EXIST (Preserves local server secrets)
 mkdir -p server
-cat << 'EOF' > server/.env
+if [ ! -f "server/.env" ]; then
+    echo "🔑 Generating default server/.env..."
+    cat << 'EOF' > server/.env
 PORT=3001
 NODE_ENV=production
 DB_HOST=127.0.0.1
 DB_PORT=3306
-DB_USER=survasi
-DB_PASS=admin.id01
-DB_NAME=dbsurvasi
+DB_USER=${DB_USER:-survasi}
+DB_PASS=${DB_PASS:-admin.id01}
+DB_NAME=${DB_NAME:-dbsurvasi}
 DB_CONNECTION_LIMIT=12
-JWT_SECRET=bsan_jatim_monitoring_jwt_secret_change_this_in_production_32chars_min
+JWT_SECRET=${JWT_SECRET:-bsan_jatim_monitoring_jwt_secret_change_this_in_production_32chars_min}
 JWT_EXPIRES_IN=8h
 CORS_ORIGINS=https://survasi.com,http://localhost:5173
 EOF
+else
+    echo "🔒 Preserving existing server/.env file (local secrets safe & untouchable)."
+fi
 
 # 4. Import Complete Database Dump (Schema + All Data)
 echo "🗄️ Importing Complete MySQL Database (schema & all data) into dbsurvasi..."
