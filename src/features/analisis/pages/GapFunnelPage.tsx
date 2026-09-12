@@ -13,6 +13,8 @@ import { Layers, HelpCircle, ArrowDownRight, CheckCircle, AlertCircle, Info, Fil
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 
 import CustomSelect from '../../../shared/components/CustomSelect';
+import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
+import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
 
 interface GapFunnelProps {
   activeKecamatan: string | null;
@@ -22,7 +24,7 @@ export default function GapFunnel({ activeKecamatan }: GapFunnelProps) {
   const [selectedKab, setSelectedKab] = useState<string>('');
   const [selectedKec, setSelectedKec] = useState<string>('');
 
-  const { data: funnelSteps = [], isLoading } = useQuery({
+  const { data: funnelSteps = [], isLoading, isError, error: fetchError, refetch } = useQuery({
     queryKey: ['funnelData', selectedKab, selectedKec, activeKecamatan],
     queryFn: () => database.getGapFunnelData({ kabupaten: selectedKab || undefined, kecamatan: selectedKec || activeKecamatan || undefined })
   });
@@ -31,6 +33,16 @@ export default function GapFunnel({ activeKecamatan }: GapFunnelProps) {
     { value: '', label: 'Semua Wilayah Kabupaten' },
     ...KABUPATEN_LIST.map(k => ({ value: k.name, label: k.name }))
   ];
+
+  if (isError) {
+    return (
+      <ConnectionErrorCard
+        title="Gagal Memuat Gap Funnel"
+        message={(fetchError as any)?.message || 'Gagal terhubung ke server.'}
+        onRetry={() => refetch()}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6 animate-tab-content">
@@ -77,8 +89,8 @@ export default function GapFunnel({ activeKecamatan }: GapFunnelProps) {
           </div>
 
           {isLoading ? (
-            <div className="h-80 flex items-center justify-center text-xs font-bold text-slate-400 uppercase tracking-wider">
-              Memuat data corong...
+            <div className="py-20 text-center">
+              <ThreeDotsLoader text="Memuat data corong..." />
             </div>
           ) : (
             <div key={`funnel-${selectedKab}-${selectedKec}`} className="space-y-5 pt-2">

@@ -50,7 +50,7 @@ export default function NotificationManagerModal({ isOpen, onClose }: Notificati
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
       <div className="w-full max-w-lg bg-surface rounded-2xl p-6 shadow-2xl border border-border space-y-4 animate-scale-in">
         <div className="flex items-center justify-between border-b border-border pb-3">
           <h3 className="font-bold font-display text-text-primary text-base flex items-center space-x-2">
@@ -93,7 +93,7 @@ export default function NotificationManagerModal({ isOpen, onClose }: Notificati
                 type="button"
                 onClick={() => setTargetRole('admin')}
                 className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all ${
-                  targetRole === 'admin' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-bg text-text-secondary hover:text-text-primary'
+                  targetRole === 'admin' ? 'bg-teal-600 text-white border-teal-600' : 'bg-bg text-text-secondary hover:text-text-primary'
                 }`}
               >
                 Admin

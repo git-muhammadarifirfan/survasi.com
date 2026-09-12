@@ -14,6 +14,8 @@ import { Download, Filter, CheckCircle2, Building2, ChevronLeft, ChevronRight, X
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import { notifyToast } from '../../../shared/components/NotificationToast';
+import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
+import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
 
 interface ColumnOption {
   id: string;
@@ -60,13 +62,26 @@ export default function LaporanEkspor() {
     { id: 'm5', label: 'Modul 5 (Kemitraan Orang Tua)', category: 'survey' },
   ];
 
-  const { data: schools = [], isLoading } = useQuery({
-    queryKey: ['schoolsExportMain', selectedKab, selectedKec, selectedStatus],
+  const { data: dbKabupatenList = [] } = useQuery({
+    queryKey: ['db-kabupaten-laporan'],
+    queryFn: () => database.getKabupatenList(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: dbKecamatanList = [] } = useQuery({
+    queryKey: ['db-kecamatan-laporan', selectedKab],
+    queryFn: () => database.getKecamatanList(selectedKab),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Query database schools for preview table
+  const { data: schools = [], isLoading, isError, error: fetchError, refetch } = useQuery({
+    queryKey: ['schools-laporan', selectedKab, selectedKec, selectedStatus],
     queryFn: () => database.getSchools({
       kabupaten: selectedKab || undefined,
       kecamatan: selectedKec || undefined,
-      status: selectedStatus || undefined
-    })
+      status: selectedStatus || undefined,
+    }),
   });
 
   const total = schools.length;
@@ -203,6 +218,16 @@ export default function LaporanEkspor() {
     }, 1200);
   };
 
+  if (isError) {
+    return (
+      <ConnectionErrorCard
+        title="Gagal Memuat Data Laporan"
+        message={(fetchError as any)?.message || 'Gagal terhubung ke server.'}
+        onRetry={() => refetch()}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
 
@@ -284,9 +309,10 @@ export default function LaporanEkspor() {
               onChange={(val) => { setSelectedKab(val); setSelectedKec(''); setCurrentPage(1); }}
               options={[
                 { value: '', label: 'Semua Kabupaten (Target Jatim)' },
-                ...KABUPATEN_LIST.map(k => ({ value: k.name, label: k.name }))
+                ...dbKabupatenList.map(k => ({ value: k.nama, label: k.nama }))
               ]}
               placeholder="Semua Kabupaten (Target Jatim)"
+              enableSearch={true}
               size="md"
             />
           </div>
@@ -298,9 +324,10 @@ export default function LaporanEkspor() {
               onChange={(val) => { setSelectedKec(val); setCurrentPage(1); }}
               options={[
                 { value: '', label: 'Semua Kecamatan' },
-                ...KECAMATAN_LIST.map(k => ({ value: `Kec. ${k}`, label: `Kec. ${k}` }))
+                ...dbKecamatanList.map(k => ({ value: k.nama, label: `Kec. ${k.nama.replace(/^Kec\.\s*/i, '')}` }))
               ]}
               placeholder="Semua Kecamatan"
+              enableSearch={true}
               size="md"
             />
           </div>
@@ -339,7 +366,9 @@ export default function LaporanEkspor() {
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-text-secondary animate-pulse">Memuat data...</td>
+                  <td colSpan={7} className="py-12 text-center">
+                    <ThreeDotsLoader text="Memuat data laporan sekolah..." />
+                  </td>
                 </tr>
               ) : paged.length === 0 ? (
                 <tr>

@@ -60,10 +60,10 @@ export default function NotificationToastContainer() {
       const customEvt = e as CustomEvent<{ message?: string }>;
       notifyToast({
         type: 'warning',
-        title: 'Proteksi Server & Rate Limiting',
+        title: 'Batas Akses Terlampaui',
         message:
           customEvt.detail?.message ||
-          'Terlalu banyak permintaan! Sistem membatasi akses berulang untuk menjaga kestabilan server.',
+          'Terlalu banyak tindakan dalam waktu singkat. Mohon tunggu beberapa saat sebelum mencoba lagi.',
       });
     };
 
@@ -160,10 +160,10 @@ export default function NotificationToastContainer() {
             badgeText: 'PERHATIAN',
           },
           info: {
-            bgIcon: 'bg-indigo-500/10 text-indigo-600 border-indigo-500/20',
-            badge: 'bg-indigo-500 text-white',
-            bar: 'bg-indigo-500',
-            border: 'border-indigo-200/80',
+            bgIcon: 'bg-teal-500/10 text-teal-600 border-teal-500/20',
+            badge: 'bg-teal-500 text-white',
+            bar: 'bg-teal-500',
+            border: 'border-teal-200/80',
             Icon: Info,
             badgeText: 'INFORMASI',
           },

@@ -355,6 +355,36 @@ export const database = {
     status?: string;
     search?: string;
   }): Promise<School[]> => {
+    // 1. Try public getOptions endpoint first (unauthenticated friendly for registration dropdown)
+    try {
+      const optRes = await apiClient.sekolah.getOptions().catch(() => null);
+      if (optRes?.success && Array.isArray(optRes.data) && optRes.data.length > 0) {
+        return optRes.data.map((s: any) => ({
+          id: String(s.id),
+          npsn: s.npsn || '',
+          nama: s.nama,
+          kecamatan: s.kecamatan_nama || s.kecamatan || '',
+          kabupaten: s.kabupaten_nama || s.kabupaten || '',
+          status: 'belum',
+          jenjang: s.jenjang || 'SD',
+          statusSekolah: 'Negeri',
+          totalGuru: 0,
+          totalSiswa: 0,
+          akreditasi: 'A',
+          alamat: '',
+          email: '',
+          telepon: '',
+          user_id: null,
+          is_registered: false,
+          x: 0,
+          y: 0,
+        }));
+      }
+    } catch (err) {
+      console.warn('[data-source] getOptions fallback:', err);
+    }
+
+    // 2. Try full authenticated getAll query if available
     try {
       const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
       const res = await apiClient.sekolah.getAll({
@@ -388,6 +418,7 @@ export const database = {
     } catch (err) {
       console.warn('[data-source] getSchools fallback:', err);
     }
+
     return schoolsData.filter(s => {
       let match = true;
       if (filters?.kabupaten && s.kabupaten !== filters.kabupaten) match = false;
@@ -399,6 +430,50 @@ export const database = {
       }
       return match;
     });
+  },
+
+  getKabupatenList: async (): Promise<Array<{ id: number; nama: string }>> => {
+    try {
+      const res = await apiClient.sekolah.getKabupaten();
+      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+        return res.data.map((item: any) => ({
+          id: item.id || KABUPATEN_NAME_TO_ID[item.nama || item.name || item] || 1,
+          nama: item.nama || item.name || String(item),
+        }));
+      }
+    } catch (err) {
+      console.warn('[data-source] getKabupatenList API fallback:', err);
+    }
+    // Extract unique kabupaten from real-time database schools
+    const schools = await database.getSchools();
+    const uniqueKabs = Array.from(new Set(schools.map(s => s.kabupaten).filter(Boolean)));
+    if (uniqueKabs.length > 0) {
+      return uniqueKabs.map((kName, idx) => ({ id: KABUPATEN_NAME_TO_ID[kName] || (idx + 1), nama: kName }));
+    }
+    return KABUPATEN_LIST.map(k => ({ id: KABUPATEN_NAME_TO_ID[k.name] || 1, nama: k.name }));
+  },
+
+  getKecamatanList: async (kabupaten?: string): Promise<Array<{ id: number; nama: string; kabupaten_nama?: string }>> => {
+    try {
+      const kabIdNum = kabupaten ? KABUPATEN_NAME_TO_ID[kabupaten] : undefined;
+      const res = await apiClient.sekolah.getKecamatan(kabIdNum);
+      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+        return res.data.map((item: any, idx: number) => ({
+          id: item.id || (idx + 1),
+          nama: item.nama || item.name || String(item),
+          kabupaten_nama: item.kabupaten_nama || kabupaten,
+        }));
+      }
+    } catch (err) {
+      console.warn('[data-source] getKecamatanList API fallback:', err);
+    }
+    // Extract unique kecamatan from real-time database schools
+    const schools = await database.getSchools({ kabupaten });
+    const uniqueKec = Array.from(new Set(schools.map(s => s.kecamatan).filter(Boolean)));
+    if (uniqueKec.length > 0) {
+      return uniqueKec.map((kName, idx) => ({ id: idx + 1, nama: kName, kabupaten_nama: kabupaten }));
+    }
+    return KECAMATAN_LIST.map((k, idx) => ({ id: idx + 1, nama: k, kabupaten_nama: kabupaten }));
   },
 
   getRespondents: async (filters?: {

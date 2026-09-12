@@ -15,6 +15,8 @@ import { Grid3X3, Building2, X, Search } from 'lucide-react';
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 
 import CustomSelect from '../../../shared/components/CustomSelect';
+import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
+import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
 
 interface MatriksKuadranProps {
   activeKecamatan: string | null;
@@ -25,7 +27,7 @@ export default function MatriksKuadran({ activeKecamatan }: MatriksKuadranProps)
   const [selectedPoint, setSelectedPoint] = useState<MatrixPoint | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const { data: matrixData = [], isLoading } = useQuery({
+  const { data: matrixData = [], isLoading, isError, error: fetchError, refetch } = useQuery({
     queryKey: ['matrixData', selectedKab, activeKecamatan],
     queryFn: () => database.getMatriksKuadranData({ kabupaten: selectedKab || undefined, kecamatan: activeKecamatan || undefined })
   });
@@ -46,6 +48,16 @@ export default function MatriksKuadran({ activeKecamatan }: MatriksKuadranProps)
     if (p.implementation >= 60 && p.readiness < 60) return '#F59E0B';
     return '#EF4444';
   };
+
+  if (isError) {
+    return (
+      <ConnectionErrorCard
+        title="Gagal Memuat Matriks Kuadran"
+        message={(fetchError as any)?.message || 'Gagal terhubung ke server.'}
+        onRetry={() => refetch()}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6 animate-tab-content">
@@ -137,8 +149,8 @@ export default function MatriksKuadran({ activeKecamatan }: MatriksKuadranProps)
         </div>
 
         {isLoading ? (
-          <div className="h-96 flex items-center justify-center text-xs font-bold text-slate-400 uppercase tracking-wider">
-            Memuat matriks kuadran...
+          <div className="py-20 text-center">
+            <ThreeDotsLoader text="Memuat matriks kuadran..." />
           </div>
         ) : (
           <div className="h-[430px]">

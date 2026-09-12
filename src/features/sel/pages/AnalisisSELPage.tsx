@@ -26,6 +26,8 @@ import {
 } from 'lucide-react';
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 import CustomSelect from '../../../shared/components/CustomSelect';
+import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
+import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
 
 // ─── Helpers ───────────────────────────────────────────────────
 
@@ -210,7 +212,13 @@ export default function AnalisisSEL() {
   const selectedKabObj = KABUPATEN_LIST.find(k => k.name === selectedKab || k.id === selectedKab);
   const kabIdNumber = KABUPATEN_NAME_TO_ID[selectedKab] ?? (selectedKabObj ? KABUPATEN_NAME_TO_ID[selectedKabObj.name] : undefined);
 
-  const { data: scoresRes, isLoading } = useQuery({
+  const { data: dbKabupatenList = [] } = useQuery({
+    queryKey: ['db-kabupaten-analisis-sel'],
+    queryFn: () => database.getKabupatenList(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: scoresRes, isLoading, isError, error: fetchError, refetch } = useQuery({
     queryKey: ['selScoresApi', selectedKab],
     queryFn: () => database.getSELScores({ kabupaten: selectedKab || undefined }),
   });
@@ -272,6 +280,16 @@ export default function AnalisisSEL() {
   const totalPages = Math.ceil(sortedScores.length / itemsPerPage) || 1;
   const paginatedScores = sortedScores.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
+  if (isError) {
+    return (
+      <ConnectionErrorCard
+        title="Gagal Memuat Analisis Observasi SEL"
+        message={(fetchError as any)?.message || 'Gagal terhubung ke server.'}
+        onRetry={() => refetch()}
+      />
+    );
+  }
+
   return (
     <div className="space-y-5 animate-fade-in">
       {selectedScore && (
@@ -330,11 +348,12 @@ export default function AnalisisSEL() {
           <CustomSelect
             options={[
               { value: '', label: 'Semua Kabupaten' },
-              ...KABUPATEN_LIST.map(k => ({ value: k.name, label: k.name }))
+              ...dbKabupatenList.map(k => ({ value: k.nama, label: k.nama }))
             ]}
             value={selectedKab}
             onChange={(val) => { setSelectedKab(val); setCurrentPage(1); }}
             placeholder="Pilih Kabupaten"
+            enableSearch={true}
           />
         </div>
       </div>
@@ -639,7 +658,7 @@ export default function AnalisisSEL() {
               </thead>
               <tbody>
                 {isLoading ? (
-                  <tr><td colSpan={10} className="py-12 text-center text-text-secondary animate-pulse">Memuat data...</td></tr>
+                  <tr><td colSpan={10} className="py-12 text-center"><ThreeDotsLoader text="Memuat data analisis..." /></td></tr>
                 ) : paginatedScores.length === 0 ? (
                   <tr><td colSpan={10} className="py-12 text-center text-text-secondary">Belum ada data.</td></tr>
                 ) : (

@@ -21,6 +21,8 @@ import CustomSelect from '../../../shared/components/CustomSelect';
 import { apiClient } from '../../../shared/services/api-client';
 import { notifyToast } from '../../../shared/components/NotificationToast';
 import ConfirmationModal from '../../../shared/components/ConfirmationModal';
+import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
+import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
 
 export interface CustomSkorOption {
   value: 1 | 2 | 3 | 4;
@@ -31,6 +33,7 @@ export interface CustomSkorOption {
 export default function KelolaFormSEL() {
   const [indikatorList, setIndikatorList] = useState<SELIndikator[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [selectedSection, setSelectedSection] = useState<string>('');
   const [selectedSubjek, setSelectedSubjek] = useState<string>('');
   const [search, setSearch] = useState<string>('');
@@ -74,6 +77,7 @@ export default function KelolaFormSEL() {
   const fetchIndikatorList = async () => {
     try {
       setLoading(true);
+      setFetchError(null);
       const res = await apiClient.get<any[]>('/sel/indikator');
       if (res.success && Array.isArray(res.data)) {
         const formatted: SELIndikator[] = res.data.map((item: any) => ({
@@ -86,10 +90,10 @@ export default function KelolaFormSEL() {
         }));
         setIndikatorList(formatted);
       } else {
-        setIndikatorList(SEL_INDIKATORS);
+        setFetchError(res.message || 'Gagal memuat indikator pengamatan SEL.');
       }
-    } catch {
-      setIndikatorList(SEL_INDIKATORS);
+    } catch (err: any) {
+      setFetchError(err?.message || 'Gagal terhubung ke sistem. Silakan periksa koneksi internet Anda atau coba beberapa saat lagi.');
     } finally {
       setLoading(false);
     }
@@ -132,7 +136,7 @@ export default function KelolaFormSEL() {
         notifyToast({
           type: 'success',
           title: 'Dimensi Baru Ditambahkan',
-          message: `Dimensi "${newDimensiTitle}" berhasil disimpan ke MySQL database.`,
+          message: `Dimensi "${newDimensiTitle}" berhasil disimpan.`,
         });
       }
     } catch (err: any) {
@@ -240,7 +244,7 @@ export default function KelolaFormSEL() {
       notifyToast({
         type: 'success',
         title: 'Urutan Diperbarui',
-        message: 'Posisi urutan opsi konteks berhasil disimpan ke MySQL.',
+        message: 'Posisi urutan opsi konteks berhasil disimpan.',
       });
     } catch {
       notifyToast({
@@ -284,7 +288,7 @@ export default function KelolaFormSEL() {
           urutan: formKonteksUrutan,
         });
         if (res.success) {
-          notifyToast({ type: 'success', title: 'Opsi Diperbarui', message: 'Opsi konteks lapangan berhasil disimpan ke MySQL.' });
+          notifyToast({ type: 'success', title: 'Opsi Diperbarui', message: 'Opsi konteks lapangan berhasil disimpan.' });
           fetchKonteksList();
         }
       } else {
@@ -295,12 +299,12 @@ export default function KelolaFormSEL() {
           urutan: formKonteksUrutan,
         });
         if (res.success) {
-          notifyToast({ type: 'success', title: 'Opsi Ditambahkan', message: 'Opsi konteks lapangan baru berhasil ditambahkan ke MySQL.' });
+          notifyToast({ type: 'success', title: 'Opsi Ditambahkan', message: 'Opsi konteks lapangan baru berhasil ditambahkan.' });
           fetchKonteksList();
         }
       }
     } catch (err: any) {
-      notifyToast({ type: 'error', title: 'Gagal Menyimpan', message: err?.message || 'Server Error' });
+      notifyToast({ type: 'error', title: 'Gagal Menyimpan', message: err?.message || 'Kendala sistem saat menyimpan.' });
     } finally {
       setIsKonteksModalOpen(false);
     }
@@ -311,7 +315,7 @@ export default function KelolaFormSEL() {
     try {
       await apiClient.sel.deleteKonteks(deleteKonteksConfirmId);
       setKonteksList(prev => prev.filter(k => k.id !== deleteKonteksConfirmId));
-      notifyToast({ type: 'error', title: 'Opsi Dihapus', message: 'Opsi konteks lapangan berhasil dihapus dari database MySQL.' });
+      notifyToast({ type: 'error', title: 'Opsi Dihapus', message: 'Opsi konteks lapangan berhasil dihapus.' });
     } catch {
       notifyToast({ type: 'error', title: 'Gagal Menghapus', message: 'Terjadi kesalahan saat menghapus opsi konteks.' });
     } finally {
@@ -618,6 +622,28 @@ export default function KelolaFormSEL() {
     );
   };
 
+  if (loading) {
+    return (
+      <div className="py-20 text-center flex items-center justify-center">
+        <ThreeDotsLoader text="Memuat instrumen form observasi SEL..." />
+      </div>
+    );
+  }
+
+  if (fetchError) {
+    return (
+      <ConnectionErrorCard
+        title="Gagal Memuat Form Observasi SEL"
+        message={fetchError}
+        onRetry={() => {
+          fetchDimensiList();
+          fetchIndikatorList();
+          fetchKonteksList();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6 max-w-[1400px] mx-auto animate-fade-in">
       {/* Header Banner */}
@@ -723,14 +749,14 @@ export default function KelolaFormSEL() {
                   <School className="h-4 w-4" />
                 </div>
                 <div>
-                  <h4 className="text-xs font-bold text-text-primary">1. Data Sekolah Sasaran (Database Official)</h4>
+                  <h4 className="text-xs font-bold text-text-primary">1. Data Sekolah Sasaran (Terintegrasi)</h4>
                   <p className="text-[11px] text-text-secondary mt-0.5">
-                    Nama sekolah, NPSN, kecamatan, dan kabupaten terhubung langsung secara otomatis dari <strong>Database Sekolah (`satuan_pendidikan`)</strong>.
+                    Nama sekolah, NPSN, kecamatan, dan kabupaten terhubung langsung secara otomatis dari data induk sekolah.
                   </p>
                 </div>
               </div>
               <span className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 shrink-0 self-start sm:self-auto flex items-center gap-1">
-                <DatabaseIcon className="h-3 w-3" /> Auto Database Sekolah
+                <School className="h-3 w-3" /> Data Sekolah Resmi
               </span>
             </div>
 
@@ -753,7 +779,7 @@ export default function KelolaFormSEL() {
       {/* DIMENSI SEL INDIKATOR (GURU & MURID)                           */}
       {/* ══════════════════════════════════════════════════════════════ */}
       <div className="space-y-6">
-        {allDimensiList.filter(d => !selectedSection || selectedSection === d.key || selectedSection === 'konteks').map((dimensiItem, dIdx) => {
+          {allDimensiList.filter(d => !selectedSection || selectedSection === d.key || selectedSection === 'konteks').map((dimensiItem, dIdx) => {
           const dimensi = dimensiItem.key;
           if (selectedSection === 'konteks') return null; // Only show section 1 when section=konteks is selected
 
@@ -802,13 +828,10 @@ export default function KelolaFormSEL() {
                           {inds.map((ind, idx) => (
                             <div
                               key={ind.id}
-                              draggable
-                              onDragStart={e => handleDragStartIndikator(e, ind.id)}
-                              onDragEnd={handleDragEndIndikator}
                               onDragOver={e => handleDragOverIndikator(e, ind.id, inds)}
                               onDragLeave={handleDragLeaveIndikator}
                               onDrop={() => handleDropIndikator(ind.id, inds)}
-                              className={`rounded-xl border p-3.5 space-y-2 transition-all duration-200 relative group cursor-grab active:cursor-grabbing ${draggedIndikatorId === ind.id
+                              className={`rounded-xl border p-3.5 space-y-2 transition-all duration-200 relative group ${draggedIndikatorId === ind.id
                                   ? 'border-primary bg-primary/10 shadow-lg scale-[1.01] opacity-50'
                                   : dragOverIndikatorId === ind.id
                                     ? 'border-primary bg-primary/5 shadow-md border-t-2 border-t-primary transform translate-y-0.5'
@@ -817,7 +840,13 @@ export default function KelolaFormSEL() {
                             >
                               <div className="flex items-center justify-between gap-3">
                                 <div className="flex items-center gap-2.5 flex-1">
-                                  <div className="p-1.5 text-text-secondary/40 group-hover:text-primary transition-colors cursor-grab shrink-0 flex items-center justify-center hover:bg-border/40 rounded-md">
+                                  <div
+                                    draggable
+                                    onDragStart={e => handleDragStartIndikator(e, ind.id)}
+                                    onDragEnd={handleDragEndIndikator}
+                                    className="p-1.5 text-text-secondary/40 group-hover:text-primary transition-colors cursor-grab active:cursor-grabbing shrink-0 flex items-center justify-center hover:bg-border/40 rounded-md"
+                                    title="Tarik & Geser untuk mengubah urutan"
+                                  >
                                     <GripVertical className="h-4 w-4" />
                                   </div>
                                   <div className="h-6 w-6 rounded-lg bg-primary/10 text-primary font-bold text-xs flex items-center justify-center shrink-0 shadow-2xs">
@@ -885,7 +914,7 @@ export default function KelolaFormSEL() {
       {/* Modal Add Dimensi Baru */}
       {isAddDimensiModalOpen && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
-          <div className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-md overflow-hidden animate-scale-in">
+          <div className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-md overflow-visible animate-scale-in">
             <div className="flex items-center justify-between p-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <Brain className="h-5 w-5 text-primary" />
@@ -960,7 +989,7 @@ export default function KelolaFormSEL() {
       {/* Modal Admin Add/Edit Indikator */}
       {isModalOpen && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
-          <div className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-lg overflow-hidden animate-scale-in">
+          <div className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-lg overflow-visible animate-scale-in">
             <div className="flex items-center justify-between p-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <FileText className="h-5 w-5 text-primary" />
@@ -1058,7 +1087,7 @@ export default function KelolaFormSEL() {
       {/* Modal Add/Edit Konteks Option */}
       {isKonteksModalOpen && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
-          <div className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-md overflow-hidden animate-scale-in">
+          <div className="bg-surface rounded-2xl shadow-2xl border border-border w-full max-w-md overflow-visible animate-scale-in">
             <div className="flex items-center justify-between p-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <MapPin className="h-5 w-5 text-primary" />
@@ -1144,7 +1173,7 @@ export default function KelolaFormSEL() {
         onClose={() => setDeleteKonteksConfirmId(null)}
         onConfirm={confirmDeleteKonteks}
         title="Hapus Opsi Konteks"
-        description="Apakah Anda yakin ingin menghapus opsi konteks ini dari database MySQL?"
+        description="Apakah Anda yakin ingin menghapus opsi konteks ini?"
         confirmLabel="Hapus Opsi"
         cancelLabel="Batal"
         variant="danger"

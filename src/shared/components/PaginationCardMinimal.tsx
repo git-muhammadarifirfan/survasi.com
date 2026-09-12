@@ -94,7 +94,7 @@ export default function PaginationCardMinimal({
                 onClick={() => onPageChange(num as number)}
                 className={`min-w-8 h-8 px-2.5 flex items-center justify-center text-xs rounded-xl font-bold transition-all cursor-pointer ${
                   isCurrent
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                    ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200/60'
                 }`}
               >

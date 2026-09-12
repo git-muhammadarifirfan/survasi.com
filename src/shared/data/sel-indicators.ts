@@ -58,9 +58,9 @@ export const BSAN_MODUL_SUBTITLE_ID: Record<BSANModul, string> = {
 };
 
 export const BSAN_MODUL_COLOR: Record<BSANModul, string> = {
-  with_myself:     '#4A57C4', // indigo/blue
-  with_others:     '#10B981', // emerald/green
-  with_challenges: '#F59E0B', // amber/yellow
+  with_myself:     '#0D9488', // Teal
+  with_others:     '#10B981', // Emerald green
+  with_challenges: '#F59E0B', // Amber
 };
 
 export const BSAN_MODUL_ICON: Record<BSANModul, string> = {

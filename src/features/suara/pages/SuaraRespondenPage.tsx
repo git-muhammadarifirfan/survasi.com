@@ -12,6 +12,8 @@ import { database } from '../../../shared/data/data-source';
 import { Search, Filter, Smile, Meh, Frown, Tag, MessageSquareQuote, Calendar, ChevronLeft, ChevronRight, Send, CheckCircle2 } from 'lucide-react';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import { notifyToast } from '../../../shared/components/NotificationToast';
+import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
+import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
 
 interface SuaraRespondenProps {
   activeKecamatan: string | null;
@@ -45,7 +47,7 @@ export default function SuaraResponden({ activeKecamatan, userRole = 'admin' }: 
 
   const tags = ['Perangkat Digital', 'Internet', 'Buku Ajar', 'KKG Guru', 'Wali Murid', 'Pelatihan'];
 
-  const { data: feedbackData = [], isLoading } = useQuery({
+  const { data: feedbackData = [], isLoading, isError, error: fetchError, refetch } = useQuery({
     queryKey: ['suaraResponden', activeKecamatan],
     queryFn: () => database.getSuaraRespondenData({ kecamatan: activeKecamatan || undefined })
   });
@@ -290,9 +292,16 @@ export default function SuaraResponden({ activeKecamatan, userRole = 'admin' }: 
     );
   }
 
-  // ---------------------------------------------------
-  // ADMIN DINAS VIEW: SEARCH, FILTER & RESPONDENTS LIST
-  // ---------------------------------------------------
+  if (isError) {
+    return (
+      <ConnectionErrorCard
+        title="Gagal Memuat Suara Responden"
+        message={(fetchError as any)?.message || 'Gagal terhubung ke server.'}
+        onRetry={() => refetch()}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -377,8 +386,8 @@ export default function SuaraResponden({ activeKecamatan, userRole = 'admin' }: 
 
       {/* Feedback Grid */}
       {isLoading ? (
-        <div className="h-64 flex items-center justify-center text-sm text-text-secondary animate-pulse">
-          Menganalisis dan memuat ulasan narasi sekolah...
+        <div className="py-20 text-center">
+          <ThreeDotsLoader text="Memuat data ulasan responden..." />
         </div>
       ) : filteredFeedback.length === 0 ? (
         <div className="rounded-card bg-surface p-12 text-center text-sm text-text-secondary border border-border">

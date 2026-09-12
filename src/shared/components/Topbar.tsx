@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Menu, Bell, Search, User, X, Mail,
-  LogOut, ArrowRight, RefreshCw, School, ShieldCheck, ClipboardList
+  LogOut, Settings
 } from 'lucide-react';
 import { apiClient } from '../services/api-client';
 
@@ -15,7 +15,6 @@ interface TopbarProps {
   searchTerm: string;
   onSearchChange: (val: string) => void;
   userRole: UserRole;
-  onSwitchRole: (role: UserRole) => void;
   onLogout: () => void;
 }
 
@@ -26,14 +25,26 @@ export default function Topbar({
   searchTerm,
   onSearchChange,
   userRole,
-  onSwitchRole,
   onLogout,
 }: TopbarProps) {
+  const navigate = useNavigate();
   const [showNotif, setShowNotif] = useState(false);
   const [showMessages, setShowMessages] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [userName, setUserName] = useState('');
+
+  // Load user name from stored profile
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('bsan_user_profile');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setUserName(parsed.nama || '');
+      }
+    } catch {}
+  }, []);
 
   // Fetch real notifications from API
   useEffect(() => {
@@ -45,7 +56,6 @@ export default function Topbar({
         }
       })
       .catch(() => {
-        // Fallback default notification
         setNotifications([
           { id: 1, judul: 'Selamat Datang di Survasi BSAN', pesan: 'Sistem monitoring & evaluasi mutu pendidikan Jatim', tipe: 'system', is_read: false, created_at: new Date().toISOString() }
         ]);
@@ -59,7 +69,7 @@ export default function Topbar({
 
   const getRoleBadge = () => {
     switch (userRole) {
-      case 'admin': return { label: 'Admin Sistem', color: 'bg-indigo-500/10 text-indigo-600 border-indigo-200' };
+      case 'admin': return { label: 'Admin Sistem', color: 'bg-teal-500/10 text-teal-700 border-teal-200' };
       case 'pengawas': return { label: 'Pengawas Sekolah', color: 'bg-emerald-500/10 text-emerald-600 border-emerald-200' };
       case 'sekolah': return { label: 'Perwakilan Sekolah', color: 'bg-amber-500/10 text-amber-600 border-amber-200' };
       default: return { label: 'User', color: 'bg-slate-500/10 text-slate-600 border-slate-200' };
@@ -67,6 +77,20 @@ export default function Topbar({
   };
 
   const badge = getRoleBadge();
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-topbar-dropdown]')) {
+        setShowNotif(false);
+        setShowMessages(false);
+        setShowProfile(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   return (
     <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-border bg-surface px-5 md:px-8">
@@ -128,7 +152,7 @@ export default function Topbar({
         </div>
 
         {/* Message Icon */}
-        <div className="relative">
+        <div className="relative" data-topbar-dropdown>
           <button
             onClick={() => {
               setShowMessages(!showMessages);
@@ -170,7 +194,7 @@ export default function Topbar({
         </div>
 
         {/* Notification Icon */}
-        <div className="relative">
+        <div className="relative" data-topbar-dropdown>
           <button
             onClick={() => {
               setShowNotif(!showNotif);
@@ -222,8 +246,8 @@ export default function Topbar({
 
         <div className="h-8 w-px bg-border mx-1" />
 
-        {/* Profile Card & Role Switcher */}
-        <div className="relative">
+        {/* Profile Card — No Role Switcher */}
+        <div className="relative" data-topbar-dropdown>
           <button
             onClick={() => {
               setShowProfile(!showProfile);
@@ -233,71 +257,55 @@ export default function Topbar({
             className="flex items-center space-x-3 cursor-pointer rounded-xl px-2 py-1.5 hover:bg-bg transition-smooth"
           >
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary to-accent text-white text-xs font-bold shadow-sm">
-              <User className="h-4 w-4" />
+              {userName ? userName.substring(0, 1).toUpperCase() : <User className="h-4 w-4" />}
             </div>
             <div className="hidden lg:block text-left leading-tight">
-              <p className="text-[13px] font-semibold text-text-primary">
-                {badge.label}
+              <p className="text-[13px] font-semibold text-text-primary truncate max-w-[140px]">
+                {userName || badge.label}
               </p>
-              <p className="text-[10px] font-mono text-text-secondary uppercase">
-                Role: {userRole}
+              <p className="text-[10px] font-medium text-text-secondary capitalize">
+                {badge.label}
               </p>
             </div>
           </button>
 
           {showProfile && (
             <div className="absolute right-0 top-12 z-50 w-72 rounded-2xl bg-surface p-4 shadow-2xl border border-border space-y-3 text-xs">
-              <div className="border-b border-border pb-2.5 space-y-0.5">
-                <p className="font-bold text-text-primary text-sm">
-                  {badge.label}
-                </p>
-                <p className="text-[10px] text-text-secondary">
-                  Hak Akses Aktif: <span className="font-bold text-primary capitalize">{userRole}</span>
-                </p>
-              </div>
-
-              {/* Role Switcher Option */}
-              <div className="space-y-1.5">
-                <p className="text-[10px] font-bold text-text-secondary uppercase">Ganti Peran Stakeholder:</p>
-                <div className="grid grid-cols-3 gap-1">
-                  <button
-                    type="button"
-                    onClick={() => { onSwitchRole('admin'); setShowProfile(false); }}
-                    className={`py-2 px-1.5 rounded-lg text-[10px] font-bold border text-center transition-all ${
-                      userRole === 'admin' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-bg text-text-secondary hover:text-text-primary'
-                    }`}
-                  >
-                    Admin
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => { onSwitchRole('pengawas'); setShowProfile(false); }}
-                    className={`py-2 px-1.5 rounded-lg text-[10px] font-bold border text-center transition-all ${
-                      userRole === 'pengawas' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-bg text-text-secondary hover:text-text-primary'
-                    }`}
-                  >
-                    Pengawas
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => { onSwitchRole('sekolah'); setShowProfile(false); }}
-                    className={`py-2 px-1.5 rounded-lg text-[10px] font-bold border text-center transition-all ${
-                      userRole === 'sekolah' ? 'bg-amber-600 text-white border-amber-600' : 'bg-bg text-text-secondary hover:text-text-primary'
-                    }`}
-                  >
-                    Sekolah
-                  </button>
+              {/* User Info Header */}
+              <div className="border-b border-border pb-3 space-y-1">
+                <div className="flex items-center space-x-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-primary to-accent text-white text-sm font-bold shadow-sm shrink-0">
+                    {userName ? userName.substring(0, 1).toUpperCase() : <User className="h-4 w-4" />}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-bold text-text-primary text-sm truncate">
+                      {userName || badge.label}
+                    </p>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border ${badge.color} capitalize`}>
+                      {badge.label}
+                    </span>
+                  </div>
                 </div>
               </div>
+
+              {/* Profile Actions */}
+              <button
+                onClick={() => {
+                  setShowProfile(false);
+                  navigate('/setting');
+                }}
+                className="w-full flex items-center space-x-2 p-2.5 rounded-xl text-text-primary hover:bg-bg font-semibold transition-smooth cursor-pointer"
+              >
+                <Settings className="h-4 w-4 text-text-secondary" />
+                <span>Pengaturan Akun</span>
+              </button>
 
               <button
                 onClick={() => {
                   setShowProfile(false);
                   onLogout();
                 }}
-                className="w-full flex items-center space-x-2 p-2 rounded-xl text-status-belum hover:bg-status-belum/8 font-bold transition-smooth"
+                className="w-full flex items-center space-x-2 p-2.5 rounded-xl text-status-belum hover:bg-status-belum/8 font-bold transition-smooth cursor-pointer"
               >
                 <LogOut className="h-4 w-4" />
                 <span>Keluar Akun</span>

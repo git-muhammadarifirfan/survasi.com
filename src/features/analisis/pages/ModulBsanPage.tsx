@@ -18,7 +18,7 @@ import {
 import type { BSANModul, BSANGeneralSkill, SELDimensi } from '../../../shared/data/sel-indicators';
 import {
   Brain, Users, Target, ChevronDown, Download, FileText, File,
-  BookOpen, Sparkles, CheckCircle2, Eye, Loader2
+  BookOpen, CheckCircle2, Eye, Loader2
 } from 'lucide-react';
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 import html2pdf from 'html2pdf.js';
@@ -171,7 +171,7 @@ function SkillCard({ gs, index, color }: { gs: BSANGeneralSkill; index: number; 
 
       <div className="p-5 pt-4">
         <div className="flex items-center gap-1.5 mb-3">
-          <Sparkles className="h-3.5 w-3.5" style={{ color }} />
+          <CheckCircle2 className="h-3.5 w-3.5" style={{ color }} />
           <span className="text-[9px] font-bold uppercase tracking-[0.08em]" style={{ color }}>Specific Skills</span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
