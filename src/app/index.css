@@ -3,22 +3,23 @@
 @tailwind utilities;
 
 :root {
-  --color-primary: #4F46E5;
-  --color-primary-dark: #3730A3;
-  --color-accent: #7C3AED;
+  /* LearnWorlds Inspired Modern SaaS Teal Palette */
+  --color-primary: #0D9488;
+  --color-primary-dark: #0F766E;
+  --color-accent: #14B8A6;
   --color-bg: #F8FAFC;
   --color-surface: #FFFFFF;
   --color-border: #E2E8F0;
   --color-text-primary: #0F172A;
-  --color-text-secondary: #64748B;
+  --color-text-secondary: #475569;
 
   --status-belum: #EF4444;
   --status-sebagian: #F59E0B;
   --status-sudah: #10B981;
-  --status-netral: #94A3B8;
+  --status-netral: #64748B;
 
-  --shadow-card: 0 4px 20px -2px rgba(15, 23, 42, 0.05), 0 2px 6px -1px rgba(15, 23, 42, 0.03);
-  --shadow-card-hover: 0 12px 32px -4px rgba(15, 23, 42, 0.12), 0 4px 12px -2px rgba(15, 23, 42, 0.04);
+  --shadow-card: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+  --shadow-card-hover: 0 4px 12px -2px rgba(15, 23, 42, 0.08), 0 2px 4px -1px rgba(15, 23, 42, 0.04);
   --radius-card: 16px;
 }
 
@@ -28,7 +29,7 @@
 
 body {
   margin: 0;
-  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Poppins', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background-color: var(--color-bg);
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
@@ -46,9 +47,9 @@ html {
 ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
 
-/* ─── Page & Tab Transitions ─── */
+/* ─── Clean Transitions & Animations ─── */
 @keyframes tabSlideIn {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -58,21 +59,21 @@ html {
 }
 
 .animate-tab-content {
-  animation: tabSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: tabSlideIn 0.2s ease-out forwards;
 }
 
 .progress-bar-fill {
   transform-origin: left;
-  animation: barGrow 0.75s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: barGrow 0.5s ease-out forwards;
 }
 
-/* ─── Card & Button Aesthetics ─── */
+/* ─── Crisp Clean Card System (No Glass UI, No Blurs) ─── */
 .card-premium {
   background: #FFFFFF;
   border: 1px solid var(--color-border);
   border-radius: 16px;
   box-shadow: var(--shadow-card);
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.2s ease-out;
 }
 
 .card-premium:hover {
@@ -80,41 +81,41 @@ html {
   border-color: #CBD5E1;
 }
 
-/* Tab Active Glass Glow */
+/* Tab Active Clean Teal Pill */
 .tab-active-glow {
-  background: linear-gradient(135deg, #4F46E5 0%, #4338CA 100%);
+  background: #0D9488;
   color: #FFFFFF;
-  box-shadow: 0 4px 14px 0 rgba(79, 70, 229, 0.38);
+  box-shadow: 0 2px 8px 0 rgba(13, 148, 136, 0.25);
 }
 
 @keyframes markerFadeIn {
-  from { opacity: 0; transform: scale(0.5); }
+  from { opacity: 0; transform: scale(0.8); }
   to { opacity: 1; transform: scale(1); }
 }
 
 .marker-fade-in {
-  animation: markerFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: markerFadeIn 0.2s ease-out forwards;
 }
 
 /* ─── 3-Dot Bounce Loading Animation ─── */
 @keyframes dotPulse {
-  0%, 100% { transform: scale(0.6); opacity: 0.4; }
-  50% { transform: scale(1.2); opacity: 1; }
+  0%, 100% { transform: scale(0.7); opacity: 0.5; }
+  50% { transform: scale(1.1); opacity: 1; }
 }
 
 .animate-dot-1 {
-  animation: dotPulse 1.4s infinite ease-in-out;
+  animation: dotPulse 1.2s infinite ease-in-out;
   animation-delay: 0s;
 }
 
 .animate-dot-2 {
-  animation: dotPulse 1.4s infinite ease-in-out;
-  animation-delay: 0.2s;
+  animation: dotPulse 1.2s infinite ease-in-out;
+  animation-delay: 0.15s;
 }
 
 .animate-dot-3 {
-  animation: dotPulse 1.4s infinite ease-in-out;
-  animation-delay: 0.4s;
+  animation: dotPulse 1.2s infinite ease-in-out;
+  animation-delay: 0.3s;
 }
 
 /* ─── Skeleton Shimmer Effect ─── */
@@ -128,4 +129,3 @@ html {
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
-

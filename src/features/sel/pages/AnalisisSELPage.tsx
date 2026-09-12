@@ -30,10 +30,10 @@ import CustomSelect from '../../../shared/components/CustomSelect';
 // ─── Helpers ───────────────────────────────────────────────────
 
 const SEL_COLORS: Record<SELDimensi, string> = {
-  kesadaran_diri:      '#4A57C4',
+  kesadaran_diri:      '#0D9488',
   regulasi_emosi:      '#10B981',
   kesadaran_sosial:    '#F59E0B',
-  keterampilan_relasi: '#8B5CF6',
+  keterampilan_relasi: '#6366F1',
   tanggung_jawab:      '#EF4444',
 };
 
@@ -138,7 +138,7 @@ function DetailModal({ score, onClose }: { score: SELSchoolScore; onClose: () =>
                 <RadarChart data={radarData} margin={{ top: 5, right: 30, bottom: 5, left: 30 }}>
                   <PolarGrid stroke="var(--color-border)" />
                   <PolarAngleAxis dataKey="subject" tick={{ fill: 'var(--color-text-secondary)', fontSize: 10 }} />
-                  <Radar name="Guru" dataKey="Guru" stroke="#4A57C4" fill="#4A57C4" fillOpacity={0.3} strokeWidth={2} />
+                  <Radar name="Guru" dataKey="Guru" stroke="#0D9488" fill="#0D9488" fillOpacity={0.3} strokeWidth={2} />
                   <Radar name="Murid" dataKey="Murid" stroke="#10B981" fill="#10B981" fillOpacity={0.2} strokeWidth={2} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                 </RadarChart>
@@ -279,29 +279,28 @@ export default function AnalisisSEL() {
       )}
 
       {/* Header */}
-      <div className="rounded-2xl bg-gradient-to-r from-primary via-[#5a6bd4] to-accent p-6 text-white shadow-lg relative overflow-hidden animate-slide-up">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -mr-20 -mt-20" />
-        <div className="relative z-10">
-          <div className="flex items-center gap-2.5 mb-2">
-            <div className="p-2 bg-white/20 rounded-xl">
-              <Brain className="h-5 w-5" />
+      <div className="rounded-2xl bg-surface border border-border p-6 shadow-card animate-slide-up">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-primary/10 text-primary rounded-xl shrink-0">
+              <Brain className="h-6 w-6" />
             </div>
             <div>
-              <h2 className="text-xl font-bold font-display">Analisis Observasi SEL</h2>
-              <p className="text-white/70 text-[11px]">Social-Emotional Learning • BSAN Jawa Timur</p>
+              <h2 className="text-xl font-bold font-display text-text-primary">Analisis Observasi SEL</h2>
+              <p className="text-text-secondary text-xs">Social-Emotional Learning • BSAN Jawa Timur</p>
             </div>
           </div>
           {stats && (
-            <div className="flex flex-wrap gap-4 mt-4">
+            <div className="flex flex-wrap gap-3">
               {[
                 { label: 'Sekolah Diobservasi', value: stats.totalDiobservasi },
                 { label: 'Rata-rata Skor Guru', value: `${stats.rataGuruAll}/4` },
                 { label: 'Rata-rata Skor Murid', value: `${stats.rataMuridAll}/4` },
                 { label: 'Butuh Intervensi', value: stats.butuhIntervensi },
               ].map(item => (
-                <div key={item.label} className="bg-white/20 rounded-xl px-4 py-2.5">
-                  <div className="text-white/70 text-[9px] uppercase tracking-wider font-bold">{item.label}</div>
-                  <div className="text-white font-bold text-lg font-display">{item.value}</div>
+                <div key={item.label} className="bg-bg rounded-xl px-4 py-2 border border-border/60 min-w-[120px]">
+                  <div className="text-text-secondary text-[10px] uppercase tracking-wider font-bold">{item.label}</div>
+                  <div className="text-text-primary font-bold text-base font-display mt-0.5">{item.value}</div>
                 </div>
               ))}
             </div>
@@ -354,7 +353,7 @@ export default function AnalisisSEL() {
                   <RadarChart data={avgRadarData} margin={{ top: 5, right: 30, bottom: 5, left: 30 }}>
                     <PolarGrid stroke="var(--color-border)" />
                     <PolarAngleAxis dataKey="subject" tick={{ fill: 'var(--color-text-secondary)', fontSize: 10 }} />
-                    <Radar name="Guru" dataKey="Guru" stroke="#4A57C4" fill="#4A57C4" fillOpacity={0.35} strokeWidth={2} dot />
+                    <Radar name="Guru" dataKey="Guru" stroke="#0D9488" fill="#0D9488" fillOpacity={0.35} strokeWidth={2} dot />
                     <Radar name="Murid" dataKey="Murid" stroke="#10B981" fill="#10B981" fillOpacity={0.2} strokeWidth={2} dot />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                     <Tooltip
@@ -381,7 +380,7 @@ export default function AnalisisSEL() {
                       formatter={(v: any) => [`${v}/4`, '']}
                     />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Bar dataKey="Guru" fill="#4A57C4" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="Guru" fill="#0D9488" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="Murid" fill="#10B981" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>

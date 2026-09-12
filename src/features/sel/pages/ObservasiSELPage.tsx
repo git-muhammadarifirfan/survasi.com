@@ -1403,16 +1403,15 @@ function AdminObservasiPanel() {
       )}
 
       {/* Header */}
-      <div className="rounded-2xl bg-gradient-to-r from-primary via-[#5a6bd4] to-accent p-6 text-white shadow-lg relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-56 h-56 bg-white/10 rounded-full blur-3xl -mr-16 -mt-16" />
-        <div className="relative z-10 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+      <div className="rounded-2xl bg-surface border border-border p-6 shadow-card">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-white/20 rounded-xl">
-              <ClipboardList className="h-5 w-5" />
+            <div className="p-2.5 bg-primary/10 text-primary rounded-xl shrink-0">
+              <ClipboardList className="h-6 w-6" />
             </div>
             <div>
-              <h2 className="text-xl font-bold font-display">Manajemen Sesi Observasi SEL</h2>
-              <p className="text-white/70 text-[11px] mt-0.5">Admin · Lihat & pantau semua data hasil observasi lapangan</p>
+              <h2 className="text-xl font-bold font-display text-text-primary">Manajemen Sesi Observasi SEL</h2>
+              <p className="text-text-secondary text-xs mt-0.5">Admin · Lihat & pantau semua data hasil observasi lapangan</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">

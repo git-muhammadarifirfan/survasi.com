@@ -170,28 +170,27 @@ export default function Dashboard({ activeKecamatan, setActiveKecamatan, userRol
     const mockProgresses = [100, 75, 40];
     return (
       <div className="space-y-6">
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary via-accent to-primary-dark p-8 text-white shadow-lg">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -mr-20 -mt-20"></div>
-          <div className="relative z-10 max-w-xl">
-            <p className="text-white/70 text-xs font-bold uppercase tracking-wider mb-2 flex items-center space-x-2">
-              <span className="w-2 h-2 rounded-full bg-status-sudah animate-pulse"></span>
+        <div className="rounded-2xl bg-surface border border-border p-6 shadow-card">
+          <div className="max-w-2xl">
+            <p className="text-primary text-xs font-bold uppercase tracking-wider mb-2 flex items-center space-x-2">
+              <span className="w-2 h-2 rounded-full bg-status-sudah"></span>
               <span>Sesi Aktif</span>
             </p>
-            <h2 className="text-3xl font-bold font-display mb-3">Halo, SD Negeri Candi 1 👋</h2>
-            <p className="text-white/80 text-sm leading-relaxed mb-6">
-               Anda telah melengkapi <strong>2 dari 3</strong> Modul BSAN (Budaya Sekolah Aman dan Nyaman) tahun 2026. Selesaikan modul tersisa untuk mendapatkan sertifikat dan rapor mutu sekolah.
+            <h2 className="text-2xl font-bold font-display text-text-primary mb-2">Halo, SD Negeri Candi 1</h2>
+            <p className="text-text-secondary text-xs leading-relaxed mb-5">
+              Anda telah melengkapi <strong>2 dari 3</strong> Modul BSAN (Budaya Sekolah Aman dan Nyaman) tahun 2026. Selesaikan modul tersisa untuk mendapatkan sertifikat dan rapor mutu sekolah.
             </p>
-            <div className="flex flex-wrap gap-4">
-              <Link to="/kuisioner" className="inline-flex items-center space-x-2 bg-white text-primary rounded-xl px-5 py-2.5 text-xs font-bold hover:bg-white/90 hover:scale-105 transition-all shadow-md">
+            <div className="flex flex-wrap gap-3">
+              <Link to="/kuisioner" className="inline-flex items-center space-x-2 bg-primary text-white rounded-xl px-4 py-2.5 text-xs font-bold hover:bg-primary-dark transition-all shadow-xs">
                 <BookOpen className="h-4 w-4" />
-                 <span>Lanjutkan Survei</span>
+                <span>Lanjutkan Survei</span>
               </Link>
               <button 
                 onClick={() => alert('Rapor sementara berhasil diunduh. Silakan cek folder Download Anda.')}
-                className="inline-flex items-center space-x-2 bg-white/15 text-white border border-white/20 rounded-xl px-5 py-2.5 text-xs font-bold hover:bg-white/25 transition-all"
+                className="inline-flex items-center space-x-2 bg-bg border border-border text-text-primary rounded-xl px-4 py-2.5 text-xs font-bold hover:bg-border/40 transition-all"
               >
-                <Download className="h-4 w-4" />
-                <span>Unduh Rapor Sementara</span>
+                <Download className="h-4 w-4 text-text-secondary" />
+                <span>Unduh Rapor Mutu</span>
               </button>
             </div>
           </div>

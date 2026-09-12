@@ -211,7 +211,7 @@ export default function Sidebar({ isOpen, setIsOpen, userRole, onLogout }: Sideb
         {/* User profile + Logout */}
         <div className="border-t border-border p-3">
           <div className="flex items-center space-x-3 rounded-xl bg-bg p-3 mb-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary to-accent text-white text-xs font-bold shrink-0">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-white text-xs font-bold shrink-0 shadow-2xs">
               {getRoleAvatar()}
             </div>
             <div className="leading-tight overflow-hidden">
