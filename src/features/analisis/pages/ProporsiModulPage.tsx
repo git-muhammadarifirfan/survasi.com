@@ -19,6 +19,8 @@ import {
 } from 'recharts';
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 import CustomSelect from '../../../shared/components/CustomSelect';
+import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
+import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
 
 const TABS = [
   { id: 'penerima', label: 'Proporsi Penerima', icon: PieIcon },
@@ -61,7 +63,7 @@ export default function ProporsiModul() {
   const [activeTab, setActiveTab] = useState<TabId>('penerima');
   const [kabupaten, setKabupaten] = useState('Semua Wilayah');
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error: fetchError, refetch } = useQuery({
     queryKey: ['proporsiModul', kabupaten],
     queryFn: () => database.getProporsiModulData(kabupaten),
   });
@@ -81,6 +83,24 @@ export default function ProporsiModul() {
   const COLOR_VIOLET = '#7C3AED';
   const COLOR_AMBER = '#F59E0B';
   const COLOR_SLATE = '#64748B';
+
+  if (isLoading) {
+    return (
+      <div className="py-20 text-center rounded-2xl bg-surface border border-border">
+        <ThreeDotsLoader text="Memuat visualisasi proporsi modul..." />
+      </div>
+    );
+  }
+
+  if (isError || !data) {
+    return (
+      <ConnectionErrorCard
+        title="Gagal Memuat Proporsi Modul"
+        message={(fetchError as any)?.message || 'Gagal terhubung ke server.'}
+        onRetry={() => refetch()}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fade-in pb-8">
@@ -134,12 +154,7 @@ export default function ProporsiModul() {
       </div>
 
       {/* Konten Halaman */}
-      {isLoading || !data ? (
-        <div className="rounded-2xl bg-surface p-16 text-center border border-border">
-          <p className="text-xs text-text-secondary font-medium animate-pulse">Memuat visualisasi proporsi modul...</p>
-        </div>
-      ) : (
-        <div key={`${activeTab}-${kabupaten}`} className="space-y-6 animate-fade-in">
+      <div key={`${activeTab}-${kabupaten}`} className="space-y-6 animate-fade-in">
           {/* ================= TAB 1: PROPORSI PENERIMA ================= */}
           {activeTab === 'penerima' && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -714,7 +729,6 @@ export default function ProporsiModul() {
             </div>
           )}
         </div>
-      )}
     </div>
   );
 }

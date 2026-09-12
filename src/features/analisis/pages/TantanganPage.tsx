@@ -13,6 +13,8 @@ import { AlertTriangle, ShieldAlert, Cpu, Wifi, BookOpen, Users, CheckCircle2, S
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 
 import CustomSelect from '../../../shared/components/CustomSelect';
+import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
+import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
 
 interface TantanganImplementasiProps {
   activeKecamatan: string | null;
@@ -21,7 +23,7 @@ interface TantanganImplementasiProps {
 export default function TantanganImplementasi({ activeKecamatan }: TantanganImplementasiProps) {
   const [selectedKab, setSelectedKab] = useState<string>('');
 
-  const { data: challengeData = [], isLoading } = useQuery({
+  const { data: challengeData = [], isLoading, isError, error: fetchError, refetch } = useQuery({
     queryKey: ['challengeData', selectedKab, activeKecamatan],
     queryFn: () => database.getTantanganData({ kabupaten: selectedKab || undefined, kecamatan: activeKecamatan || undefined })
   });
@@ -38,6 +40,16 @@ export default function TantanganImplementasi({ activeKecamatan }: TantanganImpl
     if (category.includes('Bahan')) return BookOpen;
     return Users;
   };
+
+  if (isError) {
+    return (
+      <ConnectionErrorCard
+        title="Gagal Memuat Data Tantangan"
+        message={(fetchError as any)?.message || 'Gagal terhubung ke server.'}
+        onRetry={() => refetch()}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6 animate-tab-content">
@@ -82,8 +94,8 @@ export default function TantanganImplementasi({ activeKecamatan }: TantanganImpl
           </div>
 
           {isLoading ? (
-            <div className="h-64 flex items-center justify-center text-xs font-bold text-slate-400 uppercase tracking-wider">
-              Memuat data tantangan...
+            <div className="py-16 text-center">
+              <ThreeDotsLoader text="Memuat data tantangan..." />
             </div>
           ) : (
             <>
@@ -116,14 +128,14 @@ export default function TantanganImplementasi({ activeKecamatan }: TantanganImpl
 
               {/* AI Insight Box */}
               <div className="pt-1">
-                <div className="rounded-2xl bg-gradient-to-r from-indigo-50 via-purple-50 to-indigo-50 border border-indigo-100 p-5">
+                <div className="rounded-2xl bg-gradient-to-r from-teal-50 via-emerald-50 to-teal-50 border border-teal-100 p-5">
                   <div className="flex items-center gap-2 mb-2">
-                    <Sparkles className="h-5 w-5 text-indigo-600 animate-pulse" />
+                    <Sparkles className="h-5 w-5 text-teal-600 animate-pulse" />
                     <h4 className="text-xs font-black text-slate-900 font-display uppercase tracking-wider">AI Insight & Rekomendasi</h4>
                   </div>
                   <p className="text-xs text-slate-600 leading-relaxed font-medium">
                     Berdasarkan analisis data sentimen dari {challengeData[0]?.count || 0} laporan teratas,
-                    <strong className="text-indigo-600"> {challengeData[0]?.category} </strong>
+                    <strong className="text-teal-600"> {challengeData[0]?.category} </strong>
                     merupakan hambatan terbesar di lapangan. Rekomendasi tindakan prioritas untuk
                     Dinas Pendidikan {selectedKab || 'Provinsi'} adalah segera melakukan alokasi ulang anggaran BOS Kinerja
                     untuk penguatan infrastruktur digital, serta menggandeng CSR perusahaan lokal.

@@ -11,7 +11,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   BookOpen, ChevronLeft, ChevronRight, Check, Save, Send, HelpCircle,
   AlertCircle, PlayCircle, ShieldCheck, WifiOff, RefreshCw, Plus, Edit3,
-  Trash2, X, Eye, Layers, FileText, GripVertical, Building2, Sparkles
+  Trash2, X, Eye, Layers, FileText, GripVertical, Building2, CheckCircle2
 } from 'lucide-react';
 import { apiClient } from '../../../shared/services/api-client';
 import { database } from '../../../shared/data/data-source';
@@ -23,6 +23,7 @@ import { throttle } from '../../../shared/utils/throttle';
 import { notifyToast } from '../../../shared/components/NotificationToast';
 import ConfirmationModal from '../../../shared/components/ConfirmationModal';
 import { LoadingIndicator } from '../../../shared/components/LoadingIndicator';
+import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
 
 interface KuisionerProps {
   userRole: 'admin' | 'pengawas' | 'sekolah';
@@ -78,10 +79,11 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
   const [editingQuestion, setEditingQuestion] = useState<ApiQuestionItem | null>(null);
   const [formTeks, setFormTeks] = useState('');
   const [formKode, setFormKode] = useState('');
-  const [formTipe, setFormTipe] = useState<'dropdown' | 'checkbox' | 'text' | 'radio' | 'scale' | 'school_select' | 'kabupaten_select' | 'kecamatan_select'>('text');
+  const [formTipe, setFormTipe] = useState<'dropdown' | 'checkbox' | 'text' | 'radio' | 'scale' | 'school_select' | 'kabupaten_select' | 'kecamatan_select'>('radio');
   const [formSection, setFormSection] = useState('identitas');
   const [formModulId, setFormModulId] = useState<number | null>(1);
   const [formOpsi, setFormOpsi] = useState('');
+  const [formOpsiList, setFormOpsiList] = useState<string[]>(['Sudah', 'Belum', 'Dalam Proses']);
   const [formIsRequired, setFormIsRequired] = useState(true);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
@@ -167,10 +169,10 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
             setAnswers(draft.data);
           }
         } else {
-          setError(res.message || 'Gagal memuat pertanyaan survei dari database.');
+          setError(res.message || 'Gagal memuat pertanyaan survei.');
         }
       } catch (err: any) {
-        setError('Gagal menghubungkan ke server MySQL API.');
+        setError('Gagal terhubung ke server.');
       } finally {
         setLoading(false);
       }
@@ -220,7 +222,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     setFormTipe('radio');
     setFormSection(secName || 'identitas');
     setFormModulId(1);
-    setFormOpsi('');
+    setFormOpsiList(['Sudah', 'Belum', 'Dalam Proses']);
     setFormIsRequired(true);
     setIsModalOpen(true);
   };
@@ -233,12 +235,11 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     setFormSection(q.section);
     setFormModulId(q.modul_id || null);
     
-    // If opening radio or dropdown without existing options, pre-fill standard options
-    const existingOpts = Array.isArray(q.opsi_jawaban) && q.opsi_jawaban.length > 0 
-      ? q.opsi_jawaban.join('\n') 
-      : (q.tipe === 'radio' || q.tipe === 'dropdown' ? 'Sudah\nBelum\nDalam Proses' : '');
+    const existingArr = Array.isArray(q.opsi_jawaban) && q.opsi_jawaban.length > 0 
+      ? q.opsi_jawaban 
+      : ['Sudah', 'Belum', 'Dalam Proses'];
       
-    setFormOpsi(existingOpts);
+    setFormOpsiList(existingArr);
     setFormIsRequired(q.is_required);
     setIsModalOpen(true);
   };
@@ -288,13 +289,13 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
         notifyToast({
           type: 'success',
           title: 'Survei Berhasil Dikirim!',
-          message: 'Jawaban survei Anda telah resmi tersimpan di database.',
+          message: 'Jawaban survei Anda telah resmi tersimpan.',
         });
       } else {
         notifyToast({ type: 'error', title: 'Gagal Mengirim', message: res.message || 'Gagal mengirim survei.' });
       }
     } catch {
-      notifyToast({ type: 'error', title: 'Error Server', message: 'Gagal terhubung ke server.' });
+      notifyToast({ type: 'error', title: 'Kendala Sistem', message: 'Gagal terhubung ke sistem. Silakan coba lagi.' });
     } finally {
       setSubmitting(false);
     }
@@ -352,7 +353,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
       notifyToast({
         type: 'success',
         title: 'Pertanyaan Dihapus',
-        message: res?.message || 'Pertanyaan berhasil dihapus dari database.',
+        message: res?.message || 'Pertanyaan berhasil dihapus.',
       });
     } catch (err: any) {
       notifyToast({
@@ -384,13 +385,13 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
       notifyToast({
         type: 'success',
         title: 'Section Dihapus',
-        message: res?.message || `Section "${secMeta.title}" dan pertanyaannya berhasil dihapus dari database.`,
+        message: res?.message || `Section "${secMeta.title}" dan pertanyaannya berhasil dihapus.`,
       });
     } catch (err: any) {
       notifyToast({
         type: 'error',
         title: 'Gagal Hapus Section',
-        message: err?.message || 'Terjadi kesalahan saat menghapus section dari database.',
+        message: err?.message || 'Terjadi kesalahan saat menghapus section.',
       });
     } finally {
       setIsDeleting(false);
@@ -402,8 +403,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     e.preventDefault();
     if (!formTeks.trim()) return;
 
-    const parsedOpsi = formOpsi
-      .split('\n')
+    const parsedOpsi = formOpsiList
       .map(s => s.trim())
       .filter(Boolean);
 
@@ -413,7 +413,9 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
       teks_pertanyaan: formTeks,
       tipe: formTipe,
       section: formSection,
-      opsi_jawaban: parsedOpsi.length > 0 ? parsedOpsi : null,
+      opsi_jawaban: (formTipe !== 'text' && formTipe !== 'school_select' && formTipe !== 'kabupaten_select' && formTipe !== 'kecamatan_select')
+        ? (parsedOpsi.length > 0 ? parsedOpsi : null)
+        : null,
       is_required: formIsRequired,
     };
 
@@ -430,7 +432,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                   teks_pertanyaan: formTeks,
                   tipe: formTipe,
                   section: formSection,
-                  opsi_jawaban: parsedOpsi.length > 0 ? parsedOpsi : null,
+                  opsi_jawaban: payload.opsi_jawaban,
                   is_required: formIsRequired,
                 }
               : q
@@ -446,14 +448,14 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
           kode_pertanyaan: formKode,
           teks_pertanyaan: formTeks,
           tipe: formTipe,
-          opsi_jawaban: parsedOpsi.length > 0 ? parsedOpsi : null,
+          opsi_jawaban: payload.opsi_jawaban,
           urutan: questions.length + 1,
           is_required: formIsRequired,
           section: formSection,
           target_kelas: '1-6',
         };
         setQuestions(prev => [...prev, newQ]);
-        notifyToast({ type: 'success', title: 'Berhasil Ditambahkan', message: 'Instrumen pertanyaan survei baru telah disimpan ke MySQL.' });
+        notifyToast({ type: 'success', title: 'Berhasil Ditambahkan', message: 'Instrumen pertanyaan survei baru telah disimpan.' });
       }
       setIsModalOpen(false);
     } catch (err: any) {
@@ -641,7 +643,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
         notifyToast({
           type: 'success',
           title: 'Section Diperbarui',
-          message: res?.message || 'Informasi section berhasil diperbarui di database.',
+          message: res?.message || 'Informasi section berhasil diperbarui.',
         });
       } else {
         const res = await apiClient.post<{ data: { section_key: string; title: string; description: string } }>('/survey/sections', {
@@ -652,7 +654,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
         notifyToast({
           type: 'success',
           title: 'Section Ditambahkan',
-          message: res?.message || 'Section baru berhasil disimpan ke database.',
+          message: res?.message || 'Section baru berhasil disimpan.',
         });
       }
       setIsSectionModalOpen(false);
@@ -660,7 +662,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
       notifyToast({
         type: 'error',
         title: 'Gagal Menyimpan Section',
-        message: err?.message || 'Terjadi kesalahan saat menyimpan section ke database.',
+        message: err?.message || 'Terjadi kesalahan saat menyimpan section.',
       });
     }
   };
@@ -835,27 +837,19 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
 
   if (loading) {
     return (
-      <div className="space-y-6">
-        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-xs flex justify-between items-center">
-          <div className="space-y-2">
-            <div className="w-48 h-6 bg-slate-200 rounded animate-pulse" />
-            <div className="w-80 h-4 bg-slate-100 rounded animate-pulse" />
-          </div>
-        </div>
-        <SkeletonLoader type="form" count={4} />
+      <div className="py-20 text-center flex items-center justify-center">
+        <ThreeDotsLoader text="Memuat instrumen kuisioner..." />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 text-red-700 p-6 rounded-2xl flex items-center space-x-3">
-        <AlertCircle className="w-6 h-6 shrink-0" />
-        <div>
-          <h4 className="font-semibold text-red-900">Gagal Memuat Kuisioner</h4>
-          <p className="text-sm">{error}</p>
-        </div>
-      </div>
+      <ConnectionErrorCard
+        title="Gagal Memuat Kuisioner Survei"
+        message={error || 'Sistem tidak dapat terhubung ke server. Silakan periksa koneksi internet Anda atau coba beberapa saat lagi.'}
+        onRetry={() => window.location.reload()}
+      />
     );
   }
 
@@ -869,7 +863,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
         <div className="space-y-2">
           <h2 className="text-2xl font-bold text-slate-800">Terima Kasih!</h2>
           <p className="text-slate-600">
-            Jawaban kuesioner BSAN Anda telah berhasil disimpan ke database real. Data ini akan digunakan untuk analisis efektivitas program di Jawa Timur.
+            Jawaban kuesioner BSAN Anda telah berhasil disimpan. Data ini akan digunakan untuk analisis efektivitas program di Jawa Timur.
           </p>
         </div>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
@@ -961,7 +955,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                   <Save className="w-3.5 h-3.5 text-emerald-400" /> Draft Otomatis
                 </span>
                 <span className="flex items-center gap-1.5 font-medium bg-white/5 px-3 py-1.5 rounded-xl border border-white/10">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" /> Estimasi ~10 Mnt
+                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" /> Estimasi ~10 Mnt
                 </span>
               </div>
             </div>
@@ -1149,13 +1143,10 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                     secQuestions.map((q, qIdx) => (
                     <div
                       key={q.id}
-                      draggable
-                      onDragStart={e => handleDragStart(e, q.id)}
-                      onDragEnd={handleDragEnd}
                       onDragOver={e => handleDragOver(e, q.id, secQuestions)}
                       onDragLeave={handleDragLeave}
                       onDrop={() => handleDropQuestion(q.id, secQuestions)}
-                      className={`p-4 rounded-xl bg-white border transition-all duration-200 flex items-center justify-between gap-4 group cursor-grab active:cursor-grabbing ${draggedQuestionId === q.id
+                      className={`p-4 rounded-xl bg-white border transition-all duration-200 flex items-center justify-between gap-4 group ${draggedQuestionId === q.id
                           ? 'border-indigo-500 bg-indigo-50/60 shadow-lg scale-[0.99] opacity-40 border-dashed'
                           : dragOverQuestionId === q.id
                             ? 'border-indigo-600 bg-indigo-50/30 scale-[1.01] shadow-md border-t-2'
@@ -1173,7 +1164,13 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                         )}
 
                         {/* 6-Dots Drag Handle Icon Centered Vertically */}
-                        <div className="p-1.5 rounded-md text-slate-300 group-hover:text-indigo-600 group-hover:bg-indigo-50 transition cursor-grab shrink-0 flex items-center justify-center" title="Tarik & Geser untuk mengubah urutan">
+                        <div
+                          draggable
+                          onDragStart={e => handleDragStart(e, q.id)}
+                          onDragEnd={handleDragEnd}
+                          className="p-1.5 rounded-md text-slate-300 group-hover:text-indigo-600 group-hover:bg-indigo-50 transition cursor-grab active:cursor-grabbing shrink-0 flex items-center justify-center"
+                          title="Tarik & Geser untuk mengubah urutan"
+                        >
                           <GripVertical className="w-5 h-5 stroke-[2.5]" />
                         </div>
 
@@ -1189,14 +1186,16 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                             <span>
                               Tipe: <strong className="text-indigo-600 capitalize">
                                 {q.tipe === 'school_select' || q.kode_pertanyaan === 'Q4'
-                                  ? 'Dropdown Database Sekolah'
+                                  ? 'Pilih Sekolah'
                                   : q.tipe === 'text'
-                                    ? 'Teks Isian'
+                                    ? 'Teks Isian / Esai'
                                     : q.tipe === 'radio'
-                                      ? 'Pilihan Ganda'
-                                      : q.tipe === 'dropdown'
-                                        ? 'Dropdown Custom'
-                                        : q.tipe}
+                                      ? 'Pilihan Ganda (Radio)'
+                                      : q.tipe === 'checkbox'
+                                        ? 'Pilihan Jamak (Checkbox)'
+                                        : q.tipe === 'dropdown'
+                                          ? 'Pilihan Dropdown'
+                                          : q.tipe}
                               </strong>
                             </span>
                             <span>•</span>
@@ -1251,7 +1250,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
         {/* Modal Admin Add/Edit Question */}
         {isModalOpen && createPortal(
           <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-xl overflow-hidden animate-scale-in">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-xl overflow-visible animate-scale-in">
               <div className="flex items-center justify-between p-5 border-b border-slate-100">
                 <div className="flex items-center space-x-2">
                   <FileText className="w-5 h-5 text-indigo-600" />
@@ -1324,20 +1323,20 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                     <CustomSelect
                       label="Tipe Isian"
                       options={[
-                        { value: 'school_select', label: 'Dropdown Database Sekolah (Auto Fetch)' },
-                        { value: 'kabupaten_select', label: 'Dropdown Database Kabupaten (Auto Fetch)' },
-                        { value: 'kecamatan_select', label: 'Dropdown Database Kecamatan (Auto Fetch)' },
-                        { value: 'dropdown', label: 'Dropdown Options (Opsi Manual)' },
                         { value: 'radio', label: 'Pilihan Ganda (Radio)' },
                         { value: 'checkbox', label: 'Pilihan Jamak (Checkbox)' },
+                        { value: 'dropdown', label: 'Dropdown Options (Pilihan Dropdown)' },
                         { value: 'text', label: 'Teks Isian / Esai' },
+                        { value: 'school_select', label: 'Pilih Sekolah (Auto Search)' },
+                        { value: 'kabupaten_select', label: 'Pilih Kabupaten / Kota (Auto Search)' },
+                        { value: 'kecamatan_select', label: 'Pilih Kecamatan (Auto Search)' },
                       ]}
                       value={formTipe}
                       onChange={val => {
                         const newTipe = val as any;
                         setFormTipe(newTipe);
-                        if ((newTipe === 'radio' || newTipe === 'dropdown' || newTipe === 'checkbox') && !formOpsi.trim()) {
-                          setFormOpsi('Sudah\nBelum\nDalam Proses');
+                        if ((newTipe === 'radio' || newTipe === 'dropdown' || newTipe === 'checkbox') && formOpsiList.length === 0) {
+                          setFormOpsiList(['Sudah', 'Belum', 'Dalam Proses']);
                         }
                       }}
                       size="md"
@@ -1361,26 +1360,59 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                   <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 space-y-1 animate-fade-in">
                     <div className="font-bold flex items-center gap-1.5 text-emerald-800">
                       <Building2 className="w-4 h-4 text-emerald-600" />
-                      <span>Auto Fetch Database Sekolah</span>
+                      <span>Pilih Sekolah Otomatis</span>
                     </div>
                     <p className="text-[11px] text-emerald-700 leading-relaxed">
-                      Pertanyaan ini akan secara otomatis menampilkan dropdown pencarian daftar sekolah sasaran (200+ SD/MI) langsung dari database MySQL saat diisi oleh pengawas/responden. Anda tidak perlu memasukkan opsi secara manual.
+                      Pertanyaan ini akan menampilkan pencarian nama sekolah secara otomatis dari sistem. Opsi pilihan tidak perlu diinput manual.
                     </p>
                   </div>
                 )}
 
-                {formTipe !== 'text' && formTipe !== 'school_select' && (
-                  <div className="space-y-1">
-                    <label className="font-bold text-slate-600 uppercase text-[10px]">
-                      Opsi Jawaban (Satu Opsi Per Baris)
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={formOpsi}
-                      onChange={e => setFormOpsi(e.target.value)}
-                      placeholder="Masukkan pilihan 1&#10;Masukkan pilihan 2&#10;Masukkan pilihan 3"
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none font-mono text-xs"
-                    />
+                {formTipe !== 'text' && formTipe !== 'school_select' && formTipe !== 'kabupaten_select' && formTipe !== 'kecamatan_select' && (
+                  <div className="space-y-2 pt-1">
+                    <div className="flex items-center justify-between">
+                      <label className="font-bold text-slate-600 uppercase text-[10px]">
+                        Daftar Opsi Pilihan ({formOpsiList.length})
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setFormOpsiList(prev => [...prev, `Pilihan ${prev.length + 1}`])}
+                        className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 cursor-pointer bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200/80 transition"
+                      >
+                        <Plus className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>Tambah Opsi</span>
+                      </button>
+                    </div>
+
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {formOpsiList.map((optVal, optIdx) => (
+                        <div key={optIdx} className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-lg bg-slate-100 text-slate-500 text-xs font-bold flex items-center justify-center shrink-0">
+                            {optIdx + 1}
+                          </div>
+                          <input
+                            type="text"
+                            value={optVal}
+                            onChange={(e) => {
+                              const newArr = [...formOpsiList];
+                              newArr[optIdx] = e.target.value;
+                              setFormOpsiList(newArr);
+                            }}
+                            placeholder={`Tulis opsi ${optIdx + 1}...`}
+                            className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-slate-800 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            disabled={formOpsiList.length <= 1}
+                            onClick={() => setFormOpsiList(prev => prev.filter((_, i) => i !== optIdx))}
+                            className="p-2 rounded-lg border border-slate-200 hover:bg-rose-50 hover:border-rose-200 hover:text-rose-600 text-slate-400 transition cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                            title="Hapus opsi ini"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -1659,13 +1691,13 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                   />
                   {userProfile?.sekolah_nama && currentVal === userProfile.sekolah_nama ? (
                     <p className="text-[11px] text-emerald-600 font-medium italic mt-1 flex items-center gap-1.5 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/60 w-fit">
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0 animate-pulse" />
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                       <span>Asal Sekolah terisi otomatis dari akun terintegrasi: <strong>{userProfile.sekolah_nama}</strong></span>
                     </p>
                   ) : (
                     <p className="text-[11px] text-slate-500 italic mt-1 flex items-center gap-1">
-                      <Sparkles className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                      <span>Daftar sekolah diambil secara otomatis dari database resmi MySQL.</span>
+                      <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                      <span>Daftar sekolah terintegrasi secara otomatis dari data resmi.</span>
                     </p>
                   )}
                 </div>
@@ -1689,7 +1721,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                   />
                   {userProfile?.kabupaten_nama && currentVal === userProfile.kabupaten_nama && (
                     <p className="text-[11px] text-emerald-600 font-medium italic mt-1 flex items-center gap-1.5 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/60 w-fit">
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0 animate-pulse" />
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                       <span>Kabupaten terisi otomatis dari akun terintegrasi: <strong>{userProfile.kabupaten_nama}</strong></span>
                     </p>
                   )}
@@ -1714,7 +1746,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                   />
                   {currentVal && (userProfile?.kecamatan_nama === currentVal || dbSchoolsList.some(s => s.nama === userProfile?.sekolah_nama && s.kecamatan === currentVal)) && (
                     <p className="text-[11px] text-emerald-600 font-medium italic mt-1 flex items-center gap-1.5 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/60 w-fit">
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0 animate-pulse" />
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                       <span>Kecamatan terisi otomatis dari akun terintegrasi: <strong>{currentVal}</strong></span>
                     </p>
                   )}
@@ -1734,7 +1766,11 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
               )}
 
               {q.tipe === 'radio' && q.opsi_jawaban && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <div className={`grid gap-2.5 ${
+                  q.opsi_jawaban.some(opt => opt.length > 40)
+                    ? 'grid-cols-1'
+                    : 'grid-cols-1 md:grid-cols-2'
+                }`}>
                   {q.opsi_jawaban.map((opt, i) => {
                     const isSelected = currentVal === opt;
                     return (
@@ -1742,13 +1778,13 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                         key={i}
                         type="button"
                         onClick={() => handleAnswerChange(q.id, opt)}
-                        className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-left border text-xs font-medium transition ${isSelected
-                          ? 'bg-indigo-50 border-indigo-500 text-indigo-900 shadow-xs'
-                          : 'bg-white border-slate-200/80 text-slate-700 hover:bg-slate-100/80'
+                        className={`flex items-start justify-between p-3.5 rounded-xl text-left border text-xs font-medium transition-all duration-200 cursor-pointer ${isSelected
+                          ? 'bg-indigo-50/80 border-indigo-500 text-indigo-950 shadow-xs ring-1 ring-indigo-500/20'
+                          : 'bg-white border-slate-200/80 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
                           }`}
                       >
-                        <span>{opt}</span>
-                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ml-2 ${isSelected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300'
+                        <span className="leading-relaxed flex-1 pr-3">{opt}</span>
+                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 mt-0.5 ${isSelected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300'
                           }`}>
                           {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
                         </div>
@@ -1759,7 +1795,11 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
               )}
 
               {q.tipe === 'checkbox' && q.opsi_jawaban && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <div className={`grid gap-2.5 ${
+                  q.opsi_jawaban.some(opt => opt.length > 40)
+                    ? 'grid-cols-1'
+                    : 'grid-cols-1 md:grid-cols-2'
+                }`}>
                   {q.opsi_jawaban.map((opt, i) => {
                     const selectedArr: string[] = Array.isArray(currentVal) ? currentVal : [];
                     const isChecked = selectedArr.includes(opt);
@@ -1775,13 +1815,13 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                         key={i}
                         type="button"
                         onClick={toggleCheck}
-                        className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-left border text-xs font-medium transition ${isChecked
-                          ? 'bg-indigo-50 border-indigo-500 text-indigo-900 shadow-xs'
-                          : 'bg-white border-slate-200/80 text-slate-700 hover:bg-slate-100/80'
+                        className={`flex items-start justify-between p-3.5 rounded-xl text-left border text-xs font-medium transition-all duration-200 cursor-pointer ${isChecked
+                          ? 'bg-indigo-50/80 border-indigo-500 text-indigo-950 shadow-xs ring-1 ring-indigo-500/20'
+                          : 'bg-white border-slate-200/80 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
                           }`}
                       >
-                        <span>{opt}</span>
-                        <div className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 ml-2 ${isChecked ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300'
+                        <span className="leading-relaxed flex-1 pr-3">{opt}</span>
+                        <div className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 mt-0.5 ${isChecked ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300'
                           }`}>
                           {isChecked && <Check className="w-2.5 h-2.5 stroke-[3]" />}
                         </div>
@@ -1802,7 +1842,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                   />
                   {q.kode_pertanyaan === 'Q1' && userProfile?.nama && currentVal === userProfile.nama && (
                     <p className="text-[11px] text-emerald-600 font-medium italic flex items-center gap-1.5 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-200/60 w-fit">
-                      <Sparkles className="w-3 h-3 text-emerald-600 shrink-0 animate-pulse" />
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
                       <span>Nama Responden terisi otomatis dari akun terintegrasi: <strong>{userProfile.nama}</strong></span>
                     </p>
                   )}
@@ -1892,7 +1932,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
         onClose={() => setIsBulkDeleteModalOpen(false)}
         onConfirm={handleBulkDelete}
         title={`Hapus ${selectedQuestionIds.length} Pertanyaan`}
-        description={`Apakah Anda yakin ingin menghapus ${selectedQuestionIds.length} pertanyaan terpilih? Seluruh instrumen tersebut akan dihapus permanen dari MySQL.`}
+        description={`Apakah Anda yakin ingin menghapus ${selectedQuestionIds.length} pertanyaan terpilih? Seluruh instrumen tersebut akan dihapus permanen.`}
         confirmLabel="Hapus Semua"
         cancelLabel="Batal"
         variant="danger"
@@ -1905,7 +1945,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
         onClose={() => setDeleteSectionConfirmKey(null)}
         onConfirm={confirmDeleteSection}
         title={`Hapus Section "${deleteSectionConfirmKey ? (allSectionMeta[deleteSectionConfirmKey]?.title || deleteSectionConfirmKey) : ''}"?`}
-        description={`Apakah Anda yakin ingin menghapus bagian ini beserta seluruh (${deleteSectionConfirmKey ? questions.filter(q => q.section === deleteSectionConfirmKey).length : 0}) butir pertanyaannya? Pertanyaan pada bagian ini akan dinonaktifkan di database.`}
+        description={`Apakah Anda yakin ingin menghapus bagian ini beserta seluruh (${deleteSectionConfirmKey ? questions.filter(q => q.section === deleteSectionConfirmKey).length : 0}) butir pertanyaannya? Pertanyaan pada bagian ini akan dinonaktifkan.`}
         confirmLabel="Hapus Section"
         cancelLabel="Batal"
         variant="danger"

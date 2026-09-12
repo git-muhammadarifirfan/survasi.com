@@ -5,7 +5,7 @@
  * @api POST /api/sel/sesi, PUT /api/sel/sesi/:id, POST /api/sel/jawaban
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { database, KABUPATEN_LIST, KECAMATAN_LIST } from '../../../shared/data/data-source';
@@ -25,6 +25,8 @@ import CustomSelect from '../../../shared/components/CustomSelect';
 import { apiClient } from '../../../shared/services/api-client';
 import { LoadingIndicator } from '../../../shared/components/LoadingIndicator';
 import { notifyToast } from '../../../shared/components/NotificationToast';
+import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
+import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
 
 // ─── Helpers ──────────────────────────────────────── ────────────
 
@@ -386,6 +388,51 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
     staleTime: 5 * 60 * 1000,
   });
 
+  // Fetch real-time 1200+ schools from MySQL database API (satuan_pendidikan table)
+  const { data: dbSchoolsList = [], isLoading: isLoadingDbSchools } = useQuery({
+    queryKey: ['db-schools-wizard'],
+    queryFn: () => database.getSchools(),
+    staleTime: 2 * 60 * 1000,
+  });
+
+  // Fetch real-time kecamatan list from MySQL API
+  const { data: dbKecamatanList = [] } = useQuery({
+    queryKey: ['db-kecamatan-wizard', kabupaten],
+    queryFn: () => database.getKecamatanList(kabupaten),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Fetch real-time kabupaten list from MySQL API
+  const { data: dbKabupatenList = [] } = useQuery({
+    queryKey: ['db-kabupaten-wizard'],
+    queryFn: () => database.getKabupatenList(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Filter schools options dynamically based on selected kabupaten and kecamatan
+  const dbSchoolsOptions = useMemo(() => {
+    let list = dbSchoolsList;
+    if (kabupaten) {
+      const filtered = list.filter(s => s.kabupaten.toLowerCase() === kabupaten.toLowerCase());
+      if (filtered.length > 0) list = filtered;
+    }
+    if (kecamatan) {
+      const filtered = list.filter(s => s.kecamatan.toLowerCase() === kecamatan.toLowerCase());
+      if (filtered.length > 0) list = filtered;
+    }
+    return list;
+  }, [dbSchoolsList, kabupaten, kecamatan]);
+
+  const handleSelectSchoolFromDb = (schNama: string) => {
+    setSekolahNama(schNama);
+    const matched = dbSchoolsList.find(s => s.nama.toLowerCase().trim() === schNama.toLowerCase().trim());
+    if (matched) {
+      if (matched.kecamatan) setKecamatan(matched.kecamatan);
+      if (matched.kabupaten) setKabupaten(matched.kabupaten);
+      if (matched.id) setSelectedSekolahId(Number(matched.id) || null);
+    }
+  };
+
   const { data: allExistingSessions = [] } = useQuery({
     queryKey: ['selObservationsAll'],
     queryFn: () => database.getSELObservations(),
@@ -425,11 +472,11 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
       queryClient.invalidateQueries({ queryKey: ['selStats'] });
       queryClient.invalidateQueries({ queryKey: ['selObservations'] });
       queryClient.invalidateQueries({ queryKey: ['selObservationsAll'] });
-      showToast(res.message || 'Sesi observasi SEL berhasil disimpan ke database MySQL!', 'success', 'Sesi Tersimpan');
+      showToast(res.message || 'Sesi observasi SEL berhasil disimpan!', 'success', 'Sesi Tersimpan');
       onSubmitDone?.();
     },
     onError: (err: any) => {
-      showToast(err.message || 'Gagal menyimpan ke server database. Silakan periksa kembali data Anda.', 'error', 'Gagal Menyimpan');
+      showToast(err.message || 'Gagal menyimpan data observasi. Silakan periksa kembali data Anda.', 'error', 'Gagal Menyimpan');
       scrollToTop();
     }
   });
@@ -470,24 +517,6 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
       }
     }
     setShowConfirmModal(true);
-  };
-
-  const { data: dbSchoolsOptions = [], isLoading: isLoadingDbSchools } = useQuery({
-    queryKey: ['db-schools-wizard', kabupaten, kecamatan],
-    queryFn: () => database.getSchools({
-      kabupaten: kabupaten || undefined,
-      kecamatan: kecamatan || undefined,
-    }),
-  });
-
-  const handleSelectSchoolFromDb = (nama: string) => {
-    setSekolahNama(nama);
-    const found = dbSchoolsOptions.find(s => s.nama === nama);
-    if (found) {
-      setSelectedSekolahId(found.id ? Number(found.id) : null);
-      if (found.kecamatan) setKecamatan(found.kecamatan);
-      if (found.kabupaten) setKabupaten(found.kabupaten);
-    }
   };
 
   const executeSubmit = () => {
@@ -597,12 +626,16 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
             >
               <CustomSelect
                 label="Kabupaten / Kota *"
-                options={KABUPATEN_LIST.map(k => ({ value: k.name, label: k.name }))}
+                options={[
+                  { value: '', label: '-- Pilih Kabupaten / Kota --' },
+                  ...dbKabupatenList.map(k => ({ value: k.nama, label: k.nama }))
+                ]}
                 value={kabupaten}
                 onChange={(val) => {
                   if (highlightedFieldId === 'field-kabupaten') setHighlightedFieldId(null);
                   setKabupaten(val);
                 }}
+                enableSearch={true}
               />
             </div>
             <div
@@ -614,7 +647,7 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
                 label="Kecamatan *"
                 options={[
                   { value: '', label: '-- Pilih Kecamatan --' },
-                  ...KECAMATAN_LIST.map(k => ({ value: k, label: k }))
+                  ...dbKecamatanList.map(k => ({ value: k.nama, label: k.nama }))
                 ]}
                 value={kecamatan}
                 onChange={(val) => {
@@ -633,8 +666,8 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
               <CustomSelect
                 label=""
                 options={[
-                  { value: '', label: isLoadingDbSchools ? 'Memuat daftar sekolah dari database...' : '-- Pilih / Cari Nama Sekolah Sasaran --' },
-                  ...dbSchoolsOptions.map(s => ({
+                  { value: '', label: isLoadingDbSchools ? 'Memuat daftar sekolah...' : '-- Pilih / Cari Nama Sekolah Sasaran --' },
+                  ...dbSchoolsOptions.map((s: any) => ({
                     value: s.nama,
                     label: `${s.nama} (${s.npsn || 'NPSN'}) • Kec. ${s.kecamatan}, ${s.kabupaten}`,
                   }))
@@ -656,7 +689,7 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
                   <span>Sesi Observasi SEL untuk Sekolah ini Sudah Pernah Dikirim</span>
                 </div>
                 <p className="text-xs text-amber-800 leading-relaxed">
-                  Data pengamatan untuk <strong>{existingSchoolSession.sekolahNama}</strong> telah tersimpan di database (Dikirim pada {existingSchoolSession.tanggal} oleh {existingSchoolSession.observerNama || 'Observer'}).
+                  Data pengamatan untuk <strong>{existingSchoolSession.sekolahNama}</strong> telah tersimpan (Dikirim pada {existingSchoolSession.tanggal} oleh {existingSchoolSession.observerNama || 'Observer'}).
                 </p>
                 <div className="flex flex-wrap gap-2 pt-1">
                   <button
@@ -944,7 +977,7 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
               </div>
               <div>
                 <h3 className="font-bold text-text-primary text-base font-display">Konfirmasi Kirim Observasi</h3>
-                <p className="text-xs text-text-secondary mt-0.5">Pastikan data pengamatan sudah benar sebelum disimpan ke database.</p>
+                <p className="text-xs text-text-secondary mt-0.5">Pastikan data pengamatan sudah benar sebelum disimpan.</p>
               </div>
             </div>
 
@@ -953,7 +986,7 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
                 Pengiriman Data Permanen
               </p>
               <p className="text-[11px] text-amber-800">
-                Data observasi SEL akan langsung tersimpan di database MySQL dan dijadikan acuan rekapitulasi Dinas Pendidikan.
+                Data observasi SEL akan langsung tersimpan di sistem dan dijadikan acuan rekapitulasi Dinas Pendidikan.
               </p>
             </div>
 
@@ -1349,7 +1382,13 @@ function AdminObservasiPanel() {
   const [selectedSession, setSelectedSession] = useState<SELObservasiSession | null>(null);
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
 
-  const { data: rawSessions = [], isLoading, refetch } = useQuery({
+  const { data: dbKabupatenList = [] } = useQuery({
+    queryKey: ['db-kabupaten-panel'],
+    queryFn: () => database.getKabupatenList(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: rawSessions = [], isLoading, isError, error: fetchError, refetch } = useQuery({
     queryKey: ['selObservations', selectedKab],
     queryFn: () => database.getSELObservations({ kabupaten: selectedKab || undefined }),
   });
@@ -1391,6 +1430,16 @@ function AdminObservasiPanel() {
     setDeletedIds(prev => new Set([...prev, id]));
     queryClient.invalidateQueries({ queryKey: ['selStats'] });
   };
+
+  if (isError) {
+    return (
+      <ConnectionErrorCard
+        title="Gagal Memuat Data Observasi SEL"
+        message={(fetchError as any)?.message || 'Gagal terhubung ke server.'}
+        onRetry={() => refetch()}
+      />
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -1441,7 +1490,7 @@ function AdminObservasiPanel() {
             <CustomSelect
               options={[
                 { value: '', label: 'Semua Kabupaten' },
-                ...KABUPATEN_LIST.map(k => ({ value: k.name, label: k.name }))
+                ...dbKabupatenList.map(k => ({ value: k.nama, label: k.nama }))
               ]}
               value={selectedKab}
               onChange={(val) => setSelectedKab(val)}
@@ -1504,7 +1553,11 @@ function AdminObservasiPanel() {
             </thead>
             <tbody>
               {isLoading ? (
-                <tr><td colSpan={7} className="py-12 text-center text-text-secondary animate-pulse">Memuat data...</td></tr>
+                <tr>
+                  <td colSpan={7} className="py-16 text-center">
+                    <ThreeDotsLoader text="Memuat data sesi observasi SEL..." />
+                  </td>
+                </tr>
               ) : visibleSessions.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-16 px-4 text-center">
@@ -1514,7 +1567,7 @@ function AdminObservasiPanel() {
                       </div>
                       <h3 className="text-base font-bold text-text-primary font-display">Belum Ada Sesi Observasi SEL</h3>
                       <p className="text-xs text-text-secondary leading-relaxed">
-                        Database pengamatan observasi SEL saat ini masih bersih (0 sesi). Data pengamatan akan muncul secara otomatis setelah Pengawas Sekolah menginput hasil pengamatan di lapangan.
+                        Daftar pengamatan observasi SEL saat ini belum ada data (0 sesi). Data pengamatan akan muncul secara otomatis setelah Pengawas Sekolah menginput hasil pengamatan di lapangan.
                       </p>
                     </div>
                   </td>

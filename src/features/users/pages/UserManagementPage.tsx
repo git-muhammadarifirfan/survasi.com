@@ -11,11 +11,13 @@ import {
   Trash2, Mail, ChevronLeft, ChevronRight, Edit, School, Lock, RefreshCw
 } from 'lucide-react';
 import { apiClient } from '../../../shared/services/api-client';
+import { database } from '../../../shared/data/data-source';
 import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
 import ConfirmationModal from '../../../shared/components/ConfirmationModal';
 import NotificationManagerModal from '../../notifikasi/components/NotificationManagerModal';
 import { notifyToast } from '../../../shared/components/NotificationToast';
 import CustomSelect from '../../../shared/components/CustomSelect';
+import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
 
 export default function UserManagementPage() {
   const queryClient = useQueryClient();
@@ -47,20 +49,38 @@ export default function UserManagementPage() {
   useEffect(() => {
     apiClient.sekolah.getOptions()
       .then((res) => {
-        if (res.success && Array.isArray(res.data)) {
+        if (res.success && Array.isArray(res.data) && res.data.length > 0) {
           setSekolahOptions(res.data);
+        } else {
+          database.getSchools().then(schools => setSekolahOptions(schools));
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        database.getSchools().then(schools => setSekolahOptions(schools));
+      });
   }, []);
 
   // Fetch users with pagination
-  const { data, isLoading, isError, error: fetchError } = useQuery({
+  const { data, isLoading, isError, error: fetchError, refetch } = useQuery({
     queryKey: ['usersList', roleFilter, search, page, limit],
     queryFn: () => apiClient.users.getAll({ page, limit, role: roleFilter || undefined, search: search || undefined }),
   });
 
-  const usersList = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+  const rawUsersList = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+
+  const rolePriority: Record<string, number> = {
+    admin: 1,
+    pengawas: 2,
+    sekolah: 3,
+  };
+
+  const usersList = [...rawUsersList].sort((a: any, b: any) => {
+    const pA = rolePriority[a.role?.toLowerCase()] ?? 99;
+    const pB = rolePriority[b.role?.toLowerCase()] ?? 99;
+    if (pA !== pB) return pA - pB;
+    return (a.nama || '').localeCompare(b.nama || '');
+  });
+
   const totalItems = data?.total || usersList.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / limit));
 
@@ -76,7 +96,7 @@ export default function UserManagementPage() {
       });
     },
     onError: (err: any) => {
-      notifyToast({ type: 'error', title: 'Gagal Ubah Status', message: err?.message || 'Gagal mengupdate status user.' });
+      notifyToast({ type: 'error', title: 'Gagal Ubah Status', message: err?.message || 'Gagal memperbarui status pengguna.' });
     }
   });
 
@@ -169,8 +189,8 @@ export default function UserManagementPage() {
         }
       }
     } catch (err: any) {
-      setFormError(err.message || 'Gagal menyimpan data user.');
-      notifyToast({ type: 'error', title: 'Gagal Menyimpan', message: err.message || 'Gagal menyimpan data user.' });
+      setFormError(err.message || 'Gagal menyimpan data pengguna.');
+      notifyToast({ type: 'error', title: 'Gagal Menyimpan', message: err.message || 'Gagal menyimpan data pengguna.' });
     }
   };
 
@@ -192,6 +212,16 @@ export default function UserManagementPage() {
     for (let i = start; i <= end; i++) range.push(i);
     return range;
   };
+
+  if (isError) {
+    return (
+      <ConnectionErrorCard
+        title="Gagal Memuat Daftar Pengguna"
+        message={(fetchError as any)?.message || 'Gagal terhubung ke server.'}
+        onRetry={() => refetch()}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -260,7 +290,7 @@ export default function UserManagementPage() {
           <div className="w-48">
             <CustomSelect
               options={[
-                { value: '', label: 'Semua Stakeholder' },
+                { value: '', label: 'Semua Pengguna' },
                 { value: 'admin', label: 'Admin System' },
                 { value: 'pengawas', label: 'Pengawas Sekolah' },
                 { value: 'sekolah', label: 'Perwakilan Sekolah' },
@@ -280,12 +310,6 @@ export default function UserManagementPage() {
           <div className="p-12 text-center">
             <ThreeDotsLoader text="Memuat daftar pengguna..." />
           </div>
-        ) : isError ? (
-          <div className="p-12 text-center text-status-belum space-y-2">
-            <XCircle className="h-10 w-10 mx-auto opacity-60" />
-            <p className="font-bold text-sm">Gagal mengambil daftar user</p>
-            <p className="text-xs text-text-secondary">{(fetchError as any)?.message || 'Pastikan Anda login sebagai Admin.'}</p>
-          </div>
         ) : usersList.length === 0 ? (
           <div className="p-12 text-center text-text-secondary space-y-2">
             <Users className="h-10 w-10 mx-auto text-text-secondary/40" />
@@ -297,6 +321,7 @@ export default function UserManagementPage() {
               <table className="w-full text-left text-xs">
                 <thead className="bg-bg/80 border-b border-border text-[10px] font-bold text-text-secondary uppercase tracking-wider">
                   <tr>
+                    <th className="py-3.5 px-3 text-center w-12">No.</th>
                     <th className="py-3.5 px-4">Pengguna</th>
                     <th className="py-3.5 px-4">Role</th>
                     <th className="py-3.5 px-4">Instansi / Sekolah Terintegrasi</th>
@@ -306,8 +331,11 @@ export default function UserManagementPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {usersList.map((u: any) => (
+                  {usersList.map((u: any, idx: number) => (
                     <tr key={u.id} className="hover:bg-bg/40 transition-colors">
+                      <td className="py-3.5 px-3 text-center font-bold text-text-secondary text-[11px]">
+                        {(page - 1) * limit + idx + 1}
+                      </td>
                       <td className="py-3.5 px-4">
                         <div className="flex items-center space-x-3">
                           <div className="h-8 w-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0">
@@ -341,11 +369,10 @@ export default function UserManagementPage() {
                       <td className="py-3.5 px-4">
                         <button
                           onClick={() => toggleMutation.mutate({ id: u.id, isActive: !u.is_active })}
-                          className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold cursor-pointer transition-all ${
-                            u.is_active
+                          className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold cursor-pointer transition-all ${u.is_active
                               ? 'bg-emerald-500/10 text-emerald-600 border border-emerald-200 hover:bg-emerald-500/20'
                               : 'bg-rose-500/10 text-rose-600 border border-rose-200 hover:bg-rose-500/20'
-                          }`}
+                            }`}
                         >
                           {u.is_active ? (
                             <>
@@ -387,7 +414,7 @@ export default function UserManagementPage() {
               <p className="text-[11px] text-text-secondary font-medium">
                 Menampilkan {Math.min((page - 1) * limit + 1, totalItems)} - {Math.min(page * limit, totalItems)} dari {totalItems} pengguna
               </p>
-              
+
               <div className="flex items-center space-x-1">
                 <button
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -402,9 +429,8 @@ export default function UserManagementPage() {
                   <button
                     key={p}
                     onClick={() => setPage(p)}
-                    className={`h-7 w-7 rounded-lg text-xs font-bold transition-smooth cursor-pointer ${
-                      page === p ? 'bg-primary text-white shadow-sm' : 'text-text-secondary hover:bg-bg'
-                    }`}
+                    className={`h-7 w-7 rounded-lg text-xs font-bold transition-smooth cursor-pointer ${page === p ? 'bg-primary text-white shadow-sm' : 'text-text-secondary hover:bg-bg'
+                      }`}
                   >
                     {p}
                   </button>
