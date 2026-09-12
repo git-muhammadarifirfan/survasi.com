@@ -23,8 +23,8 @@ router.get('/options', async (req, res) => {
         sp.id, sp.npsn, sp.nama, sp.jenjang,
         k.nama AS kecamatan, kb.nama AS kabupaten
       FROM satuan_pendidikan sp
-      JOIN kecamatan k ON sp.kecamatan_id = k.id
-      JOIN kabupaten kb ON k.kabupaten_id = kb.id
+      LEFT JOIN kecamatan k ON sp.kecamatan_id = k.id
+      LEFT JOIN kabupaten kb ON k.kabupaten_id = kb.id
       ORDER BY sp.nama ASC
     `);
     return res.json({ success: true, data: rows });

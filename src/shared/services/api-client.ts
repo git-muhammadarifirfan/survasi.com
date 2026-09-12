@@ -27,10 +27,25 @@ async function fetchJson<T>(endpoint: string, options?: RequestInit): Promise<T>
     ...(options?.headers || {}),
   };
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${endpoint}`, { ...options, headers });
+  } catch (err: any) {
+    if (err.name === 'TypeError' || err.message?.includes('fetch') || err.message?.includes('Failed')) {
+      throw new Error('Gagal terhubung ke sistem. Silakan periksa koneksi internet Anda atau coba beberapa saat lagi.');
+    }
+    throw err;
+  }
 
-  // Auto-redirect on unauthorized (kecuali endpoint login)
-  if (response.status === 401 && !endpoint.startsWith('/auth/login')) {
+  // Auto-redirect on unauthorized (kecuali endpoint login / registrasi / public auth pages)
+  const isAuthPage = typeof window !== 'undefined' && (
+    window.location.pathname.startsWith('/login') ||
+    window.location.pathname.startsWith('/register') ||
+    window.location.pathname.startsWith('/forgot-password') ||
+    window.location.pathname.startsWith('/verify-otp')
+  );
+
+  if (response.status === 401 && !endpoint.startsWith('/auth') && !endpoint.startsWith('/sekolah/options') && !isAuthPage) {
     localStorage.removeItem(TOKEN_KEY);
     window.location.href = '/login';
     throw new Error('Sesi berakhir. Silakan login kembali.');
@@ -95,7 +110,7 @@ export const apiClient = {
       }),
 
     /** Registrasi akun sekolah baru */
-    registerSekolah: (payload: { nama: string; email: string; password: string; sekolah_id: number }) =>
+    registerSekolah: (payload: { nama: string; email: string; password: string; sekolah_id: number; sekolah_nama?: string }) =>
       fetchJson<{ success: boolean; token: string; user: any; message: string }>('/auth/register-sekolah', {
         method: 'POST',
         body: JSON.stringify(payload),
@@ -104,6 +119,34 @@ export const apiClient = {
     /** Registrasi akun pengawas baru */
     registerPengawas: (payload: { nama: string; email: string; password: string }) =>
       fetchJson<{ success: boolean; token: string; user: any; message: string }>('/auth/register-pengawas', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    /** Kirim ulang kode OTP baru (Kode lama otomatis hangus) */
+    resendOtp: (payload: { email: string; nama?: string; type?: string }) =>
+      fetchJson<{ success: boolean; message: string }>('/auth/resend-otp', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    /** Permintaan reset password / kirim kode OTP reset */
+    forgotPassword: (payload: { email: string }) =>
+      fetchJson<{ success: boolean; message: string }>('/auth/forgot-password', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    /** Verifikasi kode OTP */
+    verifyOtp: (payload: { email: string; otp_code: string }) =>
+      fetchJson<{ success: boolean; verified: boolean; type: string; message: string }>('/auth/verify-otp', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+
+    /** Reset password setelah OTP terverifikasi */
+    resetPassword: (payload: { email: string; otp_code: string; new_password: string }) =>
+      fetchJson<{ success: boolean; message: string }>('/auth/reset-password', {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
