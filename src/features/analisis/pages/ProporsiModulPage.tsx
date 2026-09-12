@@ -18,6 +18,7 @@ import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts';
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
+import CustomSelect from '../../../shared/components/CustomSelect';
 
 const TABS = [
   { id: 'penerima', label: 'Proporsi Penerima', icon: PieIcon },
@@ -58,13 +59,18 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 export default function ProporsiModul() {
   const [activeTab, setActiveTab] = useState<TabId>('penerima');
-  const [kabupaten, setKabupaten] = useState('Kab. Sidoarjo');
-  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [kabupaten, setKabupaten] = useState('Semua Wilayah');
 
   const { data, isLoading } = useQuery({
     queryKey: ['proporsiModul', kabupaten],
     queryFn: () => database.getProporsiModulData(kabupaten),
   });
+
+  const regionOptions = KABUPATEN_LIST.map(k => ({
+    value: k.id,
+    label: k.name,
+    icon: <span className="w-2.5 h-2.5 rounded-full shrink-0 inline-block" style={{ backgroundColor: k.color }} />
+  }));
 
   const ActiveIcon = TABS.find(t => t.id === activeTab)?.icon || PieIcon;
 
@@ -95,34 +101,13 @@ export default function ProporsiModul() {
         </div>
 
         {/* Filter Kabupaten */}
-        <div className="relative">
-          <button
-            onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-bg border border-border text-xs font-bold text-text-primary hover:border-primary/50 transition-smooth cursor-pointer min-w-[200px] justify-between shadow-xs"
-          >
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-primary" />
-              <span>{kabupaten}</span>
-            </div>
-            <ChevronDown className={`h-4 w-4 text-text-secondary transition-transform ${dropdownOpen ? 'rotate-180' : ''}`} />
-          </button>
-
-          {dropdownOpen && (
-            <div className="absolute right-0 top-full mt-1.5 z-30 w-full rounded-xl bg-surface border border-border shadow-card-hover py-1 animate-scale-in">
-              {KABUPATEN_LIST.map((k) => (
-                <button
-                  key={k.id}
-                  onClick={() => { setKabupaten(k.id); setDropdownOpen(false); }}
-                  className={`flex items-center gap-2 w-full px-4 py-2.5 text-xs text-left font-medium transition-smooth cursor-pointer ${
-                    kabupaten === k.id ? 'bg-primary/10 text-primary font-bold' : 'text-text-secondary hover:bg-bg hover:text-text-primary'
-                  }`}
-                >
-                  <span className="w-2 h-2 rounded-full" style={{ background: k.color }} />
-                  {k.name}
-                </button>
-              ))}
-            </div>
-          )}
+        <div className="w-52">
+          <CustomSelect
+            options={regionOptions}
+            value={kabupaten}
+            onChange={(val) => setKabupaten(val)}
+            size="md"
+          />
         </div>
       </div>
 
