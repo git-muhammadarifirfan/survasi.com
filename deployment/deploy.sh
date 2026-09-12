@@ -61,7 +61,7 @@ else
     echo "📦 Installing npm dependencies & building production bundle..."
     npm install -g pnpm pm2 2>/dev/null || true
     pnpm install || npm install
-    pnpm build || npm run build
+    npx vite build || pnpm build || npm run build
 
     # 6. Install Server Dependencies & Start PM2
     cd server

@@ -74,19 +74,9 @@ app.use('/api', globalLimiter); // Apply Rate Limiting ke semua endpoint /api
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
-// CORS — izinkan origin frontend
-const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
-  .split(',').map(o => o.trim());
-
+// CORS — izinkan semua origin di production/tunnel
 app.use(cors({
-  origin: (origin, callback) => {
-    // Izinkan request tanpa origin (Postman, curl) atau dari localhost manapun saat dev
-    if (!origin || allowedOrigins.includes(origin) || origin.startsWith('http://localhost:')) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS blocked: ${origin}`));
-    }
-  },
+  origin: true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
@@ -124,11 +114,19 @@ app.use('/api/suara',      require('./routes/suara'));
 app.use('/api/laporan',    require('./routes/laporan'));
 app.use('/api/setting',    require('./routes/setting'));
 
+// ─── Serve React Static SPA Frontend (dist folder) ───────────────────────────
+const path = require('path');
+const distPath = path.join(__dirname, '../dist');
+app.use(express.static(distPath));
 
-// ─── 404 Handler ─────────────────────────────────────────────────────────────
-app.use((req, res) => {
-  res.status(404).json({ success: false, message: `Endpoint ${req.method} ${req.path} tidak ditemukan.` });
+// Fallback to index.html for React SPA Router routes
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api/')) return next();
+  res.sendFile(path.join(distPath, 'index.html'), (err) => {
+    if (err) next();
+  });
 });
+
 
 // ─── Global Error Handler ────────────────────────────────────────────────────
 app.use((err, req, res, _next) => {

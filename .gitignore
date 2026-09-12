@@ -47,3 +47,7 @@ db.sqlite3
 # IDE / Agent configs
 .gemini/
 antigravity-ide/
+
+# Server maintenance cheat sheet
+SERVER_COMMANDS.txt
+
