@@ -66,8 +66,6 @@ function AppContent({
 
   return (
     <div className="flex h-screen bg-bg overflow-hidden font-sans text-text-primary antialiased">
-      <NotificationToastContainer />
-      <ThrottleToast />
       <Sidebar 
         isOpen={sidebarOpen} 
         setIsOpen={setSidebarOpen} 
@@ -206,7 +204,7 @@ export default function App() {
 
   return (
     <>
-      <ThrottleToast />
+      <NotificationToastContainer />
       {isAuthTransitioning && <ThreeDotsLoader fullScreen={true} text={transitionText} size="lg" />}
       {!isLoggedIn ? (
         <Suspense fallback={<ThreeDotsLoader fullScreen={true} text="Memuat Halaman Login..." />}>

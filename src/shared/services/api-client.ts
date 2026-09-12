@@ -261,6 +261,17 @@ export const apiClient = {
 
     getTantangan: (kabupatenId?: number) =>
       fetchJson<ApiResponse<any>>(`/analisis/tantangan${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
+
+    getFrameworks: (kabupatenId?: number) =>
+      fetchJson<ApiResponse<any[]>>(`/analisis/frameworks${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
+
+    getModulBreakdown: (kabupatenId?: number, modulId?: number) => {
+      const params = new URLSearchParams();
+      if (kabupatenId) params.append('kabupaten_id', String(kabupatenId));
+      if (modulId) params.append('modul_id', String(modulId));
+      const q = params.toString();
+      return fetchJson<ApiResponse<Record<number, any>>>(`/analisis/modul-breakdown${q ? `?${q}` : ''}`);
+    },
   },
 
   // ── SEL ────────────────────────────────────────────────────────────────────
@@ -309,14 +320,17 @@ export const apiClient = {
     getSesi: (kabupatenId?: number) =>
       fetchJson<ApiResponse<any[]>>(`/sel/sesi${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
 
+    getScores: (kabupatenId?: number) =>
+      fetchJson<ApiResponse<any[]>>(`/sel/analisis/scores${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
+
     getHeatmap: (kabupatenId?: number) =>
       fetchJson<ApiResponse<any[]>>(`/sel/analisis/heatmap${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
 
     getRadar: (sekolahId: number) =>
       fetchJson<ApiResponse<any[]>>(`/sel/analisis/radar/${sekolahId}`),
 
-    getSummary: () =>
-      fetchJson<ApiResponse<any>>('/sel/analisis/summary'),
+    getSummary: (kabupatenId?: number) =>
+      fetchJson<ApiResponse<any>>(`/sel/analisis/summary${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
 
     getMatriks: (kabupatenId?: number) =>
       fetchJson<ApiResponse<any[]>>(`/sel/analisis/matriks${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),

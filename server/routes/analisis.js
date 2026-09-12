@@ -323,4 +323,216 @@ router.get('/tantangan', async (req, res) => {
   }
 });
 
+// ─── GET /api/analisis/frameworks ─────────────────────────────────────────────
+router.get('/frameworks', async (req, res) => {
+  try {
+    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
+
+    const [frameworkRows] = await pool.execute(
+      `SELECT id, framework_key, nama, nama_id, subtitle, subtitle_id, deskripsi, warna, ikon, urutan 
+       FROM bsan_frameworks WHERE is_active = 1 ORDER BY urutan ASC`
+    );
+
+    const [modulRows] = await pool.execute(
+      `SELECT id, framework_key, kode, nama, nama_en, subtitle, subtitle_en, warna, ikon, urutan 
+       FROM modul_bsan WHERE is_active = 1 ORDER BY urutan ASC`
+    );
+
+    const [answerRows] = await pool.execute(
+      `SELECT 
+         ps.modul_id,
+         js.jawaban_terstruktur,
+         COUNT(*) AS total_count
+       FROM jawaban_survey js
+       JOIN pertanyaan_survey ps ON js.pertanyaan_id = ps.id
+       JOIN responden_survey rs ON js.responden_id = rs.id
+       WHERE js.jawaban_terstruktur IS NOT NULL AND js.jawaban_terstruktur != ''
+         AND (? IS NULL OR rs.kabupaten_id = ?)
+       GROUP BY ps.modul_id, js.jawaban_terstruktur`,
+      [kabupatenId, kabupatenId]
+    );
+
+    const modulAnswerStats = {};
+    answerRows.forEach(row => {
+      if (!modulAnswerStats[row.modul_id]) {
+        modulAnswerStats[row.modul_id] = { total: 0, positive: 0 };
+      }
+      modulAnswerStats[row.modul_id].total += row.total_count;
+      const ansLower = (row.jawaban_terstruktur || '').toLowerCase();
+      if (['ya', 'sudah', 'rutin', 'lengkap', 'restoratif'].some(k => ansLower.includes(k))) {
+        modulAnswerStats[row.modul_id].positive += row.total_count;
+      }
+    });
+
+    const DEFAULT_MODUL_PROGRESS = { 1: 62, 2: 45, 3: 36, 4: 42, 5: 28 };
+
+    const formattedFrameworks = frameworkRows.map(fw => {
+      const fwModules = modulRows.filter(m => m.framework_key === fw.framework_key);
+      
+      let sumProgress = 0;
+      const modulesWithProgress = fwModules.map(m => {
+        const stats = modulAnswerStats[m.id];
+        let pct = DEFAULT_MODUL_PROGRESS[m.id] || 40;
+        if (stats && stats.total > 0) {
+          pct = Math.round((stats.positive / stats.total) * 100);
+        }
+        sumProgress += pct;
+        return {
+          ...m,
+          progres: pct,
+        };
+      });
+
+      const avgFrameworkProgress = fwModules.length > 0
+        ? Math.round(sumProgress / fwModules.length)
+        : (fw.framework_key === 'with_myself' ? 62 : fw.framework_key === 'with_others' ? 37 : 39);
+
+      return {
+        ...fw,
+        progres: avgFrameworkProgress,
+        modules: modulesWithProgress,
+      };
+    });
+
+    return res.json({ success: true, data: formattedFrameworks });
+  } catch (err) {
+    console.error('[Analisis] frameworks error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── GET /api/analisis/modul-breakdown ───────────────────────────────────────
+router.get('/modul-breakdown', async (req, res) => {
+  try {
+    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
+    const targetModulId = req.query.modul_id ? parseInt(req.query.modul_id) : null;
+
+    // Fetch active modules
+    const [modulRows] = await pool.execute(
+      `SELECT id, framework_key, kode, nama, urutan FROM modul_bsan WHERE is_active = 1 AND (? IS NULL OR id = ?) ORDER BY urutan ASC`,
+      [targetModulId, targetModulId]
+    );
+
+    // Fetch all active questions mapped to modul_id
+    const [questionRows] = await pool.execute(
+      `SELECT id, modul_id, kode_pertanyaan, teks_pertanyaan, tipe, opsi_jawaban, urutan
+       FROM pertanyaan_survey
+       WHERE is_active = 1 AND modul_id IS NOT NULL AND (? IS NULL OR modul_id = ?)
+       ORDER BY modul_id ASC, urutan ASC`,
+      [targetModulId, targetModulId]
+    );
+
+    // Fetch answer counts per question option
+    const [answerRows] = await pool.execute(
+      `SELECT 
+         js.pertanyaan_id,
+         js.jawaban_terstruktur,
+         COUNT(*) AS total_count
+       FROM jawaban_survey js
+       JOIN responden_survey rs ON js.responden_id = rs.id
+       WHERE js.jawaban_terstruktur IS NOT NULL AND js.jawaban_terstruktur != ''
+         AND (? IS NULL OR rs.kabupaten_id = ?)
+       GROUP BY js.pertanyaan_id, js.jawaban_terstruktur`,
+      [kabupatenId, kabupatenId]
+    );
+
+    // Group answers by question ID
+    const answersByQ = {};
+    answerRows.forEach(row => {
+      if (!answersByQ[row.pertanyaan_id]) {
+        answersByQ[row.pertanyaan_id] = {};
+      }
+      answersByQ[row.pertanyaan_id][row.jawaban_terstruktur] = row.total_count;
+    });
+
+    const COLOR_PALETTE = ['#10B981', '#F59E0B', '#EF4444', '#3B82F6', '#8B5CF6', '#EC4899', '#06B6D4'];
+
+    const result = {};
+
+    modulRows.forEach(modul => {
+      const qInModul = questionRows.filter(q => q.modul_id === modul.id);
+      
+      let totalAnswersInModul = 0;
+      let positiveAnswersInModul = 0;
+
+      const formattedQuestions = qInModul.map(q => {
+        let rawOpts = [];
+        try {
+          rawOpts = typeof q.opsi_jawaban === 'string' ? JSON.parse(q.opsi_jawaban) : (q.opsi_jawaban || []);
+        } catch {
+          rawOpts = [];
+        }
+
+        const qAnswersMap = answersByQ[q.id] || {};
+        const totalResp = Object.values(qAnswersMap).reduce((acc, curr) => acc + curr, 0);
+
+        let options = [];
+        if (rawOpts && rawOpts.length > 0) {
+          options = rawOpts.map((optLabel, idx) => {
+            const count = qAnswersMap[optLabel] || 0;
+            const percent = totalResp > 0 ? parseFloat(((count / totalResp) * 100).toFixed(1)) : 0;
+            
+            totalAnswersInModul += count;
+            if (['ya', 'sudah', 'rutin', 'lengkap', 'restoratif'].some(k => optLabel.toLowerCase().includes(k))) {
+              positiveAnswersInModul += count;
+            }
+
+            return {
+              label: optLabel,
+              count,
+              percent,
+              color: COLOR_PALETTE[idx % COLOR_PALETTE.length]
+            };
+          });
+        } else {
+          const keys = Object.keys(qAnswersMap);
+          options = keys.map((key, idx) => {
+            const count = qAnswersMap[key];
+            const percent = totalResp > 0 ? parseFloat(((count / totalResp) * 100).toFixed(1)) : 0;
+            totalAnswersInModul += count;
+            return {
+              label: key,
+              count,
+              percent,
+              color: COLOR_PALETTE[idx % COLOR_PALETTE.length]
+            };
+          });
+        }
+
+        return {
+          id: q.id,
+          kode: q.kode_pertanyaan,
+          q: q.teks_pertanyaan,
+          tipe: q.tipe,
+          total_responden: totalResp,
+          options
+        };
+      });
+
+      const defaultProgress = modul.id === 1 ? 62 : modul.id === 2 ? 45 : modul.id === 3 ? 36 : modul.id === 4 ? 42 : 28;
+      const progresPct = totalAnswersInModul > 0 
+        ? Math.round((positiveAnswersInModul / totalAnswersInModul) * 100) 
+        : defaultProgress;
+
+      const modulObj = {
+        modul_id: modul.id,
+        framework_key: modul.framework_key,
+        kode: modul.kode,
+        title: modul.nama,
+        progres: `${progresPct}%`,
+        questions: formattedQuestions
+      };
+
+      result[modul.id] = modulObj;
+      result[modul.kode] = modulObj;
+    });
+
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('[Analisis] modul-breakdown error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 module.exports = router;
+

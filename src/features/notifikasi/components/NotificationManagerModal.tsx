@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Mail, Send, XCircle, CheckCircle2, AlertCircle, Users } from 'lucide-react';
+import { Mail, Send, XCircle, CheckCircle2, AlertCircle } from 'lucide-react';
 import { apiClient } from '../../../shared/services/api-client';
+import CustomSelect from '../../../shared/components/CustomSelect';
 
 interface NotificationManagerModalProps {
   isOpen: boolean;
@@ -119,17 +120,18 @@ export default function NotificationManagerModal({ isOpen, onClose }: Notificati
           </div>
 
           <div>
-            <label className="text-[10px] font-bold text-text-secondary uppercase">Kategori Notifikasi</label>
-            <select
+            <CustomSelect
+              label="Kategori Notifikasi"
+              options={[
+                { value: 'system', label: 'Pemberitahuan Sistem (System Announcement)' },
+                { value: 'reminder', label: 'Pengingat Waktu / Deadline (Reminder)' },
+                { value: 'report', label: 'Hasil Laporan & Progress (Report)' },
+                { value: 'alert', label: 'Peringatan Penting (Alert)' },
+              ]}
               value={tipe}
-              onChange={(e) => setTipe(e.target.value as any)}
-              className="w-full rounded-xl border border-border bg-bg p-2.5 text-xs font-bold text-text-primary mt-1 focus:border-primary focus:outline-none"
-            >
-              <option value="system">Pemberitahuan Sistem (System Announcement)</option>
-              <option value="reminder">Pengingat Waktu / Deadline (Reminder)</option>
-              <option value="report">Hasil Laporan & Progress (Report)</option>
-              <option value="alert">Peringatan Penting (Alert)</option>
-            </select>
+              onChange={(val) => setTipe(val)}
+              size="md"
+            />
           </div>
 
           <div>

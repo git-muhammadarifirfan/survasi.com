@@ -14,17 +14,23 @@ let toastMemoryState: ToastItem[] = [];
 
 export function notifyToast(toast: Omit<ToastItem, 'id'>) {
   const duration = toast.duration || 3500;
+  const normTitle = (toast.title || '').trim().toLowerCase();
+  const normMessage = (toast.message || '').trim().toLowerCase();
 
-  // Deduplicate: If identical title & message already exists, avoid pushing duplicate box
+  // Deduplicate: If identical title & message already exists in active memory state, update instead of duplicate card
   const existingIdx = toastMemoryState.findIndex(
-    (t) => t.title === toast.title && (t.message === toast.message || !toast.message)
+    (t) => {
+      const tTitle = (t.title || '').trim().toLowerCase();
+      const tMsg = (t.message || '').trim().toLowerCase();
+      return tTitle === normTitle && (tMsg === normMessage || !normMessage || !tMsg);
+    }
   );
 
   if (existingIdx !== -1) {
     // Refresh existing toast and move to top without creating duplicate cards
     const updated = [...toastMemoryState];
     const existing = updated.splice(existingIdx, 1)[0];
-    toastMemoryState = [{ ...existing, duration }, ...updated].slice(0, 2);
+    toastMemoryState = [{ ...existing, ...toast, duration }, ...updated].slice(0, 2);
   } else {
     const id = Math.random().toString(36).substring(2, 9);
     const newItem: ToastItem = { ...toast, id, duration };
@@ -49,8 +55,32 @@ export default function NotificationToastContainer() {
   useEffect(() => {
     const handler = (newToasts: ToastItem[]) => setToasts(newToasts);
     toastListeners.push(handler);
+
+    const handleExceeded = (e: Event) => {
+      const customEvt = e as CustomEvent<{ message?: string }>;
+      notifyToast({
+        type: 'warning',
+        title: 'Proteksi Server & Rate Limiting',
+        message:
+          customEvt.detail?.message ||
+          'Terlalu banyak permintaan! Sistem membatasi akses berulang untuk menjaga kestabilan server.',
+      });
+    };
+
+    const handleNotify = (e: Event) => {
+      const customEvt = e as CustomEvent<{ type?: any; title: string; message?: string }>;
+      if (customEvt.detail && customEvt.detail.title) {
+        notifyToast(customEvt.detail);
+      }
+    };
+
+    window.addEventListener('bsan_rate_limit_exceeded', handleExceeded);
+    window.addEventListener('bsan_toast_notify', handleNotify);
+
     return () => {
       toastListeners = toastListeners.filter((l) => l !== handler);
+      window.removeEventListener('bsan_rate_limit_exceeded', handleExceeded);
+      window.removeEventListener('bsan_toast_notify', handleNotify);
     };
   }, []);
 

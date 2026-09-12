@@ -3,13 +3,15 @@ interface LoadingIndicatorProps {
   size?: 'sm' | 'md' | 'lg';
   label?: string;
   className?: string;
+  color?: string;
 }
 
 export function LoadingIndicator({
   type = 'line-spinner',
   size = 'md',
-  label = 'Loading...',
+  label,
   className = '',
+  color,
 }: LoadingIndicatorProps) {
   const sizeClasses = {
     sm: 'w-4 h-4 text-xs',
@@ -17,11 +19,16 @@ export function LoadingIndicator({
     lg: 'w-8 h-8 text-base',
   }[size];
 
+  const isCustomColorStyle = color && (color.startsWith('#') || color.startsWith('rgb') || color.startsWith('hsl'));
+  const colorClass = color && !isCustomColorStyle ? color : '';
+  const colorStyle = isCustomColorStyle ? { color } : undefined;
+
   return (
     <div className={`inline-flex items-center gap-2.5 ${className}`}>
       {type === 'line-spinner' && (
         <svg
-          className={`animate-spin text-indigo-600 ${sizeClasses}`}
+          className={`animate-spin ${colorClass || 'text-indigo-600'} ${sizeClasses}`}
+          style={colorStyle}
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
           viewBox="0 0 24 24"
@@ -37,15 +44,15 @@ export function LoadingIndicator({
 
       {type === 'line-simple' && (
         <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden relative">
-          <div className="w-1/2 h-full bg-indigo-600 rounded-full animate-[shimmer_1.5s_infinite]" />
+          <div className="w-1/2 h-full bg-indigo-600 rounded-full animate-[shimmer_1.5s_infinite]" style={colorStyle} />
         </div>
       )}
 
       {type === 'dot-circle' && (
         <div className="flex items-center gap-1">
-          <div className="w-2 h-2 rounded-full bg-indigo-600 animate-bounce [animation-delay:-0.3s]" />
-          <div className="w-2 h-2 rounded-full bg-indigo-600 animate-bounce [animation-delay:-0.15s]" />
-          <div className="w-2 h-2 rounded-full bg-indigo-600 animate-bounce" />
+          <div className="w-2 h-2 rounded-full bg-indigo-600 animate-bounce [animation-delay:-0.3s]" style={colorStyle} />
+          <div className="w-2 h-2 rounded-full bg-indigo-600 animate-bounce [animation-delay:-0.15s]" style={colorStyle} />
+          <div className="w-2 h-2 rounded-full bg-indigo-600 animate-bounce" style={colorStyle} />
         </div>
       )}
 

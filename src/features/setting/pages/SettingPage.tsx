@@ -9,11 +9,11 @@
 import { useState, useEffect } from 'react';
 import { Save, CheckCircle2, User, Bell, Shield, Settings, Key, Globe, Eye, EyeOff } from 'lucide-react';
 import CustomSelect from '../../../shared/components/CustomSelect';
+import { notifyToast } from '../../../shared/components/NotificationToast';
 
 export default function Setting() {
   const [userRole, setUserRole] = useState<'admin' | 'pengawas'>('admin');
   const [activeTab, setActiveTab] = useState<'profile' | 'notif' | 'pref' | 'security'>('profile');
-  const [showToast, setShowToast] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   // Form states
@@ -75,19 +75,16 @@ export default function Setting() {
 
     setTimeout(() => {
       setIsSaving(false);
-      setShowToast('Pengaturan berhasil disimpan');
-      setTimeout(() => setShowToast(null), 3000);
+      notifyToast({
+        type: 'success',
+        title: 'Pengaturan Tersimpan',
+        message: 'Pengaturan profil dan sistem berhasil diperbarui.',
+      });
     }, 800);
   };
 
   return (
     <div className="space-y-6">
-      {showToast && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center space-x-2 rounded-xl bg-status-sudah text-white px-4 py-3 shadow-xl text-xs font-semibold animate-scale-in">
-          <CheckCircle2 className="h-4 w-4" />
-          <span>{showToast}</span>
-        </div>
-      )}
 
       {/* Header */}
       <div className="rounded-card bg-surface p-6 shadow-card border border-border">

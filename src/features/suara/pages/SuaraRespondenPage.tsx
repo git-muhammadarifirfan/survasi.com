@@ -11,6 +11,7 @@ import { useQuery } from '@tanstack/react-query';
 import { database } from '../../../shared/data/data-source';
 import { Search, Filter, Smile, Meh, Frown, Tag, MessageSquareQuote, Calendar, ChevronLeft, ChevronRight, Send, CheckCircle2 } from 'lucide-react';
 import CustomSelect from '../../../shared/components/CustomSelect';
+import { notifyToast } from '../../../shared/components/NotificationToast';
 
 interface SuaraRespondenProps {
   activeKecamatan: string | null;
@@ -28,9 +29,6 @@ interface LocalFeedback {
 }
 
 export default function SuaraResponden({ activeKecamatan, userRole = 'admin' }: SuaraRespondenProps) {
-  // Common states
-  const [showToast, setShowToast] = useState<string | null>(null);
-
   // Admin states
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSentiment, setSelectedSentiment] = useState<string>('');
@@ -106,8 +104,11 @@ export default function SuaraResponden({ activeKecamatan, userRole = 'admin' }: 
     setSchoolComment('');
 
     // Toast
-    setShowToast('Umpan balik berhasil dikirim ke Dinas Pendidikan');
-    setTimeout(() => setShowToast(null), 3000);
+    notifyToast({
+      type: 'success',
+      title: 'Umpan Balik Dikirim',
+      message: 'Umpan balik berhasil dikirim ke Dinas Pendidikan',
+    });
   };
 
   const getSentimentIcon = (sentiment: string) => {
@@ -159,12 +160,6 @@ export default function SuaraResponden({ activeKecamatan, userRole = 'admin' }: 
 
     return (
       <div className="space-y-6">
-        {showToast && (
-          <div className="fixed bottom-6 right-6 z-50 flex items-center space-x-2 rounded-xl bg-status-sudah text-white px-4 py-3 shadow-xl text-xs font-semibold">
-            <CheckCircle2 className="h-4 w-4" />
-            <span>{showToast}</span>
-          </div>
-        )}
 
         {/* Header */}
         <div className="rounded-card bg-surface p-6 shadow-card border border-border">

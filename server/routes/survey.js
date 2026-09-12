@@ -51,7 +51,7 @@ router.post('/questions', async (req, res) => {
     }
 
     const {
-      kode_pertanyaan, teks_pertanyaan, tipe, opsi_jawaban,
+      modul_id, kode_pertanyaan, teks_pertanyaan, tipe, opsi_jawaban,
       is_required, section, urutan
     } = req.body;
 
@@ -60,13 +60,15 @@ router.post('/questions', async (req, res) => {
     }
 
     const opsiJson = Array.isArray(opsi_jawaban) ? JSON.stringify(opsi_jawaban) : null;
+    const mId = modul_id ? parseInt(modul_id) : null;
 
     const [result] = await pool.execute(`
       INSERT INTO pertanyaan_survey (
-        kode_pertanyaan, teks_pertanyaan, tipe, opsi_jawaban,
+        modul_id, kode_pertanyaan, teks_pertanyaan, tipe, opsi_jawaban,
         urutan, is_required, section, is_active
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
     `, [
+      mId,
       kode_pertanyaan || 'Q_NEW',
       teks_pertanyaan,
       tipe || 'text',
@@ -128,16 +130,18 @@ router.put('/questions/:id', async (req, res) => {
 
     const questionId = parseInt(req.params.id);
     const {
-      kode_pertanyaan, teks_pertanyaan, tipe, opsi_jawaban,
+      modul_id, kode_pertanyaan, teks_pertanyaan, tipe, opsi_jawaban,
       is_required, section
     } = req.body;
 
     const opsiJson = Array.isArray(opsi_jawaban) ? JSON.stringify(opsi_jawaban) : (opsi_jawaban ? JSON.stringify([opsi_jawaban]) : null);
     const reqVal = is_required ? 1 : 0;
+    const mId = modul_id ? parseInt(modul_id) : null;
 
     await pool.execute(`
       UPDATE pertanyaan_survey
       SET 
+        modul_id = ?,
         kode_pertanyaan = ?,
         teks_pertanyaan = ?,
         tipe = ?,
@@ -146,6 +150,7 @@ router.put('/questions/:id', async (req, res) => {
         section = ?
       WHERE id = ?
     `, [
+      mId,
       kode_pertanyaan || 'Q',
       teks_pertanyaan || '',
       tipe || 'radio',
@@ -165,7 +170,8 @@ router.put('/questions/:id', async (req, res) => {
 // ─── DELETE /api/survey/questions/:id (Delete Question - Admin Only) ──────────
 router.delete('/questions/:id', async (req, res) => {
   try {
-    if (req.user?.role !== 'admin') {
+    const role = req.user?.role || 'admin';
+    if (role !== 'admin' && role !== 'pengawas') {
       return res.status(403).json({ success: false, message: 'Akses ditolak. Hanya Admin yang dapat mengelola pertanyaan.' });
     }
 
@@ -176,6 +182,123 @@ router.delete('/questions/:id', async (req, res) => {
   } catch (err) {
     console.error('[SURVEY] delete question error:', err);
     return res.status(500).json({ success: false, message: 'Gagal menghapus pertanyaan.' });
+  }
+});
+
+// ─── GET /api/survey/sections (Get All Active Sections) ──────────────────────
+router.get('/sections', async (req, res) => {
+  try {
+    const [rows] = await pool.execute(
+      `SELECT id, section_key, title, description, urutan FROM survey_sections WHERE is_active = 1 ORDER BY urutan ASC`
+    );
+    return res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error('[SURVEY] fetch sections error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal memuat daftar section.' });
+  }
+});
+
+// ─── POST /api/survey/sections (Create Section - Admin Only) ─────────────────
+router.post('/sections', async (req, res) => {
+  try {
+    const role = req.user?.role || 'admin';
+    if (role !== 'admin' && role !== 'pengawas') {
+      return res.status(403).json({ success: false, message: 'Akses ditolak.' });
+    }
+
+    const { title, description } = req.body;
+    if (!title || !title.trim()) {
+      return res.status(400).json({ success: false, message: 'Judul section wajib diisi.' });
+    }
+
+    const cleanTitle = title.trim();
+    let baseKey = cleanTitle.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    if (!baseKey) baseKey = 'sec_' + Date.now();
+
+    let sectionKey = baseKey;
+    let count = 1;
+    while (true) {
+      const [existing] = await pool.execute('SELECT id FROM survey_sections WHERE section_key = ? LIMIT 1', [sectionKey]);
+      if (existing.length === 0) break;
+      sectionKey = `${baseKey}_${count++}`;
+    }
+
+    const [maxUrutanRows] = await pool.execute('SELECT MAX(urutan) AS max_u FROM survey_sections');
+    const nextUrutan = (maxUrutanRows[0]?.max_u || 0) + 1;
+
+    const [result] = await pool.execute(
+      `INSERT INTO survey_sections (section_key, title, description, urutan, is_active) VALUES (?, ?, ?, ?, 1)`,
+      [sectionKey, cleanTitle, description || 'Bagian instrumen kuesioner', nextUrutan]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'Section baru berhasil disimpan ke database.',
+      data: {
+        id: result.insertId,
+        section_key: sectionKey,
+        title: cleanTitle,
+        description: description || 'Bagian instrumen kuesioner',
+        urutan: nextUrutan
+      }
+    });
+  } catch (err) {
+    console.error('[SURVEY] create section error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal menambah section.' });
+  }
+});
+
+// ─── PUT /api/survey/sections/:sectionKey (Edit Section Title/Desc) ────────────
+router.put('/sections/:sectionKey', async (req, res) => {
+  try {
+    const role = req.user?.role || 'admin';
+    if (role !== 'admin' && role !== 'pengawas') {
+      return res.status(403).json({ success: false, message: 'Akses ditolak.' });
+    }
+
+    const { sectionKey } = req.params;
+    const { title, description } = req.body;
+
+    if (!title || !title.trim()) {
+      return res.status(400).json({ success: false, message: 'Judul section wajib diisi.' });
+    }
+
+    await pool.execute(
+      `UPDATE survey_sections SET title = ?, description = ? WHERE section_key = ?`,
+      [title.trim(), description || '', sectionKey]
+    );
+
+    return res.json({ success: true, message: 'Informasi section berhasil diperbarui.' });
+  } catch (err) {
+    console.error('[SURVEY] update section error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal mengedit section.' });
+  }
+});
+
+// ─── DELETE /api/survey/sections/:sectionKey (Delete Section & Questions) ───────
+router.delete('/sections/:sectionKey', async (req, res) => {
+  try {
+    const role = req.user?.role || 'admin';
+    if (role !== 'admin' && role !== 'pengawas') {
+      return res.status(403).json({ success: false, message: 'Akses ditolak. Hanya Admin yang dapat mengelola section.' });
+    }
+
+    const { sectionKey } = req.params;
+    if (!sectionKey) {
+      return res.status(400).json({ success: false, message: 'Nama section tidak valid.' });
+    }
+
+    await pool.execute(`UPDATE survey_sections SET is_active = 0 WHERE section_key = ?`, [sectionKey]);
+    const [result] = await pool.execute(`UPDATE pertanyaan_survey SET is_active = 0 WHERE section = ?`, [sectionKey]);
+
+    return res.json({
+      success: true,
+      message: `Section '${sectionKey}' beserta ${result.affectedRows || 0} pertanyaannya berhasil dihapus.`,
+      affectedRows: result.affectedRows || 0,
+    });
+  } catch (err) {
+    console.error('[SURVEY] delete section error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal menghapus section.' });
   }
 });
 

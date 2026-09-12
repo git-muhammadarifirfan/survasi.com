@@ -14,6 +14,8 @@ import { apiClient } from '../../../shared/services/api-client';
 import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
 import ConfirmationModal from '../../../shared/components/ConfirmationModal';
 import NotificationManagerModal from '../../notifikasi/components/NotificationManagerModal';
+import { notifyToast } from '../../../shared/components/NotificationToast';
+import CustomSelect from '../../../shared/components/CustomSelect';
 
 export default function UserManagementPage() {
   const queryClient = useQueryClient();
@@ -65,9 +67,17 @@ export default function UserManagementPage() {
   // Toggle status mutation
   const toggleMutation = useMutation({
     mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) => apiClient.users.toggleStatus(id, isActive),
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['usersList'] });
+      notifyToast({
+        type: 'info',
+        title: 'Status User Diperbarui',
+        message: `Status akun pengguna berhasil ${variables.isActive ? 'diaktifkan' : 'dinonaktifkan'}.`,
+      });
     },
+    onError: (err: any) => {
+      notifyToast({ type: 'error', title: 'Gagal Ubah Status', message: err?.message || 'Gagal mengupdate status user.' });
+    }
   });
 
   // Delete mutation
@@ -76,7 +86,15 @@ export default function UserManagementPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['usersList'] });
       setUserToDelete(null);
+      notifyToast({
+        type: 'success',
+        title: 'User Dihapus',
+        message: 'Akun pengguna berhasil dihapus dari sistem.',
+      });
     },
+    onError: (err: any) => {
+      notifyToast({ type: 'error', title: 'Gagal Menghapus', message: err?.message || 'Gagal menghapus akun pengguna.' });
+    }
   });
 
   const handleOpenAddModal = () => {
@@ -129,27 +147,30 @@ export default function UserManagementPage() {
         const res = await apiClient.users.update(editingUser.id, payload);
         if (res.success) {
           setFormSuccess('Data user & integrasi sekolah berhasil diperbarui!');
+          notifyToast({ type: 'success', title: 'User Diperbarui', message: 'Data pengguna berhasil diperbarui.' });
           setTimeout(() => {
             setIsAddModalOpen(false);
             setEditingUser(null);
             setFormSuccess('');
             queryClient.invalidateQueries({ queryKey: ['usersList'] });
-          }, 1000);
+          }, 600);
         }
       } else {
         // Create new user
         const res = await apiClient.users.create(payload);
         if (res.success) {
           setFormSuccess('User baru berhasil ditambahkan!');
+          notifyToast({ type: 'success', title: 'User Ditambahkan', message: 'Pengguna baru telah didaftarkan.' });
           setTimeout(() => {
             setIsAddModalOpen(false);
             setFormSuccess('');
             queryClient.invalidateQueries({ queryKey: ['usersList'] });
-          }, 1000);
+          }, 600);
         }
       }
     } catch (err: any) {
       setFormError(err.message || 'Gagal menyimpan data user.');
+      notifyToast({ type: 'error', title: 'Gagal Menyimpan', message: err.message || 'Gagal menyimpan data user.' });
     }
   };
 
@@ -221,30 +242,34 @@ export default function UserManagementPage() {
         <div className="flex items-center space-x-3 w-full sm:w-auto justify-end">
           <div className="flex items-center space-x-1.5 text-xs text-text-secondary">
             <span>Tampilkan:</span>
-            <select
-              value={limit}
-              onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}
-              className="rounded-xl border border-border bg-surface px-2.5 py-1.5 text-xs font-bold text-text-primary focus:outline-none focus:border-primary cursor-pointer"
-            >
-              <option value={10}>10 Data</option>
-              <option value={25}>25 Data</option>
-              <option value={50}>50 Data</option>
-              <option value={100}>100 Data</option>
-            </select>
+            <div className="w-28">
+              <CustomSelect
+                options={[
+                  { value: 10, label: '10 Data' },
+                  { value: 25, label: '25 Data' },
+                  { value: 50, label: '50 Data' },
+                  { value: 100, label: '100 Data' },
+                ]}
+                value={limit}
+                onChange={(val) => { setLimit(Number(val)); setPage(1); }}
+                size="sm"
+              />
+            </div>
           </div>
 
-          <div className="flex items-center space-x-1.5">
-            <Filter className="h-4 w-4 text-text-secondary" />
-            <select
+          <div className="w-48">
+            <CustomSelect
+              options={[
+                { value: '', label: 'Semua Stakeholder' },
+                { value: 'admin', label: 'Admin System' },
+                { value: 'pengawas', label: 'Pengawas Sekolah' },
+                { value: 'sekolah', label: 'Perwakilan Sekolah' },
+              ]}
               value={roleFilter}
-              onChange={(e) => { setRoleFilter(e.target.value); setPage(1); }}
-              className="rounded-xl border border-border bg-surface px-3 py-1.5 text-xs font-bold text-text-primary focus:outline-none focus:border-primary cursor-pointer"
-            >
-              <option value="">Semua Stakeholder</option>
-              <option value="admin">Admin System</option>
-              <option value="pengawas">Pengawas Sekolah</option>
-              <option value="sekolah">Perwakilan Sekolah</option>
-            </select>
+              onChange={(val) => { setRoleFilter(val); setPage(1); }}
+              size="sm"
+              prefixIcon={<Filter className="h-3.5 w-3.5" />}
+            />
           </div>
         </div>
       </div>
@@ -465,32 +490,32 @@ export default function UserManagementPage() {
               )}
 
               <div>
-                <label className="text-[10px] font-bold text-text-secondary uppercase">Role Stakeholder</label>
-                <select
+                <CustomSelect
+                  label="Role Stakeholder"
+                  options={[
+                    { value: 'sekolah', label: 'Sekolah (Perwakilan Satuan Pendidikan)' },
+                    { value: 'pengawas', label: 'Pengawas (Pengawas Sekolah / Penilik)' },
+                    { value: 'admin', label: 'Admin (Akses Penuh Management & Analisis)' },
+                  ]}
                   value={role}
-                  onChange={(e) => setRole(e.target.value as any)}
-                  className="w-full rounded-xl border border-border bg-bg p-2.5 text-xs font-bold text-text-primary mt-1 focus:border-primary focus:outline-none"
-                >
-                  <option value="sekolah">Sekolah (Perwakilan Satuan Pendidikan)</option>
-                  <option value="pengawas">Pengawas (Pengawas Sekolah / Penilik)</option>
-                  <option value="admin">Admin (Akses Penuh Management & Analisis)</option>
-                </select>
+                  onChange={(val) => setRole(val)}
+                  size="md"
+                />
               </div>
 
               {role === 'sekolah' && (
                 <div>
-                  <label className="text-[10px] font-bold text-text-secondary uppercase">Integrasi Sekolah Pilihan</label>
-                  <select
+                  <CustomSelect
+                    label="Integrasi Sekolah Pilihan"
+                    options={[
+                      { value: '', label: '-- Pilih Sekolah --' },
+                      ...sekolahOptions.map((s) => ({ value: s.id, label: `${s.nama} (NPSN: ${s.npsn})` })),
+                    ]}
                     value={sekolahId}
-                    onChange={(e) => setSekolahId(Number(e.target.value))}
-                    required
-                    className="w-full rounded-xl border border-border bg-bg p-2.5 text-xs text-text-primary mt-1 focus:border-primary focus:outline-none font-medium"
-                  >
-                    <option value="">-- Pilih Sekolah --</option>
-                    {sekolahOptions.map((s) => (
-                      <option key={s.id} value={s.id}>{s.nama} (NPSN: {s.npsn})</option>
-                    ))}
-                  </select>
+                    onChange={(val) => setSekolahId(val ? Number(val) : '')}
+                    enableSearch
+                    size="md"
+                  />
                 </div>
               )}
 

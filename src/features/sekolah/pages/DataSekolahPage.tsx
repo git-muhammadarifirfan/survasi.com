@@ -31,9 +31,6 @@ interface SchoolProfile {
 }
 
 export default function DataSatuanPendidikan({ userRole = 'admin' }: DataSatuanPendidikanProps) {
-  // Common states
-  const [showToast, setShowToast] = useState<string | null>(null);
-
   // Filter & Pagination states
   const [selectedKec, setSelectedKec] = useState('');
   const [searchVal, setSearchVal] = useState('');

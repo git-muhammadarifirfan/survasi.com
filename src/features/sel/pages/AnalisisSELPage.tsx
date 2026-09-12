@@ -9,7 +9,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { database, KABUPATEN_LIST } from '../../../shared/data/data-source';
+import { database, KABUPATEN_LIST, KABUPATEN_NAME_TO_ID } from '../../../shared/data/data-source';
 import type { SELSchoolScore, SELHeatmapRow } from '../../../shared/data/data-source';
 import { SEL_DIMENSI_ORDER, SEL_DIMENSI_LABEL } from '../../../shared/data/sel-indicators';
 import type { SELDimensi } from '../../../shared/data/sel-indicators';
@@ -207,25 +207,32 @@ export default function AnalisisSEL() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 8;
 
-  const { data: scores = [], isLoading } = useQuery({
-    queryKey: ['selScores', selectedKab],
+  const selectedKabObj = KABUPATEN_LIST.find(k => k.name === selectedKab || k.id === selectedKab);
+  const kabIdNumber = KABUPATEN_NAME_TO_ID[selectedKab] ?? (selectedKabObj ? KABUPATEN_NAME_TO_ID[selectedKabObj.name] : undefined);
+
+  const { data: scoresRes, isLoading } = useQuery({
+    queryKey: ['selScoresApi', selectedKab],
     queryFn: () => database.getSELScores({ kabupaten: selectedKab || undefined }),
   });
+  const scores = scoresRes || [];
 
-  const { data: heatmap = [] } = useQuery({
-    queryKey: ['selHeatmap', selectedKab],
+  const { data: heatmapRes } = useQuery({
+    queryKey: ['selHeatmapApi', selectedKab],
     queryFn: () => database.getSELHeatmap(selectedKab || undefined),
   });
+  const heatmap = heatmapRes || [];
 
-  const { data: matriksData = [] } = useQuery({
-    queryKey: ['selMatriks', selectedKab],
+  const { data: matriksDataRes } = useQuery({
+    queryKey: ['selMatriksApi', selectedKab],
     queryFn: () => database.getSELMatriksData({ kabupaten: selectedKab || undefined }),
   });
+  const matriksData = matriksDataRes || [];
 
-  const { data: stats } = useQuery({
-    queryKey: ['selStats'],
+  const { data: statsRes } = useQuery({
+    queryKey: ['selStatsApi', selectedKab],
     queryFn: () => database.getSELSummaryStats(),
   });
+  const stats = statsRes;
 
   // Aggregated radar: rata-rata semua sekolah
   const avgRadarData = SEL_DIMENSI_ORDER.map(d => {
