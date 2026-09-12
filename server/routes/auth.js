@@ -191,9 +191,29 @@ router.post('/register-sekolah', registerLimiter, async (req, res) => {
 
     // Check if email already registered
     const [existingUsers] = await pool.execute(
-      'SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1',
+      'SELECT id, is_active FROM users WHERE LOWER(email) = ? LIMIT 1',
       [cleanEmail]
     );
+
+    if (existingUsers.length > 0 && existingUsers[0].is_active) {
+      return res.status(409).json({
+        success: false,
+        message: 'Alamat email ini sudah terdaftar di sistem. Silakan login atau gunakan menu Lupa Kata Sandi.'
+      });
+    }
+
+    // Check if selected school is already registered by another active user
+    const [existingSekolahUser] = await pool.execute(
+      'SELECT id, nama, email FROM users WHERE sekolah_id = ? AND is_active = TRUE AND LOWER(email) != ? LIMIT 1',
+      [sekolah.id, cleanEmail]
+    );
+
+    if (existingSekolahUser.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `Sekolah "${sekolah.nama}" sudah terdaftar oleh perwakilan akun (${existingSekolahUser[0].email}). Silakan hubungi admin atau login ke akun terdaftar.`
+      });
+    }
 
     let userId;
     if (existingUsers.length > 0) {
@@ -298,9 +318,16 @@ router.post('/register-pengawas', registerLimiter, async (req, res) => {
     const passwordHash = await bcrypt.hash(cleanPassword, 10);
 
     const [existingUsers] = await pool.execute(
-      'SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1',
+      'SELECT id, is_active FROM users WHERE LOWER(email) = ? LIMIT 1',
       [cleanEmail]
     );
+
+    if (existingUsers.length > 0 && existingUsers[0].is_active) {
+      return res.status(409).json({
+        success: false,
+        message: 'Alamat email ini sudah terdaftar di sistem. Silakan login atau gunakan menu Lupa Kata Sandi.'
+      });
+    }
 
     let userId;
     if (existingUsers.length > 0) {
