@@ -80,16 +80,29 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
   const [formKode, setFormKode] = useState('');
   const [formTipe, setFormTipe] = useState<'dropdown' | 'checkbox' | 'text' | 'radio' | 'scale' | 'school_select' | 'kabupaten_select' | 'kecamatan_select'>('text');
   const [formSection, setFormSection] = useState('identitas');
+  const [formModulId, setFormModulId] = useState<number | null>(1);
   const [formOpsi, setFormOpsi] = useState('');
   const [formIsRequired, setFormIsRequired] = useState(true);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
-  // Custom Sections Management State
-  const [customSections, setCustomSections] = useState<Record<string, { title: string; desc: string }>>({});
-  const [isAddSectionModalOpen, setIsAddSectionModalOpen] = useState(false);
-  const [newSectionKey, setNewSectionKey] = useState('');
-  const [newSectionTitle, setNewSectionTitle] = useState('');
-  const [newSectionDesc, setNewSectionDesc] = useState('');
+  // Database Query for Sections
+  const { data: dbSectionsData = [], refetch: refetchSections } = useQuery({
+    queryKey: ['survey-sections'],
+    queryFn: async () => {
+      try {
+        const res = await apiClient.get<Array<{ id: number; section_key: string; title: string; description: string; urutan: number }>>('/survey/sections');
+        return res.data || [];
+      } catch {
+        return [];
+      }
+    },
+  });
+
+  // Section Modal State (Add & Edit)
+  const [isSectionModalOpen, setIsSectionModalOpen] = useState(false);
+  const [editingSectionKey, setEditingSectionKey] = useState<string | null>(null);
+  const [sectionFormTitle, setSectionFormTitle] = useState('');
+  const [sectionFormDesc, setSectionFormDesc] = useState('');
 
   // Form state
   const [hasStarted, setHasStarted] = useState(false);
@@ -97,7 +110,6 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
   const [answers, setAnswers] = useState<Record<number, any>>({});
   const [validationError, setValidationError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
-  const [showToast, setShowToast] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [draftFound, setDraftFound] = useState(false);
 
@@ -207,6 +219,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     setFormTeks('');
     setFormTipe('radio');
     setFormSection(secName || 'identitas');
+    setFormModulId(1);
     setFormOpsi('');
     setFormIsRequired(true);
     setIsModalOpen(true);
@@ -218,6 +231,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     setFormTeks(q.teks_pertanyaan);
     setFormTipe(q.tipe);
     setFormSection(q.section);
+    setFormModulId(q.modul_id || null);
     
     // If opening radio or dropdown without existing options, pre-fill standard options
     const existingOpts = Array.isArray(q.opsi_jawaban) && q.opsi_jawaban.length > 0 
@@ -236,9 +250,35 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     setIsSubmitModalOpen(false);
     setSubmitting(true);
     try {
+      const payloadAnswers = Object.entries(answers).map(([qIdStr, val]) => {
+        const qId = parseInt(qIdStr);
+        const qObj = questions.find(q => q.id === qId);
+        return {
+          pertanyaan_id: qId,
+          tipe: qObj?.tipe || 'text',
+          value: val,
+        };
+      });
+
+      const getAnsByCode = (code: string) => {
+        const q = questions.find(item => item.kode_pertanyaan === code);
+        return q ? answers[q.id] : null;
+      };
+
       const payload = {
-        responden: { nama: 'Pengawas Sidoarjo', peran: 'Pengawas Sekolah' },
-        jawaban: answers,
+        nama: getAnsByCode('Q1') || userProfile?.nama || 'Pengawas Sidoarjo',
+        jenis_kelamin: getAnsByCode('Q2') === 'Perempuan' ? 'P' : 'L',
+        posisi: getAnsByCode('Q3') || 'Pengawas Sekolah',
+        sekolah_id: userProfile?.sekolah_id || 1,
+        npsn: getAnsByCode('Q4') || '20512345',
+        kabupaten_id: 1,
+        kecamatan_id: 1,
+        penerima_modul: getAnsByCode('Q7') || 'Ya',
+        penyelenggara_pelatihan: getAnsByCode('Q8'),
+        status_implementasi: getAnsByCode('Q9') || 'sudah',
+        kelas_mengajar: getAnsByCode('Q10'),
+        no_wa: getAnsByCode('Q37'),
+        jawaban: payloadAnswers,
       };
 
       const res = await apiClient.post('/survey/submit', payload);
@@ -262,6 +302,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
 
   // Confirmation Modal State
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const [deleteSectionConfirmKey, setDeleteSectionConfirmKey] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
   // Bulk Mode State for Questions
@@ -303,29 +344,57 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     if (!deleteConfirmId) return;
     setIsDeleting(true);
     try {
-      await apiClient.delete(`/survey/questions/${deleteConfirmId}`);
+      const res = await apiClient.delete(`/survey/questions/${deleteConfirmId}`);
       setQuestions((prev) => {
         const remaining = prev.filter((q) => q.id !== deleteConfirmId);
         return remaining.map((q, idx) => ({ ...q, kode_pertanyaan: `Q${idx + 1}` }));
       });
       notifyToast({
-        type: 'error',
+        type: 'success',
         title: 'Pertanyaan Dihapus',
-        message: 'Pertanyaan berhasil dihapus.',
+        message: res?.message || 'Pertanyaan berhasil dihapus dari database.',
       });
-    } catch {
-      setQuestions((prev) => {
-        const remaining = prev.filter((q) => q.id !== deleteConfirmId);
-        return remaining.map((q, idx) => ({ ...q, kode_pertanyaan: `Q${idx + 1}` }));
-      });
+    } catch (err: any) {
       notifyToast({
         type: 'error',
-        title: 'Pertanyaan Dihapus',
-        message: 'Pertanyaan berhasil dihapus.',
+        title: 'Gagal Hapus Pertanyaan',
+        message: err?.message || 'Terjadi kesalahan saat menghapus pertanyaan.',
       });
     } finally {
       setIsDeleting(false);
       setDeleteConfirmId(null);
+    }
+  };
+
+  const confirmDeleteSection = async () => {
+    if (!deleteSectionConfirmKey) return;
+    const secKey = deleteSectionConfirmKey;
+    const secMeta = allSectionMeta[secKey] || { title: secKey };
+    setIsDeleting(true);
+    try {
+      const res = await apiClient.delete(`/survey/sections/${secKey}`);
+      
+      setQuestions((prev) => {
+        const remaining = prev.filter((q) => q.section !== secKey);
+        return remaining.map((q, idx) => ({ ...q, kode_pertanyaan: `Q${idx + 1}` }));
+      });
+
+      await refetchSections();
+
+      notifyToast({
+        type: 'success',
+        title: 'Section Dihapus',
+        message: res?.message || `Section "${secMeta.title}" dan pertanyaannya berhasil dihapus dari database.`,
+      });
+    } catch (err: any) {
+      notifyToast({
+        type: 'error',
+        title: 'Gagal Hapus Section',
+        message: err?.message || 'Terjadi kesalahan saat menghapus section dari database.',
+      });
+    } finally {
+      setIsDeleting(false);
+      setDeleteSectionConfirmKey(null);
     }
   };
 
@@ -339,6 +408,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
       .filter(Boolean);
 
     const payload = {
+      modul_id: formModulId,
       kode_pertanyaan: formKode,
       teks_pertanyaan: formTeks,
       tipe: formTipe,
@@ -355,6 +425,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
             q.id === editingQuestion.id
               ? {
                   ...q,
+                  modul_id: formModulId,
                   kode_pertanyaan: formKode,
                   teks_pertanyaan: formTeks,
                   tipe: formTipe,
@@ -371,7 +442,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
         const newId = (res as any)?.id || (res as any)?.data?.id || Date.now();
         const newQ: ApiQuestionItem = {
           id: Number(newId),
-          modul_id: 1,
+          modul_id: formModulId,
           kode_pertanyaan: formKode,
           teks_pertanyaan: formTeks,
           tipe: formTipe,
@@ -386,39 +457,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
       }
       setIsModalOpen(false);
     } catch (err: any) {
-      if (editingQuestion) {
-        setQuestions(prev =>
-          prev.map(q =>
-            q.id === editingQuestion.id
-              ? {
-                  ...q,
-                  kode_pertanyaan: formKode,
-                  teks_pertanyaan: formTeks,
-                  tipe: formTipe,
-                  section: formSection,
-                  opsi_jawaban: parsedOpsi.length > 0 ? parsedOpsi : null,
-                  is_required: formIsRequired,
-                }
-              : q
-          )
-        );
-        notifyToast({ type: 'success', title: 'Berhasil Diperbarui', message: 'Instrumen pertanyaan berhasil diperbarui.' });
-      } else {
-        const newQ: ApiQuestionItem = {
-          id: Date.now(),
-          modul_id: 1,
-          kode_pertanyaan: formKode,
-          teks_pertanyaan: formTeks,
-          tipe: formTipe,
-          opsi_jawaban: parsedOpsi.length > 0 ? parsedOpsi : null,
-          urutan: questions.length + 1,
-          is_required: formIsRequired,
-          section: formSection,
-          target_kelas: '1-6',
-        };
-        setQuestions(prev => [...prev, newQ]);
-        notifyToast({ type: 'success', title: 'Berhasil Ditambahkan', message: 'Pertanyaan baru berhasil ditambahkan ke tampilan.' });
-      }
+      notifyToast({ type: 'error', title: 'Gagal Menyimpan', message: err?.message || 'Terjadi kesalahan saat menyimpan pertanyaan.' });
       setIsModalOpen(false);
     }
   };
@@ -556,35 +595,81 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     setDraftFound(false);
   };
 
-  const triggerToast = (msg: string) => {
-    setShowToast(msg);
-    setTimeout(() => setShowToast(null), 3000);
+  const triggerToast = (msg: string, type: 'info' | 'success' | 'error' | 'warning' = 'info') => {
+    notifyToast({ type, title: 'Kuesioner BSAN', message: msg });
   };
 
-  // Combined metadata (Standard + Custom)
-  const allSectionMeta = { ...SECTION_METADATA, ...customSections };
-
-  const handleAddSection = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newSectionTitle.trim()) return;
-    const key = newSectionKey.trim().toLowerCase().replace(/\s+/g, '_') || `sec_${Date.now()}`;
-    setCustomSections((prev) => ({
-      ...prev,
-      [key]: { title: newSectionTitle.trim(), desc: newSectionDesc.trim() || 'Bagian instrumen baru' },
-    }));
-    notifyToast({
-      type: 'success',
-      title: 'Bagian Baru Ditambahkan',
-      message: `Bagian "${newSectionTitle}" berhasil dibuat dan siap diisi pertanyaan.`,
+  // Combined metadata (DB Sections primary, SECTION_METADATA as fallback)
+  const allSectionMeta: Record<string, { title: string; desc: string }> = {};
+  if (dbSectionsData && dbSectionsData.length > 0) {
+    dbSectionsData.forEach(sec => {
+      allSectionMeta[sec.section_key] = {
+        title: sec.title,
+        desc: sec.description || 'Bagian instrumen kuesioner',
+      };
     });
-    setNewSectionKey('');
-    setNewSectionTitle('');
-    setNewSectionDesc('');
-    setIsAddSectionModalOpen(false);
+  } else {
+    Object.assign(allSectionMeta, SECTION_METADATA);
+  }
+
+  const handleOpenAddSection = () => {
+    setEditingSectionKey(null);
+    setSectionFormTitle('');
+    setSectionFormDesc('');
+    setIsSectionModalOpen(true);
   };
 
-  // Group questions by section
-  const sectionsList = Array.from(new Set([...Object.keys(allSectionMeta), ...questions.map(q => q.section)]));
+  const handleOpenEditSection = (secKey: string) => {
+    const meta = allSectionMeta[secKey] || { title: secKey, desc: '' };
+    setEditingSectionKey(secKey);
+    setSectionFormTitle(meta.title);
+    setSectionFormDesc(meta.desc);
+    setIsSectionModalOpen(true);
+  };
+
+  const handleSaveSection = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sectionFormTitle.trim()) return;
+
+    try {
+      if (editingSectionKey) {
+        const res = await apiClient.put(`/survey/sections/${editingSectionKey}`, {
+          title: sectionFormTitle.trim(),
+          description: sectionFormDesc.trim(),
+        });
+        await refetchSections();
+        notifyToast({
+          type: 'success',
+          title: 'Section Diperbarui',
+          message: res?.message || 'Informasi section berhasil diperbarui di database.',
+        });
+      } else {
+        const res = await apiClient.post<{ data: { section_key: string; title: string; description: string } }>('/survey/sections', {
+          title: sectionFormTitle.trim(),
+          description: sectionFormDesc.trim(),
+        });
+        await refetchSections();
+        notifyToast({
+          type: 'success',
+          title: 'Section Ditambahkan',
+          message: res?.message || 'Section baru berhasil disimpan ke database.',
+        });
+      }
+      setIsSectionModalOpen(false);
+    } catch (err: any) {
+      notifyToast({
+        type: 'error',
+        title: 'Gagal Menyimpan Section',
+        message: err?.message || 'Terjadi kesalahan saat menyimpan section ke database.',
+      });
+    }
+  };
+
+  // Group questions by section (prioritize active order from DB)
+  const activeQuestionsSectionKeys = Array.from(new Set(questions.map(q => q.section)));
+  const sectionsList = dbSectionsData && dbSectionsData.length > 0
+    ? Array.from(new Set([...dbSectionsData.map(s => s.section_key), ...activeQuestionsSectionKeys]))
+    : Array.from(new Set([...Object.keys(SECTION_METADATA), ...activeQuestionsSectionKeys]));
   const currentSectionKey = sectionsList[activeSecIdx] || 'identitas';
   const currentQuestions = questions.filter(q => q.section === currentSectionKey);
   const currentMeta = allSectionMeta[currentSectionKey] || {
@@ -941,7 +1026,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                   <span>{isBulkMode ? 'Tutup Massal' : 'Pilih Massal'}</span>
                 </button>
                 <button
-                  onClick={() => setIsAddSectionModalOpen(true)}
+                  onClick={() => handleOpenAddSection()}
                   className="inline-flex items-center space-x-2 px-4 py-2.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl border border-indigo-200 transition cursor-pointer"
                 >
                   <Plus className="w-4 h-4 text-indigo-600" />
@@ -992,7 +1077,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
 
         {/* List Pertanyaan Terkelompok per Bagian / Section */}
         <div className="space-y-6">
-          {groupedSections.map((secKey, sIdx) => {
+          {sectionsList.map((secKey, sIdx) => {
             const secMeta = allSectionMeta[secKey] || {
               title: secKey.toUpperCase(),
               desc: 'Instrumen survei BSAN',
@@ -1008,17 +1093,41 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                       BAGIAN {sIdx + 1}
                     </span>
                     <h3 className="text-base font-bold text-slate-800 font-display">{secMeta.title}</h3>
+                    {secMeta.desc && <p className="text-xs text-slate-500 mt-0.5">{secMeta.desc}</p>}
                   </div>
                   <div className="flex items-center space-x-2">
                     <span className="text-xs font-semibold px-3 py-1 bg-white border border-slate-200 rounded-full text-slate-600">
                       {secQuestions.length} Pertanyaan
                     </span>
                     <button
+                      type="button"
                       onClick={() => handleOpenAddQuestion(secKey)}
                       className="inline-flex items-center space-x-1 px-3 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg border border-indigo-200 transition cursor-pointer"
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      <span>Tambah Pertanyaan di Bagian Ini</span>
+                      <span>Tambah Pertanyaan</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditSection(secKey)}
+                      className="inline-flex items-center space-x-1 px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-lg border border-slate-200 transition cursor-pointer"
+                      title="Edit Judul & Deskripsi Section"
+                    >
+                      <Edit3 className="w-3.5 h-3.5 text-slate-600" />
+                      <span>Edit Section</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setDeleteSectionConfirmKey(secKey);
+                      }}
+                      className="inline-flex items-center space-x-1 px-3 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-lg border border-rose-200 transition cursor-pointer"
+                      title="Hapus Section Ini & Seluruh Pertanyaannya"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                      <span>Hapus Section</span>
                     </button>
                   </div>
                 </div>
@@ -1093,6 +1202,14 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                             </span>
                             <span>•</span>
                             <span>{q.is_required ? 'Wajib Diisi' : 'Opsional'}</span>
+                            {q.modul_id && (
+                              <>
+                                <span>•</span>
+                                <span className="font-bold text-indigo-700 px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-200 text-[10px]">
+                                  Modul {q.modul_id}
+                                </span>
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1152,7 +1269,7 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
               </div>
 
               <form onSubmit={handleSaveQuestion} className="p-6 space-y-4 text-xs">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1">
                     <label className="font-bold text-slate-600 uppercase text-[10px]">Kode Pertanyaan</label>
                     <input
@@ -1164,19 +1281,30 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                       className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                     />
                   </div>
-                  <div className="space-y-1">
-                    <label className="font-bold text-slate-600 uppercase text-[10px]">Bagian / Section</label>
-                    <select
+                  <div>
+                    <CustomSelect
+                      label="Bagian / Section"
+                      options={Object.entries(allSectionMeta).map(([k, meta]) => ({ value: k, label: meta.title }))}
                       value={formSection}
-                      onChange={e => setFormSection(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none capitalize"
-                    >
-                      {Object.entries(allSectionMeta).map(([k, meta]) => (
-                        <option key={k} value={k}>
-                          {meta.title}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={val => setFormSection(val)}
+                      size="md"
+                    />
+                  </div>
+                  <div>
+                    <CustomSelect
+                      label="Modul BSAN"
+                      options={[
+                        { value: '', label: '-- Non-Modul --' },
+                        { value: 1, label: 'Modul 1: Literasi & Numerasi Dasar' },
+                        { value: 2, label: 'Modul 2: Disiplin Positif & Antiperundungan' },
+                        { value: 3, label: 'Modul 3: Kesehatan Emosi & Pengelolaan Stres' },
+                        { value: 4, label: 'Modul 4: Kebersihan & Kesehatan Lingkungan' },
+                        { value: 5, label: 'Modul 5: Kemitraan Orang Tua & Komite' },
+                      ]}
+                      value={formModulId || ''}
+                      onChange={val => setFormModulId(val ? parseInt(val) : null)}
+                      size="md"
+                    />
                   </div>
                 </div>
 
@@ -1193,27 +1321,28 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="font-bold text-slate-600 uppercase text-[10px]">Tipe Isian</label>
-                    <select
+                  <div>
+                    <CustomSelect
+                      label="Tipe Isian"
+                      options={[
+                        { value: 'school_select', label: 'Dropdown Database Sekolah (Auto Fetch)' },
+                        { value: 'kabupaten_select', label: 'Dropdown Database Kabupaten (Auto Fetch)' },
+                        { value: 'kecamatan_select', label: 'Dropdown Database Kecamatan (Auto Fetch)' },
+                        { value: 'dropdown', label: 'Dropdown Options (Opsi Manual)' },
+                        { value: 'radio', label: 'Pilihan Ganda (Radio)' },
+                        { value: 'checkbox', label: 'Pilihan Jamak (Checkbox)' },
+                        { value: 'text', label: 'Teks Isian / Esai' },
+                      ]}
                       value={formTipe}
-                      onChange={e => {
-                        const newTipe = e.target.value as any;
+                      onChange={val => {
+                        const newTipe = val as any;
                         setFormTipe(newTipe);
                         if ((newTipe === 'radio' || newTipe === 'dropdown' || newTipe === 'checkbox') && !formOpsi.trim()) {
                           setFormOpsi('Sudah\nBelum\nDalam Proses');
                         }
                       }}
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                    >
-                      <option value="school_select">Dropdown Database Sekolah (Auto Fetch)</option>
-                      <option value="kabupaten_select">Dropdown Database Kabupaten (Auto Fetch)</option>
-                      <option value="kecamatan_select">Dropdown Database Kecamatan (Auto Fetch)</option>
-                      <option value="dropdown">Dropdown Options (Opsi Manual)</option>
-                      <option value="radio">Pilihan Ganda (Radio)</option>
-                      <option value="checkbox">Pilihan Jamak (Checkbox)</option>
-                      <option value="text">Teks Isian / Esai</option>
-                    </select>
+                      size="md"
+                    />
                   </div>
 
                   <div className="space-y-1 flex items-center pt-5">
@@ -1270,72 +1399,6 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
                   >
                     <Save className="w-3.5 h-3.5" />
                     <span>Simpan Pertanyaan</span>
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>,
-          document.body
-        )}
-
-        {/* Modal Admin Add New Section */}
-        {isAddSectionModalOpen && createPortal(
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4 animate-fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-md overflow-hidden animate-scale-in">
-              <div className="flex items-center justify-between p-5 border-b border-slate-100">
-                <div className="flex items-center space-x-2">
-                  <Layers className="w-5 h-5 text-indigo-600" />
-                  <h3 className="font-bold text-slate-800 text-base font-display">
-                    Tambah Bagian / Section Baru
-                  </h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsAddSectionModalOpen(false)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 transition cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <form onSubmit={handleAddSection} className="p-6 space-y-4 text-xs">
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-600 uppercase text-[10px]">Nama / Judul Bagian *</label>
-                  <input
-                    type="text"
-                    value={newSectionTitle}
-                    onChange={e => setNewSectionTitle(e.target.value)}
-                    placeholder="Contoh: Evaluasi Sarana & Prasarana"
-                    required
-                    className="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none text-xs"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-600 uppercase text-[10px]">Deskripsi Singkat Bagian</label>
-                  <textarea
-                    rows={2}
-                    value={newSectionDesc}
-                    onChange={e => setNewSectionDesc(e.target.value)}
-                    placeholder="Contoh: Penilaian kesiapan fasilitas pendukung di satuan pendidikan..."
-                    className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-none leading-relaxed text-xs"
-                  />
-                </div>
-
-                <div className="border-t border-slate-100 pt-4 flex justify-end space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsAddSectionModalOpen(false)}
-                    className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-medium hover:bg-slate-50 transition cursor-pointer"
-                  >
-                    Batal
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-5 py-2 rounded-xl bg-indigo-600 text-white font-bold shadow-md hover:bg-indigo-700 transition flex items-center space-x-1.5 cursor-pointer"
-                  >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Simpan Bagian Baru</span>
                   </button>
                 </div>
               </form>
@@ -1408,6 +1471,85 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
           variant="danger"
           isLoading={isDeleting}
         />
+
+        {/* Confirmation Modal for Delete Section */}
+        <ConfirmationModal
+          isOpen={deleteSectionConfirmKey !== null}
+          onClose={() => setDeleteSectionConfirmKey(null)}
+          onConfirm={confirmDeleteSection}
+          title={`Hapus Section "${deleteSectionConfirmKey ? (allSectionMeta[deleteSectionConfirmKey]?.title || deleteSectionConfirmKey) : ''}"?`}
+          description={`Apakah Anda yakin ingin menghapus bagian ini beserta seluruh (${deleteSectionConfirmKey ? questions.filter(q => q.section === deleteSectionConfirmKey).length : 0}) butir pertanyaannya? Pertanyaan pada bagian ini akan dinonaktifkan di database.`}
+          confirmLabel="Hapus Section"
+          cancelLabel="Batal"
+          variant="danger"
+          isLoading={isDeleting}
+        />
+
+        {/* Add / Edit Section Modal */}
+        {isSectionModalOpen && createPortal(
+          <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/60 animate-in fade-in duration-200">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-md w-full p-6 relative animate-in zoom-in-95 duration-200 space-y-5">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <h3 className="text-lg font-bold text-slate-900 font-display">
+                  {editingSectionKey ? 'Edit Informasi Section' : 'Tambah Section Baru'}
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsSectionModalOpen(false)}
+                  className="p-1 text-slate-400 hover:text-slate-700 rounded-full transition cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveSection} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Judul Section / Bagian <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: Evaluasi Media Pembelajaran"
+                    value={sectionFormTitle}
+                    onChange={(e) => setSectionFormTitle(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    Deskripsi / Penjelasan Singkat
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Penjelasan singkat mengenai bagian kuesioner ini..."
+                    value={sectionFormDesc}
+                    onChange={(e) => setSectionFormDesc(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition resize-none"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end space-x-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsSectionModalOpen(false)}
+                    className="px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition cursor-pointer"
+                  >
+                    {editingSectionKey ? 'Simpan Perubahan' : 'Tambah Section'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>,
+          document.body
+        )}
       </div>
     );
   }
@@ -1416,14 +1558,6 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
   // Active Wizard Screen
   return (
     <div className="space-y-6 pb-16">
-      {/* Toast Notification */}
-      {showToast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 text-sm animate-bounce">
-          <Check className="w-4 h-4 text-emerald-400" />
-          <span>{showToast}</span>
-        </div>
-      )}
-
       {/* Offline Alert Header */}
       {isOffline && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl flex items-center justify-between text-xs font-medium">
@@ -1590,16 +1724,13 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
 
               {q.tipe === 'dropdown' && q.opsi_jawaban && (
                 <div className="max-w-md">
-                  <select
+                  <CustomSelect
+                    placeholder="-- Pilih Jawaban --"
+                    options={q.opsi_jawaban.map((opt) => ({ value: opt, label: opt }))}
                     value={currentVal}
-                    onChange={e => handleAnswerChange(q.id, e.target.value)}
-                    className="w-full px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
-                  >
-                    <option value="">-- Pilih Jawaban --</option>
-                    {q.opsi_jawaban.map((opt, i) => (
-                      <option key={i} value={opt}>{opt}</option>
-                    ))}
-                  </select>
+                    onChange={(val) => handleAnswerChange(q.id, val)}
+                    size="md"
+                  />
                 </div>
               )}
 
@@ -1768,6 +1899,85 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
         variant="danger"
         isLoading={isDeleting}
       />
+
+      {/* Confirmation Modal for Delete Section */}
+      <ConfirmationModal
+        isOpen={deleteSectionConfirmKey !== null}
+        onClose={() => setDeleteSectionConfirmKey(null)}
+        onConfirm={confirmDeleteSection}
+        title={`Hapus Section "${deleteSectionConfirmKey ? (allSectionMeta[deleteSectionConfirmKey]?.title || deleteSectionConfirmKey) : ''}"?`}
+        description={`Apakah Anda yakin ingin menghapus bagian ini beserta seluruh (${deleteSectionConfirmKey ? questions.filter(q => q.section === deleteSectionConfirmKey).length : 0}) butir pertanyaannya? Pertanyaan pada bagian ini akan dinonaktifkan di database.`}
+        confirmLabel="Hapus Section"
+        cancelLabel="Batal"
+        variant="danger"
+        isLoading={isDeleting}
+      />
+
+      {/* Add / Edit Section Modal */}
+      {isSectionModalOpen && createPortal(
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/60 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-md w-full p-6 relative animate-in zoom-in-95 duration-200 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-lg font-bold text-slate-900 font-display">
+                {editingSectionKey ? 'Edit Informasi Section' : 'Tambah Section Baru'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsSectionModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-700 rounded-full transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveSection} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Judul Section / Bagian <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: Evaluasi Media Pembelajaran"
+                  value={sectionFormTitle}
+                  onChange={(e) => setSectionFormTitle(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  Deskripsi / Penjelasan Singkat
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="Penjelasan singkat mengenai bagian kuesioner ini..."
+                  value={sectionFormDesc}
+                  onChange={(e) => setSectionFormDesc(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition resize-none"
+                />
+              </div>
+
+              <div className="flex items-center justify-end space-x-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsSectionModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition cursor-pointer"
+                >
+                  {editingSectionKey ? 'Simpan Perubahan' : 'Tambah Section'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

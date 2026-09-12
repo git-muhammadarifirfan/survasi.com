@@ -13,6 +13,7 @@ import { database, KABUPATEN_LIST, KECAMATAN_LIST } from '../../../shared/data/d
 import { Download, Filter, CheckCircle2, Building2, ChevronLeft, ChevronRight, X, Check, Settings, Award } from 'lucide-react';
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 import CustomSelect from '../../../shared/components/CustomSelect';
+import { notifyToast } from '../../../shared/components/NotificationToast';
 
 interface ColumnOption {
   id: string;
@@ -38,7 +39,6 @@ export default function LaporanEkspor() {
   ]);
   
   const [isExporting, setIsExporting] = useState(false);
-  const [showToast, setShowToast] = useState<string | null>(null);
 
   const columnOptions: ColumnOption[] = [
     { id: 'npsn', label: 'NPSN', category: 'metadata' },
@@ -195,19 +195,16 @@ export default function LaporanEkspor() {
       document.body.removeChild(link);
 
       setIsExporting(false);
-      setShowToast('Berkas laporan berhasil diekspor');
-      setTimeout(() => setShowToast(null), 3000);
+      notifyToast({
+        type: 'success',
+        title: 'Ekspor Berhasil',
+        message: 'Berkas laporan berhasil diekspor.',
+      });
     }, 1200);
   };
 
   return (
     <div className="space-y-6">
-      {showToast && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center space-x-2 rounded-xl bg-status-sudah text-white px-4 py-3 shadow-xl text-xs font-semibold animate-scale-in">
-          <CheckCircle2 className="h-4 w-4" />
-          <span>{showToast}</span>
-        </div>
-      )}
 
       {/* Header */}
       <div className="rounded-card bg-surface p-6 shadow-card border border-border flex flex-col md:flex-row justify-between items-start md:items-center gap-4">

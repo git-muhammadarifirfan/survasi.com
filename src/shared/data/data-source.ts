@@ -33,11 +33,7 @@ import type { SELDimensi, SELSubjek, SELSkor } from './sel-indicators';
 import { SEL_INDIKATORS, hitungSkorRata, SEL_DIMENSI_ORDER, SEL_DIMENSI_LABEL } from './sel-indicators';
 import { apiClient } from '../services/api-client';
 
-const KABUPATEN_NAME_TO_ID: Record<string, number> = {
-  'Kab. Sidoarjo': 1,
-  'Kota Batu': 2,
-  'Kab. Tuban': 3,
-};
+
 
 
 export interface School {
@@ -317,7 +313,19 @@ export interface ProporsiModulData {
   kelayakanRuangKelas: { kecamatan: string; rombel: number; kelasLayak: number; persentase: number }[];
 }
 
+export const KABUPATEN_NAME_TO_ID: Record<string, number | undefined> = {
+  'Semua Wilayah': undefined,
+  'Semua Kabupaten': undefined,
+  'Kab. Sidoarjo': 1,
+  'Kota Batu': 2,
+  'Kab. Tuban': 3,
+  'Sidoarjo': 1,
+  'Batu': 2,
+  'Tuban': 3,
+};
+
 export const KABUPATEN_LIST = [
+  { id: 'Semua Wilayah', name: 'Semua Wilayah', key: 'semua', color: '#6366f1' },
   { id: 'Kab. Sidoarjo', name: 'Kab. Sidoarjo', key: 'sidoarjo', color: '#4A57C4' },
   { id: 'Kota Batu', name: 'Kota Batu', key: 'batu', color: '#6C7AE0' },
   { id: 'Kab. Tuban', name: 'Kab. Tuban', key: 'tuban', color: '#2FB344' }
@@ -1096,43 +1104,28 @@ export const database = {
   }): Promise<SELSchoolScore[]> => {
     try {
       const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
-      const res = await apiClient.sel.getSesi(kabId);
-      if (res?.success && Array.isArray(res.data)) {
-        return res.data.map((r: any) => ({
-          sekolahId: String(r.sekolah_id || r.id),
-          sekolahNama: r.sekolah_nama || r.nama || `SD ${r.kecamatan}`,
-          kecamatan: r.kecamatan || 'Kec. Sidoarjo',
-          kabupaten: r.kabupaten || 'Kab. Sidoarjo',
-          tanggal: r.tanggal ? String(r.tanggal).slice(0, 10) : new Date().toISOString().slice(0, 10),
-          guruTotal: Number(r.guru_total || 0),
-          muridTotal: Number(r.murid_total || 0),
-          totalRata: Number(r.total_rata || 0),
-          dimensi: SEL_DIMENSI_ORDER.map(d => ({
-            dimensi: d,
-            label: SEL_DIMENSI_LABEL[d],
-            guruSkor: Number(r[`${d}_guru`] || r.guru_total || 0),
-            muridSkor: Number(r[`${d}_murid`] || r.murid_total || 0),
-            rataRata: Number(r[`${d}_rata`] || r.total_rata || 0),
-          })),
-          kuisionerScore: Number(r.kuisioner_score || 50),
-        }));
+      const res = await apiClient.sel.getScores(kabId);
+      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+        return res.data;
       }
     } catch (err) {
       console.warn('[data-source] getSELScores fallback:', err);
     }
 
-    return [];
+    return SEL_MOCK_SESSIONS
+      .filter(s => !filters?.kabupaten || s.kabupaten === filters.kabupaten)
+      .map(s => computeSELScore(s));
   },
 
   getSELHeatmap: async (kabupaten?: string): Promise<SELHeatmapRow[]> => {
     try {
       const kabId = kabupaten ? KABUPATEN_NAME_TO_ID[kabupaten] : undefined;
       const res = await apiClient.sel.getHeatmap(kabId);
-      if (res?.success && Array.isArray(res.data)) {
+      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
         return res.data.map((r: any) => ({
           kecamatan: r.kecamatan,
           kabupaten: r.kabupaten,
-          jumlahSekolah: Number(r.jumlah_sekolah || 0),
+          jumlahSekolah: Number(r.jumlah_sekolah || r.jumlah_sesi || 0),
           dimensiScores: {
             kesadaran_diri: Number(r.kesadaran_diri || 0),
             regulasi_emosi: Number(r.regulasi_emosi || 0),
@@ -1146,7 +1139,43 @@ export const database = {
     } catch (err) {
       console.warn('[data-source] getSELHeatmap fallback:', err);
     }
-    return [];
+
+    const mockScores = SEL_MOCK_SESSIONS.map(s => computeSELScore(s));
+    const kecMap: Record<string, { total: number; sum: number; dimSum: Record<SELDimensi, number>; count: number; kabupaten: string }> = {};
+    mockScores.forEach(sc => {
+      if (!kecMap[sc.kecamatan]) {
+        kecMap[sc.kecamatan] = {
+          total: 0,
+          sum: 0,
+          count: 0,
+          kabupaten: sc.kabupaten,
+          dimSum: { kesadaran_diri: 0, regulasi_emosi: 0, kesadaran_sosial: 0, keterampilan_relasi: 0, tanggung_jawab: 0 }
+        };
+      }
+      kecMap[sc.kecamatan].count++;
+      kecMap[sc.kecamatan].sum += sc.totalRata;
+      sc.dimensi.forEach(d => {
+        kecMap[sc.kecamatan].dimSum[d.dimensi] += d.rataRata;
+      });
+    });
+
+    return Object.keys(kecMap).map(k => {
+      const item = kecMap[k];
+      const cnt = item.count || 1;
+      return {
+        kecamatan: k,
+        kabupaten: item.kabupaten,
+        jumlahSekolah: cnt,
+        dimensiScores: {
+          kesadaran_diri: Math.round((item.dimSum.kesadaran_diri / cnt) * 100) / 100,
+          regulasi_emosi: Math.round((item.dimSum.regulasi_emosi / cnt) * 100) / 100,
+          kesadaran_sosial: Math.round((item.dimSum.kesadaran_sosial / cnt) * 100) / 100,
+          keterampilan_relasi: Math.round((item.dimSum.keterampilan_relasi / cnt) * 100) / 100,
+          tanggung_jawab: Math.round((item.dimSum.tanggung_jawab / cnt) * 100) / 100,
+        },
+        rataRata: Math.round((item.sum / cnt) * 100) / 100,
+      };
+    });
   },
 
   getSELMatriksData: async (filters?: {
@@ -1156,22 +1185,33 @@ export const database = {
     try {
       const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
       const res = await apiClient.sel.getMatriks(kabId);
-      if (res?.success && Array.isArray(res.data)) {
+      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
         return res.data.map((r: any, idx: number) => ({
-          id: String(r.id || idx + 1),
-          name: r.sekolah_nama || r.nama || r.kecamatan,
+          id: String(r.sekolah_id || r.id || idx + 1),
+          name: r.sekolah || r.sekolah_nama || r.nama || r.kecamatan,
           kecamatan: r.kecamatan,
           kuisionerScore: Number(r.kuisioner_score || 0),
           selScore: Number(r.sel_score || 0),
-          guruSkor: Number(r.guru_skor || 0),
-          muridSkor: Number(r.murid_skor || 0),
-          status: (r.status || 'belum') as any,
+          guruSkor: Number(r.guru_score || r.guru_skor || 0),
+          muridSkor: Number(r.murid_score || r.murid_skor || 0),
+          status: (r.status_pengisian || r.status || 'sudah') as any,
         }));
       }
     } catch (err) {
       console.warn('[data-source] getSELMatriksData fallback:', err);
     }
-    return [];
+
+    const mockScores = SEL_MOCK_SESSIONS.map(s => computeSELScore(s));
+    return mockScores.map(sc => ({
+      id: sc.sekolahId,
+      name: sc.sekolahNama,
+      kecamatan: sc.kecamatan,
+      kuisionerScore: sc.kuisionerScore,
+      selScore: sc.totalRata,
+      guruSkor: sc.guruTotal,
+      muridSkor: sc.muridTotal,
+      status: sc.kuisionerScore >= 60 ? 'sudah' : 'sebagian',
+    }));
   },
 
   getSELSummaryStats: async (): Promise<{
@@ -1196,7 +1236,7 @@ export const database = {
       console.warn('[data-source] getSELSummaryStats fallback:', err);
     }
 
-    const scores = selObservasiData.map(s => computeSELScore(s));
+    const scores = SEL_MOCK_SESSIONS.map(s => computeSELScore(s));
     const totalDiobservasi = scores.length;
     const rataGuruAll = Math.round((scores.reduce((a, b) => a + b.guruTotal, 0) / (totalDiobservasi || 1)) * 10) / 10;
     const rataMuridAll = Math.round((scores.reduce((a, b) => a + b.muridTotal, 0) / (totalDiobservasi || 1)) * 10) / 10;
