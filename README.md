@@ -1,32 +1,74 @@
-# React + TypeScript + Vite
+# 🏫 SURVASI — Sistem Survei & Evaluasi SEL/BSAN Jawa Timur
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+SURVASI adalah platform web berbasis **React + Express + MySQL** yang dirancang untuk pengumpulan data survei, evaluasi **Social-Emotional Learning (SEL)**, dan analisis modul **Budaya Sekolah Aman dan Nyaman (BSAN)** di wilayah Provinsi Jawa Timur.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 🚀 Fitur Utama
 
-## React Compiler
+- 🔐 **Autentikasi & RBAC**: Peran Pengguna (Admin Provinsi, Cabdin, Kepala Sekolah, Guru/Responden).
+- 📊 **Dashboard Analytics & GIS**: Visualisasi indikator SEL, peta heatmap GIS per kabupaten/kota.
+- 📝 **Kuisioner & Form Observasi**: Form survei interaktif dengan draf otomatis (auto-save offline).
+- 📈 **Analisis SEL & Matriks Gap**: Matriks evaluasi, radar chart 5 domain SEL, dan eksport laporan PDF/Word.
+- 🔒 **Security & Performance Hardening**: Anti-DDoS rate limiting, Helmet HTTP headers, CORS restriction, dan Express SPA routing.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the Oxlint configuration
+## 🛠️ Stack Teknologi
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+- **Frontend**: React 18, TypeScript, Vite, React Router v7, Recharts, Leaflet GIS, Lucide Icons
+- **Backend**: Node.js, Express.js, MySQL 2 (Connection Pool), JWT Auth, Bcrypt, Helmet, Compression
+- **Deployment**: Nginx Reverse Proxy, PM2 / Docker Compose, Cloudflare Flexible SSL
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+---
+
+## 📁 Struktur Direktori
+
+```
+survasi.com/
+├── database/          # Dump database SQL & script migrasi/patch
+├── deployment/        # Konfigurasi Nginx, Docker, PM2, dan deploy.sh
+├── server/            # Backend Express API & REST controller
+├── src/               # Frontend React Application
+│   ├── app/           # App root & routing
+│   ├── features/      # Feature modules (auth, dashboard, survey, analisis)
+│   └── shared/        # Shared components, services, & utilities
+└── vite.config.ts     # Konfigurasi Vite & API proxy
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+---
+
+## 🔧 Panduan Instalasi Lokal
+
+### 1. Prasyarat
+- Node.js (v18+)
+- MySQL (v8.0+)
+- PNPM atau NPM
+
+### 2. Instalasi & Running
+
+```bash
+# Clone repository
+git clone https://github.com/git-muhammadarifirfan/survasi.com.git
+cd survasi.com
+
+# Install dependencies frontend & backend
+npm install
+cd server && npm install && cd ..
+
+# Konfigurasi .env server
+cp server/.env.example server/.env
+
+# Import database SQL
+mysql -u root -p db_survasi < database/production_dump.sql
+
+# Jalankan backend & frontend secara lokal
+cd server && node index.js # Running di http://localhost:3001
+# Di terminal terpisah:
+npm run dev                # Running di http://localhost:5173
+```
+
+---
+
+## 📜 Lisensi & Hak Cipta
+Hak Cipta © 2026 **SURVASI.com — Dinas Pendidikan Provinsi Jawa Timur**.
