@@ -261,12 +261,22 @@ router.put('/indikator/:id', adminOnly, async (req, res) => {
   }
 });
 
-// ─── DELETE /api/sel/indikator/:id ───────────────────────────────────────────
+// ─── DELETE /api/sel/indikator/:id (Soft Delete) ───────────────────────────
 router.delete('/indikator/:id', adminOnly, async (req, res) => {
   try {
-    // Soft delete: set is_active = 0
-    await pool.execute(`UPDATE sel_indikator SET is_active = 0 WHERE id = ?`, [req.params.id]);
-    return res.json({ success: true });
+    // Soft delete: set is_active = 0 and deleted_at = CURRENT_TIMESTAMP
+    await pool.execute(`UPDATE sel_indikator SET is_active = 0, deleted_at = CURRENT_TIMESTAMP WHERE id = ?`, [req.params.id]);
+    return res.json({ success: true, message: 'Indikator SEL berhasil dihapus (soft delete).' });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── POST /api/sel/indikator/:id/restore (Restore Indikator) ─────────────────
+router.post('/indikator/:id/restore', adminOnly, async (req, res) => {
+  try {
+    await pool.execute(`UPDATE sel_indikator SET is_active = 1, deleted_at = NULL WHERE id = ?`, [req.params.id]);
+    return res.json({ success: true, message: 'Indikator SEL berhasil dipulihkan (restore).' });
   } catch (err) {
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
@@ -429,7 +439,8 @@ router.get('/sesi', async (req, res) => {
       JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
       JOIN kecamatan k ON sp.kecamatan_id = k.id
       JOIN kabupaten kb ON k.kabupaten_id = kb.id
-      WHERE (? IS NULL OR kb.id = ?)
+      WHERE sso.deleted_at IS NULL
+        AND (? IS NULL OR kb.id = ?)
         ${extraWhere}
       ORDER BY sso.tanggal DESC, sso.id DESC
       LIMIT 200
@@ -470,6 +481,28 @@ router.get('/sesi', async (req, res) => {
   } catch (err) {
     console.error('[SEL] fetch sesi list error:', err);
     return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── DELETE /api/sel/sesi/:id (Soft Delete Sesi Observasi) ────────────────────
+router.delete('/sesi/:id', async (req, res) => {
+  try {
+    await pool.execute('UPDATE sel_sesi_observasi SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id]);
+    return res.json({ success: true, message: 'Sesi observasi SEL berhasil dihapus (soft delete).' });
+  } catch (err) {
+    console.error('[SEL] delete sesi error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal menghapus sesi observasi.' });
+  }
+});
+
+// ─── POST /api/sel/sesi/:id/restore (Restore Sesi Observasi) ──────────────────
+router.post('/sesi/:id/restore', async (req, res) => {
+  try {
+    await pool.execute('UPDATE sel_sesi_observasi SET deleted_at = NULL WHERE id = ?', [req.params.id]);
+    return res.json({ success: true, message: 'Sesi observasi SEL berhasil dipulihkan (restore).' });
+  } catch (err) {
+    console.error('[SEL] restore sesi error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal memulihkan sesi observasi.' });
   }
 });
 

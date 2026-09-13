@@ -23,7 +23,7 @@ router.get('/questions', async (req, res) => {
         tipe, opsi_jawaban, urutan, is_required, 
         skip_to_question, section, target_kelas, is_active
       FROM pertanyaan_survey
-      WHERE is_active = 1
+      WHERE is_active = 1 AND deleted_at IS NULL
       ORDER BY urutan ASC
     `);
 
@@ -167,7 +167,7 @@ router.put('/questions/:id', async (req, res) => {
   }
 });
 
-// ─── DELETE /api/survey/questions/:id (Delete Question - Admin Only) ──────────
+// ─── DELETE /api/survey/questions/:id (Soft Delete Question - Admin Only) ─────
 router.delete('/questions/:id', async (req, res) => {
   try {
     const role = req.user?.role || 'admin';
@@ -176,12 +176,30 @@ router.delete('/questions/:id', async (req, res) => {
     }
 
     const questionId = parseInt(req.params.id);
-    await pool.execute(`UPDATE pertanyaan_survey SET is_active = 0 WHERE id = ?`, [questionId]);
+    await pool.execute(`UPDATE pertanyaan_survey SET is_active = 0, deleted_at = CURRENT_TIMESTAMP WHERE id = ?`, [questionId]);
 
-    return res.json({ success: true, message: 'Pertanyaan berhasil dihapus.' });
+    return res.json({ success: true, message: 'Pertanyaan berhasil dihapus (soft delete). Data masih dapat dipulihkan.' });
   } catch (err) {
     console.error('[SURVEY] delete question error:', err);
     return res.status(500).json({ success: false, message: 'Gagal menghapus pertanyaan.' });
+  }
+});
+
+// ─── POST /api/survey/questions/:id/restore (Restore Question - Admin Only) ──
+router.post('/questions/:id/restore', async (req, res) => {
+  try {
+    const role = req.user?.role || 'admin';
+    if (role !== 'admin' && role !== 'pengawas') {
+      return res.status(403).json({ success: false, message: 'Akses ditolak. Hanya Admin yang dapat mengelola pertanyaan.' });
+    }
+
+    const questionId = parseInt(req.params.id);
+    await pool.execute(`UPDATE pertanyaan_survey SET is_active = 1, deleted_at = NULL WHERE id = ?`, [questionId]);
+
+    return res.json({ success: true, message: 'Pertanyaan berhasil dipulihkan (restore).' });
+  } catch (err) {
+    console.error('[SURVEY] restore question error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal memulihkan pertanyaan.' });
   }
 });
 
