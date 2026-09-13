@@ -91,14 +91,17 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
 // ─── Health Check ─────────────────────────────────────────────────────────────
-app.get('/health', (req, res) => {
+const startTime = Date.now();
+app.get(['/health', '/api/health'], (req, res) => {
   res.json({
     status: 'ok',
     service: 'BSAN Jatim API',
     version: '1.0.0',
+    uptimeSeconds: Math.floor((Date.now() - startTime) / 1000),
     timestamp: new Date().toISOString(),
   });
 });
+
 
 // ─── API Routes ───────────────────────────────────────────────────────────────
 app.use('/api/auth',       require('./routes/auth'));
