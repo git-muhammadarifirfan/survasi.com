@@ -1180,7 +1180,7 @@ export const database = {
     try {
       const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
       const res = await apiClient.sel.getScores(kabId);
-      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+      if (res?.success && Array.isArray(res.data)) {
         return res.data;
       }
     } catch (err) {
@@ -1196,7 +1196,7 @@ export const database = {
     try {
       const kabId = kabupaten ? KABUPATEN_NAME_TO_ID[kabupaten] : undefined;
       const res = await apiClient.sel.getHeatmap(kabId);
-      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+      if (res?.success && Array.isArray(res.data)) {
         return res.data.map((r: any) => ({
           kecamatan: r.kecamatan,
           kabupaten: r.kabupaten,
@@ -1260,7 +1260,7 @@ export const database = {
     try {
       const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
       const res = await apiClient.sel.getMatriks(kabId);
-      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+      if (res?.success && Array.isArray(res.data)) {
         return res.data.map((r: any, idx: number) => ({
           id: String(r.sekolah_id || r.id || idx + 1),
           name: r.sekolah || r.sekolah_nama || r.nama || r.kecamatan,

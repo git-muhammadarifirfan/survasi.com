@@ -51,3 +51,7 @@ antigravity-ide/
 # Server maintenance cheat sheet
 SERVER_COMMANDS.txt
 
+# Archives
+*.zip
+
+

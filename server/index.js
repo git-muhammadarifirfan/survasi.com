@@ -140,7 +140,7 @@ app.listen(PORT, async () => {
   console.log(`\n🚀 BSAN Jatim API Server running on http://localhost:${PORT}`);
   console.log(`   ENV  : ${process.env.NODE_ENV || 'development'}`);
   console.log(`   DB   : ${process.env.DB_NAME}@${process.env.DB_HOST}:${process.env.DB_PORT || 3306}`);
-  console.log(`   CORS : ${allowedOrigins.join(', ')}\n`);
+  console.log(`   CORS : ${process.env.CORS_ORIGINS || '*'}\n`);
 
   // Auto-patch MySQL DB schema on startup (deleted_at soft-delete & school_select type)
   try {
