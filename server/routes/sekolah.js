@@ -25,6 +25,7 @@ router.get('/options', async (req, res) => {
       FROM satuan_pendidikan sp
       LEFT JOIN kecamatan k ON sp.kecamatan_id = k.id
       LEFT JOIN kabupaten kb ON k.kabupaten_id = kb.id
+      WHERE sp.deleted_at IS NULL
       ORDER BY sp.nama ASC
     `);
     return res.json({ success: true, data: rows });
@@ -75,7 +76,7 @@ router.get('/', async (req, res) => {
     } = req.query;
 
     const offset = (parseInt(page) - 1) * parseInt(limit);
-    let whereClauses = ['1=1'];
+    let whereClauses = ['sp.deleted_at IS NULL'];
     let params = [];
 
     if (kabupaten_id) {
@@ -207,6 +208,30 @@ router.put('/:id', adminOnly, async (req, res) => {
   } catch (err) {
     console.error('[Sekolah] update error:', err);
     return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── DELETE /api/sekolah/:id (Soft Delete) ───────────────────────────────────
+router.delete('/:id', adminOnly, async (req, res) => {
+  try {
+    const sekolahId = req.params.id;
+    await pool.execute('UPDATE satuan_pendidikan SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', [sekolahId]);
+    return res.json({ success: true, message: 'Data sekolah berhasil dihapus (soft delete). Data masih bisa dipulihkan jika diperlukan.' });
+  } catch (err) {
+    console.error('[Sekolah] delete error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal menghapus data sekolah.' });
+  }
+});
+
+// ─── POST /api/sekolah/:id/restore (Restore Soft-Deleted School) ────────────
+router.post('/:id/restore', adminOnly, async (req, res) => {
+  try {
+    const sekolahId = req.params.id;
+    await pool.execute('UPDATE satuan_pendidikan SET deleted_at = NULL WHERE id = ?', [sekolahId]);
+    return res.json({ success: true, message: 'Data sekolah berhasil dipulihkan (restore).' });
+  } catch (err) {
+    console.error('[Sekolah] restore error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal memulihkan data sekolah.' });
   }
 });
 

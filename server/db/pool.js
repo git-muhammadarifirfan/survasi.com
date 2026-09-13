@@ -14,8 +14,8 @@ const pool = mysql.createPool({
   password: process.env.DB_PASS || '',
   database: process.env.DB_NAME || 'db_survasi',
   waitForConnections: true,
-  connectionLimit: 25,              // Max 25 simultaneous active DB connections
-  maxIdle: 10,                      // Keep up to 10 idle connections for immediate reuse
+  connectionLimit: parseInt(process.env.DB_CONNECTION_LIMIT || '12'), // Max 12 active connections for 2GB RAM VM efficiency
+  maxIdle: parseInt(process.env.DB_MAX_IDLE || '5'),                   // Keep up to 5 idle connections for instant reuse
   idleTimeout: 60000,               // Close idle connections after 60s
   queueLimit: 0,
   enableKeepAlive: true,            // Keep TCP connections alive

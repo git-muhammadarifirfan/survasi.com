@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  # ── Express API Backend ──────────────────────────────────────────────────────
+  api:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+      target: api-server
+    container_name: survasi-api
+    restart: always
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DB_HOST: mysql-db
+      DB_USER: survasi
+      DB_PASS: admin.id01
+      DB_NAME: dbsurvasi
+      DB_CONNECTION_LIMIT: 12
+      JWT_SECRET: survasi_jwt_secret_key_production_32chars_min_change_this
+    ports:
+      - "3001:3001"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  # ── Nginx Static Frontend & Proxy ───────────────────────────────────────────
+  web:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+      target: production-nginx
+    container_name: survasi-web
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 256M
