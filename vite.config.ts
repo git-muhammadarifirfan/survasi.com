@@ -16,7 +16,6 @@ export default defineConfig({
     target: 'es2020',
     cssCodeSplit: true,
     sourcemap: false,
-    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
         manualChunks(id: string) {
@@ -30,8 +29,11 @@ export default defineConfig({
             if (id.includes('leaflet') || id.includes('react-leaflet')) {
               return 'vendor-maps';
             }
-            if (id.includes('docx') || id.includes('file-saver') || id.includes('html2canvas') || id.includes('html2pdf.js') || id.includes('jspdf')) {
-              return 'vendor-export';
+            if (id.includes('jspdf') || id.includes('html2pdf.js') || id.includes('html2canvas')) {
+              return 'vendor-pdf';
+            }
+            if (id.includes('docx') || id.includes('file-saver')) {
+              return 'vendor-docx';
             }
             if (id.includes('lucide-react')) {
               return 'vendor-icons';
@@ -40,6 +42,7 @@ export default defineConfig({
         },
       },
     },
+    chunkSizeWarningLimit: 2000,
   },
   optimizeDeps: {
     include: ['react-is', 'recharts']
