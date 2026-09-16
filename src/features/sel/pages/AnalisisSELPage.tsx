@@ -251,7 +251,7 @@ export default function AnalisisSEL() {
     return { subject: SEL_DIMENSI_LABEL[d], Guru: avgGuru, Murid: avgMurid, fullMark: 4 };
   });
 
-  // Bar chart: avg per dimensi, guru vs murid
+  // Bar chart 1: avg per dimensi, guru vs murid
   const barData = SEL_DIMENSI_ORDER.map(d => {
     const guruVals = scores.map(s => s.dimensi.find(dd => dd.dimensi === d)?.guruSkor || 0);
     const muridVals = scores.map(s => s.dimensi.find(dd => dd.dimensi === d)?.muridSkor || 0);
@@ -259,6 +259,17 @@ export default function AnalisisSEL() {
       dimensi: SEL_DIMENSI_LABEL[d].split(' ')[0], // short
       Guru: scores.length ? Math.round((guruVals.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : 0,
       Murid: scores.length ? Math.round((muridVals.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : 0,
+    };
+  });
+
+  // Bar chart 2: avg per dimensi, kelas vs lingkungan sekolah
+  const konteksBarData = SEL_DIMENSI_ORDER.map(d => {
+    const kelasVals = scores.map(s => s.dimensi.find(dd => dd.dimensi === d)?.kelasSkor ?? s.dimensi.find(dd => dd.dimensi === d)?.rataRata ?? 0);
+    const lingVals = scores.map(s => s.dimensi.find(dd => dd.dimensi === d)?.lingkunganSkor ?? s.dimensi.find(dd => dd.dimensi === d)?.rataRata ?? 0);
+    return {
+      dimensi: SEL_DIMENSI_LABEL[d].split(' ')[0], // short
+      Kelas: scores.length ? Math.round((kelasVals.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : 0,
+      'Lingkungan Sekolah': scores.length ? Math.round((lingVals.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : 0,
     };
   });
 
@@ -404,6 +415,35 @@ export default function AnalisisSEL() {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+            </div>
+          </div>
+
+          {/* Bar Chart Kelas vs Lingkungan Sekolah */}
+          <div className="rounded-2xl bg-surface border border-border shadow-card p-5 animate-scale-in" style={{ animationDelay: '150ms' }}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-bold text-text-primary font-display mb-0.5">Perilaku di Kelas vs Lingkungan Sekolah</h3>
+                <p className="text-[11px] text-text-secondary">Perbandingan skor rata-rata observasi berdasarkan lokasi/konteks (skala 1–4)</p>
+              </div>
+              <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
+                Konteks Observasi
+              </span>
+            </div>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={konteksBarData} margin={{ top: 5, right: 5, left: -25, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--color-border)" />
+                  <XAxis dataKey="dimensi" tick={{ fill: 'var(--color-text-secondary)', fontSize: 10 }} />
+                  <YAxis domain={[0, 4]} tickFormatter={v => v.toFixed(1)} tick={{ fill: 'var(--color-text-secondary)', fontSize: 10 }} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)', borderRadius: 12, fontSize: 12 }}
+                    formatter={(v: any) => [`${v}/4`, '']}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Bar dataKey="Kelas" fill="#6366F1" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Lingkungan Sekolah" fill="#F59E0B" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           </div>
 

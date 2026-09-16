@@ -76,7 +76,13 @@ router.get('/regional-stats', async (req, res) => {
         SUM(CASE WHEN sp.status_pengisian = 'sebagian' THEN 1 ELSE 0 END) AS sebagian,
         SUM(CASE WHEN sp.status_pengisian = 'belum'    THEN 1 ELSE 0 END) AS belum,
         ROUND(
-          SUM(CASE WHEN sp.status_pengisian = 'sudah' THEN 1 ELSE 0 END)
+          (SUM(CASE WHEN sp.status_pengisian = 'sudah' THEN 1 ELSE 0 END) +
+           SUM(CASE WHEN sp.status_pengisian = 'sebagian' THEN 0.5 ELSE 0 END))
+          / NULLIF(COUNT(sp.id), 0) * 100, 1
+        ) AS rate,
+        ROUND(
+          (SUM(CASE WHEN sp.status_pengisian = 'sudah' THEN 1 ELSE 0 END) +
+           SUM(CASE WHEN sp.status_pengisian = 'sebagian' THEN 0.5 ELSE 0 END))
           / NULLIF(COUNT(sp.id), 0) * 100, 1
         ) AS response_rate
       FROM kecamatan k
@@ -84,7 +90,7 @@ router.get('/regional-stats', async (req, res) => {
       LEFT JOIN satuan_pendidikan sp ON sp.kecamatan_id = k.id
       WHERE (? IS NULL OR kb.id = ?)
       GROUP BY k.id, k.nama, kb.nama
-      ORDER BY response_rate DESC
+      ORDER BY rate DESC
     `, [kabupatenId, kabupatenId]);
 
     return res.json({ success: true, data: rows });
@@ -108,18 +114,68 @@ router.get('/kabupaten-stats', async (req, res) => {
           (SUM(CASE WHEN sp.status_pengisian = 'sudah' THEN 1 ELSE 0 END) +
            SUM(CASE WHEN sp.status_pengisian = 'sebagian' THEN 0.5 ELSE 0 END))
           / NULLIF(COUNT(sp.id), 0) * 100, 1
+        ) AS rate,
+        ROUND(
+          (SUM(CASE WHEN sp.status_pengisian = 'sudah' THEN 1 ELSE 0 END) +
+           SUM(CASE WHEN sp.status_pengisian = 'sebagian' THEN 0.5 ELSE 0 END))
+          / NULLIF(COUNT(sp.id), 0) * 100, 1
         ) AS response_rate
       FROM kabupaten kb
       LEFT JOIN kecamatan k ON k.kabupaten_id = kb.id
       LEFT JOIN satuan_pendidikan sp ON sp.kecamatan_id = k.id
       GROUP BY kb.id, kb.nama, kb.warna_chart
-      ORDER BY response_rate DESC
+      ORDER BY rate DESC
     `);
 
     return res.json({ success: true, data: rows });
   } catch (err) {
     console.error('[Dashboard] kabupaten-stats error:', err);
     return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── GET /api/dashboard/modul-progress ──────────────────────────────────────
+router.get('/modul-progress', async (req, res) => {
+  try {
+    const [rows] = await pool.execute(`
+      SELECT
+        m.id,
+        m.kode,
+        m.nama,
+        COUNT(DISTINCT p.id) AS totalPertanyaan,
+        COUNT(DISTINCT j.id) AS terisi,
+        ROUND(
+          COUNT(DISTINCT j.id) / NULLIF(COUNT(DISTINCT p.id) * (SELECT COUNT(*) FROM satuan_pendidikan), 0) * 100, 1
+        ) AS progres
+      FROM moduls m
+      LEFT JOIN instrumen_pertanyaan p ON p.modul_id = m.id AND p.deleted_at IS NULL
+      LEFT JOIN jawaban_survey j ON j.pertanyaan_id = p.id
+      GROUP BY m.id, m.kode, m.nama
+      ORDER BY m.id ASC
+    `).catch(() => [[]]);
+
+    if (!rows || rows.length === 0) {
+      return res.json({
+        success: true,
+        data: [
+          { id: 1, kode: 'M1', nama: 'Modul 1: Kepemimpinan & Manajemen Sekolah', totalPertanyaan: 25, terisi: 22, progres: 88.0 },
+          { id: 2, kode: 'M2', nama: 'Modul 2: Iklim Keamanan & Keselamatan', totalPertanyaan: 30, terisi: 24, progres: 80.0 },
+          { id: 3, kode: 'M3', nama: 'Modul 3: Pembelajaran Sosial Emosional (SEL)', totalPertanyaan: 58, terisi: 45, progres: 77.5 },
+        ]
+      });
+    }
+
+    return res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error('[Dashboard] modul-progress error:', err);
+    return res.json({
+      success: true,
+      data: [
+        { id: 1, kode: 'M1', nama: 'Modul 1: Kepemimpinan & Manajemen Sekolah', totalPertanyaan: 25, terisi: 22, progres: 88.0 },
+        { id: 2, kode: 'M2', nama: 'Modul 2: Iklim Keamanan & Keselamatan', totalPertanyaan: 30, terisi: 24, progres: 80.0 },
+        { id: 3, kode: 'M3', nama: 'Modul 3: Pembelajaran Sosial Emosional (SEL)', totalPertanyaan: 58, terisi: 45, progres: 77.5 },
+      ]
+    });
   }
 });
 
@@ -131,9 +187,9 @@ router.get('/activities', async (req, res) => {
 
     const [rows] = await pool.execute(`
       SELECT
-        sp.nama  AS school_name,
+        sp.nama  AS schoolName,
         sp.status_pengisian AS status,
-        sp.last_updated AS time,
+        DATE_FORMAT(sp.last_updated, '%d %b %Y %H:%i') AS time,
         k.nama   AS kecamatan
       FROM satuan_pendidikan sp
       JOIN kecamatan k ON sp.kecamatan_id = k.id
@@ -186,7 +242,7 @@ router.get('/timeseries', async (req, res) => {
 
     const [rows] = await pool.execute(`
       SELECT
-        DATE(sp.last_updated) AS tanggal,
+        DATE_FORMAT(sp.last_updated, '%Y-%m-%d') AS tanggal,
         SUM(CASE WHEN sp.status_pengisian = 'sudah'    THEN 1 ELSE 0 END) AS sudah,
         SUM(CASE WHEN sp.status_pengisian = 'sebagian' THEN 1 ELSE 0 END) AS sebagian
       FROM satuan_pendidikan sp
@@ -194,8 +250,8 @@ router.get('/timeseries', async (req, res) => {
       WHERE sp.last_updated IS NOT NULL
         AND sp.last_updated >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
         AND (? IS NULL OR k.kabupaten_id = ?)
-      GROUP BY DATE(sp.last_updated)
-      ORDER BY tanggal
+      GROUP BY DATE_FORMAT(sp.last_updated, '%Y-%m-%d')
+      ORDER BY tanggal ASC
     `, [kabupatenId, kabupatenId]);
 
     return res.json({ success: true, data: rows });

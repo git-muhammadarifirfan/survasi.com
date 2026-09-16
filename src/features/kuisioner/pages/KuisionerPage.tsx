@@ -687,9 +687,8 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     saveDraft('kuisioner', updated, activeSecIdx);
 
     // Update status pengisian sekolah menjadi 'sebagian' jika draft terisi
-    if (userProfile?.sekolah_id) {
-      apiClient.put(`/sekolah/${userProfile.sekolah_id}`, { status_pengisian: 'sebagian' }).catch(() => {});
-    }
+    const targetSchId = userProfile?.sekolah_id || answers[4] || 1;
+    apiClient.post('/survey/draft', { sekolah_id: targetSchId }).catch(() => {});
   };
 
   const [highlightedQuestionId, setHighlightedQuestionId] = useState<number | null>(null);

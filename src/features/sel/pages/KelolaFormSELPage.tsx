@@ -7,12 +7,12 @@
 
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { SEL_INDIKATORS, SEL_DIMENSI_ORDER, SEL_DIMENSI_LABEL } from '../../../shared/data/sel-indicators';
+import { SEL_INDIKATORS, SEL_DIMENSI_ORDER, SEL_DIMENSI_LABEL, SEL_DESKRIPSI_SUBDIMENSI } from '../../../shared/data/sel-indicators';
 import type { SELIndikator, SELDimensi, SELSubjek, SELKonteks } from '../../../shared/data/sel-indicators';
 import { ObservasiFormWizard } from './ObservasiSELPage';
 import {
   FileText, Plus, Edit3, Trash2, Search, Filter, Save, X, CheckCircle2,
-  AlertCircle, GraduationCap, Users, Building2, Trees, Settings2, Eye,
+  AlertCircle, GraduationCap, Users, Building2, Trees, Settings2, Eye, Info,
   XCircle, Clock, CheckCircle, Sparkles, Brain, MapPin, ChevronRight,
   School, ClipboardList, GripVertical, Layers, BookOpen, CheckSquare,
   FolderPlus, PlusCircle
@@ -818,6 +818,15 @@ export default function KelolaFormSEL() {
                           <Plus className="h-3 w-3" /> Tambah Indikator
                         </button>
                       </div>
+
+                      {/* Deskripsi Sub-dimensi Header dari Dokumen Resmi BSAN-SEL */}
+                      {SEL_DESKRIPSI_SUBDIMENSI[subjek]?.[dimensi as SELDimensi] && (
+                        <div className="mb-3.5 px-3.5 py-2 rounded-xl bg-surface border border-primary/20 text-xs text-text-primary font-medium flex items-center gap-2 shadow-xs">
+                          <Info className="h-3.5 w-3.5 text-primary shrink-0" />
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-primary">Deskripsi Sub-dimensi:</span>
+                          <span className="text-xs font-semibold text-text-primary">{SEL_DESKRIPSI_SUBDIMENSI[subjek][dimensi as SELDimensi]}</span>
+                        </div>
+                      )}
 
                       {inds.length === 0 ? (
                         <div className="p-5 text-center text-text-secondary text-xs bg-bg/30 border border-dashed border-border rounded-xl">

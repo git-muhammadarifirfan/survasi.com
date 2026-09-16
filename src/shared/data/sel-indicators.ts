@@ -254,33 +254,45 @@ export interface SELIndikator {
   catatan?: string; // petunjuk tambahan untuk observer
 }
 
+/** Deskripsi / Sub-dimensi header dari dokumen resmi Instrumen Observasi BSAN-SEL 03092026.docx */
+export const SEL_DESKRIPSI_SUBDIMENSI: Record<SELSubjek, Record<SELDimensi, string>> = {
+  guru: {
+    kesadaran_diri:     'Guru mengajak murid mengenali kekuatan dan kelemahan diri',
+    regulasi_emosi:     'Guru mencontohkan teknik pengelolaan emosi (misalnya tarik napas)',
+    kesadaran_sosial:   'Guru menekankan pentingnya menghargai perbedaan',
+    keterampilan_relasi:'Guru memfasilitasi diskusi kelompok dengan aturan komunikasi positif',
+    tanggung_jawab:     'Guru memberikan contoh dan memfasilitasi peran serta tanggung jawab',
+  },
+  murid: {
+    kesadaran_diri:     'Murid mampu menamai emosi dan menunjukkan rasa percaya diri',
+    regulasi_emosi:     'Murid mampu menenangkan diri saat menghadapi kesulitan/konflik',
+    kesadaran_sosial:   'Murid menunjukkan empati terhadap teman yang kesulitan',
+    keterampilan_relasi:'Murid mampu menyelesaikan konflik dengan cara damai',
+    tanggung_jawab:     'Murid menjalankan tanggung jawab pada diri, teman dan lingkungan',
+  },
+};
+
 export const SEL_INDIKATORS: SELIndikator[] = [
   // ══════════════════════════════════════════════════
-  // GURU — Kesadaran Diri
+  // GURU — Kesadaran Diri (5 Indikator)
+  // Deskripsi: Guru mengajak murid mengenali kekuatan dan kelemahan diri
   // ══════════════════════════════════════════════════
   {
     id: 'guru_kd_kls_1',
     dimensi: 'kesadaran_diri',
     subjek: 'guru',
     konteks: 'kelas',
-    teks: 'Guru mengajak murid mengenali kekuatan dan kelemahan diri',
+    teks: 'Guru meminta murid menuliskan hal yang mereka kuasai dan hal yang perlu mereka tingkatkan',
   },
   {
     id: 'guru_kd_kls_2',
     dimensi: 'kesadaran_diri',
     subjek: 'guru',
     konteks: 'kelas',
-    teks: 'Guru meminta murid menuliskan hal yang mereka kuasai dan hal yang perlu mereka tingkatkan',
-  },
-  {
-    id: 'guru_kd_kls_3',
-    dimensi: 'kesadaran_diri',
-    subjek: 'guru',
-    konteks: 'kelas',
     teks: 'Guru memberi apresiasi atas jawaban murid di kelas',
   },
   {
-    id: 'guru_kd_kls_4',
+    id: 'guru_kd_kls_3',
     dimensi: 'kesadaran_diri',
     subjek: 'guru',
     konteks: 'kelas',
@@ -291,8 +303,8 @@ export const SEL_INDIKATORS: SELIndikator[] = [
     dimensi: 'kesadaran_diri',
     subjek: 'guru',
     konteks: 'lingkungan',
-    teks: 'Guru memberi pujian saat murid berani mencoba hal baru (misal: maju ke depan kelas, menjadi ketua kelas, menjadi petugas upacara)',
-    catatan: 'Jika selama observasi tidak ada kegiatan, bisa ditanyakan ke guru (secara umum murid, atau hanya murid tertentu)',
+    teks: 'Guru memberi pujian saat murid berani mencoba hal baru. Misal Berani maju ke depan kelas, mengajukan diri menjadi ketua kelas, menjadi petugas upacara dll]',
+    catatan: 'Jika selama observasi tidak ada kegiatan, bisa ditanyakan ke guru [secara umum murid, atau hanya murid tertentu]',
   },
   {
     id: 'guru_kd_lngk_2',
@@ -304,28 +316,22 @@ export const SEL_INDIKATORS: SELIndikator[] = [
   },
 
   // ══════════════════════════════════════════════════
-  // GURU — Regulasi Emosi
+  // GURU — Regulasi Emosi (5 Indikator)
+  // Deskripsi: Guru mencontohkan teknik pengelolaan emosi (misalnya tarik napas)
   // ══════════════════════════════════════════════════
   {
     id: 'guru_re_kls_1',
     dimensi: 'regulasi_emosi',
     subjek: 'guru',
     konteks: 'kelas',
-    teks: 'Guru mencontohkan teknik pengelolaan emosi (misal: tarik napas)',
+    teks: 'Ketika kelas gaduh, guru mencontohkan dan mengajak murid menggunakan regulasi emosi (teknik STOP, afirmasi positif, penggunaan tepuk, dll)',
   },
   {
     id: 'guru_re_kls_2',
     dimensi: 'regulasi_emosi',
     subjek: 'guru',
     konteks: 'kelas',
-    teks: 'Ketika kelas gaduh, guru mencontohkan dan mengajak murid menggunakan regulasi emosi (teknik STOP, afirmasi positif, penggunaan tepuk, dll)',
-  },
-  {
-    id: 'guru_re_kls_3',
-    dimensi: 'regulasi_emosi',
-    subjek: 'guru',
-    konteks: 'kelas',
-    teks: 'Guru tetap tenang saat menghadapi situasi yang tak terkendali (misal: kelas gaduh, murid tantrum)',
+    teks: 'Guru tetap tenang saat menghadapi situasi yang tak terkendali misalnya, saat kelas gaduh, ada murid tantrum, dll',
   },
   {
     id: 'guru_re_lngk_1',
@@ -339,7 +345,7 @@ export const SEL_INDIKATORS: SELIndikator[] = [
     dimensi: 'regulasi_emosi',
     subjek: 'guru',
     konteks: 'lingkungan',
-    teks: 'Guru mengingatkan murid dengan kalimat positif saat murid melakukan kesalahan (misal: memecahkan pot, menyerobot antrian, bermain bola di lorong)',
+    teks: 'Guru mengingatkan murid dengan kalimat postif saat murid melakukan kesalahan. Misal memecahkan pot, menyerobot antrian di kantin, bermain bola di Lorong kelas dll',
   },
   {
     id: 'guru_re_lngk_3',
@@ -350,68 +356,63 @@ export const SEL_INDIKATORS: SELIndikator[] = [
   },
 
   // ══════════════════════════════════════════════════
-  // GURU — Kesadaran Sosial
+  // GURU — Kesadaran Sosial (6 Indikator)
+  // Deskripsi: Guru menekankan pentingnya menghargai perbedaan
   // ══════════════════════════════════════════════════
   {
     id: 'guru_ks_kls_1',
     dimensi: 'kesadaran_sosial',
     subjek: 'guru',
     konteks: 'kelas',
-    teks: 'Guru menekankan pentingnya menghargai perbedaan',
+    teks: 'Guru bersikap terbuka dengan jawaban yg berbeda dalam diskusi',
   },
   {
     id: 'guru_ks_kls_2',
     dimensi: 'kesadaran_sosial',
     subjek: 'guru',
     konteks: 'kelas',
-    teks: 'Guru bersikap terbuka dengan jawaban yang berbeda dalam diskusi',
+    teks: 'Guru menggunakan Bahasa/istilah yang netral saat memberi contoh atau penyampaian materi (GEDSI)',
+    catatan: 'Netral: tidak menggunakan bahasa yang mengasosiasikan kelompok tertentu dengan sifat tertentu, misalnya anak perempuan rajin, anak laki laki nakal',
   },
   {
     id: 'guru_ks_kls_3',
     dimensi: 'kesadaran_sosial',
     subjek: 'guru',
     konteks: 'kelas',
-    teks: 'Guru menggunakan bahasa/istilah yang netral saat memberi contoh atau penyampaian materi (GEDSI)',
-    catatan: 'Netral: tidak menggunakan bahasa yang mengasosiasikan kelompok tertentu dengan sifat tertentu, misal "anak perempuan rajin, anak laki-laki nakal"',
+    teks: 'Guru mengatur kelompok secara heterogen (keseimbangan jumlah laki-laki dan perempuan dan atau kemampuan)',
   },
   {
     id: 'guru_ks_kls_4',
     dimensi: 'kesadaran_sosial',
     subjek: 'guru',
     konteks: 'kelas',
-    teks: 'Guru mengatur kelompok secara heterogen (keseimbangan jumlah laki-laki dan perempuan dan/atau kemampuan)',
+    teks: 'Guru berinteraksi secara merata dengan semua gender siswa, baik perempuan maupun laki-laki',
   },
   {
     id: 'guru_ks_kls_5',
     dimensi: 'kesadaran_sosial',
     subjek: 'guru',
     konteks: 'kelas',
-    teks: 'Guru berinteraksi secara merata dengan semua gender siswa, baik perempuan maupun laki-laki',
-  },
-  {
-    id: 'guru_ks_kls_6',
-    dimensi: 'kesadaran_sosial',
-    subjek: 'guru',
-    konteks: 'kelas',
-    teks: 'Guru berinteraksi secara merata ke semua posisi duduk siswa (depan, tengah, belakang, kiri, dan kanan)',
+    teks: 'Guru berinteraksi secara merata ke dengan semua posisi duduk siswa di semua posisi duduk, baik depan, tengah, belakang, kiri dan kanan',
   },
   {
     id: 'guru_ks_lngk_1',
     dimensi: 'kesadaran_sosial',
     subjek: 'guru',
     konteks: 'lingkungan',
-    teks: 'Guru menyapa semua murid tanpa membeda-bedakan status sosial maupun jenis kelamin',
+    teks: 'Guru menyapa semua murid tanpa membeda-bedakan status sosial maupun gender jenis kelamin',
   },
 
   // ══════════════════════════════════════════════════
-  // GURU — Keterampilan Relasi
+  // GURU — Keterampilan Relasi (2 Indikator)
+  // Deskripsi: Guru memfasilitasi diskusi kelompok dengan aturan komunikasi positif
   // ══════════════════════════════════════════════════
   {
     id: 'guru_kr_kls_1',
     dimensi: 'keterampilan_relasi',
     subjek: 'guru',
     konteks: 'kelas',
-    teks: 'Guru memfasilitasi diskusi kelompok dengan aturan komunikasi positif (menggunakan kata sopan, tidak menyela, memberi kesempatan bergiliran, menghargai perbedaan pendapat)',
+    teks: 'Guru memfasilitasi diskusi kelompok dengan aturan komunikasi positif [Menggunakan kata yang sopan, tidak menyela pembicaraan, memberi kesempatan bergiliran untuk berbicara, menghargai perbedaan pendapat]',
   },
   {
     id: 'guru_kr_kls_2',
@@ -422,7 +423,7 @@ export const SEL_INDIKATORS: SELIndikator[] = [
   },
 
   // ══════════════════════════════════════════════════
-  // GURU — Tanggung Jawab
+  // GURU — Tanggung Jawab pada Diri, Teman dan Lingkungan (7 Indikator)
   // ══════════════════════════════════════════════════
   {
     id: 'guru_tj_kls_1',
@@ -457,7 +458,7 @@ export const SEL_INDIKATORS: SELIndikator[] = [
     dimensi: 'tanggung_jawab',
     subjek: 'guru',
     konteks: 'lingkungan',
-    teks: 'Guru memberikan contoh untuk ikut menjaga kebersihan lingkungan sekolah (misal: membuang sampah pada tempatnya)',
+    teks: 'Guru memberikan contoh untuk ikut menjaga kebersihan lingkungan sekolah. Misalnya membuang sampah pada tempatnya',
   },
   {
     id: 'guru_tj_lngk_2',
@@ -475,7 +476,8 @@ export const SEL_INDIKATORS: SELIndikator[] = [
   },
 
   // ══════════════════════════════════════════════════
-  // MURID — Kesadaran Diri
+  // MURID — Kesadaran Diri (7 Indikator)
+  // Deskripsi: Murid mampu menamai emosi dan menunjukkan rasa percaya diri
   // ══════════════════════════════════════════════════
   {
     id: 'murid_kd_kls_1',
@@ -503,7 +505,7 @@ export const SEL_INDIKATORS: SELIndikator[] = [
     dimensi: 'kesadaran_diri',
     subjek: 'murid',
     konteks: 'lingkungan',
-    teks: 'Murid mengungkapkan perasaan kepada teman (misal: sedih saat kalah bermain, sakit ketika tak sengaja terdorong)',
+    teks: 'Murid mengungkapkan perasaan kepada teman. Misalnya, sedih saat kalah bermain, sakit ketika tak sengaja terdorong teman hingga jatuh, dll',
   },
   {
     id: 'murid_kd_lngk_2',
@@ -518,19 +520,20 @@ export const SEL_INDIKATORS: SELIndikator[] = [
     dimensi: 'kesadaran_diri',
     subjek: 'murid',
     konteks: 'lingkungan',
-    teks: 'Murid menyapa guru dengan ramah, atau mengajak teman (termasuk anak disabilitas jika ada) bermain bersama',
+    teks: 'Murid menyapa guru dengan ramah, atau mengajak teman (termasuk anak disabilitas-jika ada) bermain bersama',
   },
   {
     id: 'murid_kd_lngk_4',
     dimensi: 'kesadaran_diri',
     subjek: 'murid',
     konteks: 'lingkungan',
-    teks: 'Murid tahu area pribadi yang boleh disentuh dan mengingatkan temannya jika tersentuh/disentuh',
+    teks: 'Murid tahu area pribadi yang boleh disentuh – mengingatkan temannya jika tersentuh/disentuh',
     catatan: 'Bisa ditanyakan guru jika tidak ada peristiwa mendukung',
   },
 
   // ══════════════════════════════════════════════════
-  // MURID — Regulasi Emosi
+  // MURID — Regulasi Emosi (5 Indikator)
+  // Deskripsi: Murid mampu menenangkan diri saat menghadapi kesulitan/konflik
   // ══════════════════════════════════════════════════
   {
     id: 'murid_re_kls_1',
@@ -538,7 +541,7 @@ export const SEL_INDIKATORS: SELIndikator[] = [
     subjek: 'murid',
     konteks: 'kelas',
     teks: 'Murid menggunakan teknik regulasi emosi saat merasa kesulitan',
-    catatan: 'Jika saat observasi tidak ada peristiwa yang mendukung, bisa ditanyakan kepada murid dan/atau guru',
+    catatan: 'Jika saat observasi tidak ada peristiwa yg mendukung, bisa ditanyakan kepada murid dan atau guru',
   },
   {
     id: 'murid_re_kls_2',
@@ -546,7 +549,7 @@ export const SEL_INDIKATORS: SELIndikator[] = [
     subjek: 'murid',
     konteks: 'kelas',
     teks: 'Murid tidak langsung menangis atau marah saat gagal menjawab atau kelengkapan menulisnya tidak lengkap',
-    catatan: 'Jika tidak ada peristiwa yang mendukung bisa ditanyakan ke guru',
+    catatan: 'Jika tidak ada peristiwa yg mendukung bisa ditanyakan ke guru',
   },
   {
     id: 'murid_re_kls_3',
@@ -572,7 +575,8 @@ export const SEL_INDIKATORS: SELIndikator[] = [
   },
 
   // ══════════════════════════════════════════════════
-  // MURID — Kesadaran Sosial
+  // MURID — Kesadaran Sosial (5 Indikator)
+  // Deskripsi: Murid menunjukkan empati terhadap teman yang kesulitan
   // ══════════════════════════════════════════════════
   {
     id: 'murid_ks_kls_1',
@@ -607,11 +611,12 @@ export const SEL_INDIKATORS: SELIndikator[] = [
     dimensi: 'kesadaran_sosial',
     subjek: 'murid',
     konteks: 'lingkungan',
-    teks: 'Murid mau bermain bersama teman yang berbeda (jenis kelamin, kelompok sosial, ras, suku, agama, termasuk anak dengan disabilitas)',
+    teks: 'Murid mau bermain bersama teman yang berbeda (jenis kelamin, dan kelompok sosial (berbeda ras, suku, agama), termasuk anak dengan disabilitas',
   },
 
   // ══════════════════════════════════════════════════
-  // MURID — Keterampilan Relasi
+  // MURID — Keterampilan Relasi (5 Indikator)
+  // Deskripsi: Murid mampu menyelesaikan konflik dengan cara damai
   // ══════════════════════════════════════════════════
   {
     id: 'murid_kr_1',
@@ -632,14 +637,14 @@ export const SEL_INDIKATORS: SELIndikator[] = [
     dimensi: 'keterampilan_relasi',
     subjek: 'murid',
     konteks: 'kelas',
-    teks: 'Murid secara aktif menggunakan 3 kata ajaib (maaf, terima kasih, dan tolong)',
+    teks: 'Murid secara aktif menggunakan 3 kata Ajaib (maaf, terima kasih, dan tolong)',
   },
   {
     id: 'murid_kr_4',
     dimensi: 'keterampilan_relasi',
     subjek: 'murid',
     konteks: 'kelas',
-    teks: 'Murid tidak membalas dorongan fisik/perilaku kekerasan fisik',
+    teks: 'Murid tidak membalas dorongan fisik/prilaku kekerasan fisik',
   },
   {
     id: 'murid_kr_5',
@@ -650,7 +655,7 @@ export const SEL_INDIKATORS: SELIndikator[] = [
   },
 
   // ══════════════════════════════════════════════════
-  // MURID — Tanggung Jawab
+  // MURID — Tanggung Jawab pada Diri, Teman dan Lingkungan (11 Indikator)
   // ══════════════════════════════════════════════════
   {
     id: 'murid_tj_kls_1',
@@ -699,14 +704,14 @@ export const SEL_INDIKATORS: SELIndikator[] = [
     dimensi: 'tanggung_jawab',
     subjek: 'murid',
     konteks: 'lingkungan',
-    teks: 'Murid menghormati area tubuh teman yang boleh disentuh dan tidak',
+    teks: 'Murid menghormati area tubuh teman yang boleh di sentuh dan tidak',
   },
   {
     id: 'murid_tj_lngk_3',
     dimensi: 'tanggung_jawab',
     subjek: 'murid',
     konteks: 'lingkungan',
-    teks: 'Murid menggunakan bahasa positif ketika berbicara dan bermain bersama teman',
+    teks: 'Murid menggunakan Bahasa positif ketika berbicara dan bermain bersama teman',
   },
   {
     id: 'murid_tj_lngk_4',
@@ -727,7 +732,7 @@ export const SEL_INDIKATORS: SELIndikator[] = [
     dimensi: 'tanggung_jawab',
     subjek: 'murid',
     konteks: 'lingkungan',
-    teks: 'Murid menjaga lingkungan sekolah (misal: membuang sampah pada tempatnya, memelihara tanaman kelas)',
+    teks: 'Murid menjaga lingkungan sekolah seperti: membuang sampah pada tempatnya, memelihara tanaman kelas dll',
   },
 ];
 
@@ -747,14 +752,19 @@ export function getIndikatorsByFilter(opts: {
   });
 }
 
-/** Hitung skor rata-rata dari record jawaban untuk satu subjek/dimensi */
+/** Hitung skor rata-rata dari record jawaban untuk satu subjek/dimensi/konteks */
 export function hitungSkorRata(
   jawaban: Record<string, SELSkor | null>,
   subjek?: SELSubjek,
   dimensi?: SELDimensi,
+  konteks?: SELKonteks,
 ): number {
   const ids = SEL_INDIKATORS
-    .filter(ind => (!subjek || ind.subjek === subjek) && (!dimensi || ind.dimensi === dimensi))
+    .filter(ind => 
+      (!subjek || ind.subjek === subjek) && 
+      (!dimensi || ind.dimensi === dimensi) &&
+      (!konteks || ind.konteks === konteks)
+    )
     .map(ind => ind.id);
 
   const valid = ids.map(id => jawaban[id]).filter((v): v is SELSkor => v !== null && v !== undefined);

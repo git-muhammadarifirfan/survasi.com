@@ -37,6 +37,7 @@ import { createPortal } from 'react-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { database, KABUPATEN_LIST } from '../../../shared/data/data-source';
+import { apiClient } from '../../../shared/services/api-client';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import {
   TrendingUp, Download, Building2, Award, Users, Filter, Send, Check, ChevronLeft,
@@ -92,37 +93,69 @@ export default function Dashboard({ activeKecamatan, setActiveKecamatan, userRol
   const [currentPage, setCurrentPage] = useState(1);
   const perPage = 5;
 
+  // Query real API endpoints for Dashboard
+  const { data: summaryResponse } = useQuery({
+    queryKey: ['dashboardSummary', selectedKab],
+    queryFn: async () => {
+      const res = await apiClient.dashboard.getSummary().catch(() => null);
+      return res?.data;
+    },
+  });
+
+  const { data: kabStats = [] } = useQuery({
+    queryKey: ['kabStats'],
+    queryFn: async () => {
+      const res = await apiClient.dashboard.getKabupatenStats().catch(() => null);
+      return Array.isArray(res?.data) ? res.data : database.getKabupatenStats();
+    },
+  });
+
+  const { data: kecStats = [] } = useQuery({
+    queryKey: ['kecStats', selectedKab],
+    queryFn: async () => {
+      const res = await apiClient.dashboard.getRegionalStats().catch(() => null);
+      return Array.isArray(res?.data) ? res.data : database.getKecamatanStats(selectedKab || undefined);
+    },
+  });
+
+  const { data: modulProgress = [] } = useQuery({
+    queryKey: ['modulProgress', selectedKab, activeKecamatan],
+    queryFn: async () => {
+      const res = await apiClient.get<any[]>('/dashboard/modul-progress').catch(() => null);
+      return Array.isArray(res?.data) ? res.data : database.getModulProgress({ kabupaten: selectedKab || undefined, kecamatan: activeKecamatan || undefined });
+    },
+  });
+
+  const { data: recentActivities = [] } = useQuery({
+    queryKey: ['recentActivities', selectedKab, activeKecamatan],
+    queryFn: async () => {
+      const res = await apiClient.dashboard.getActivities({ limit: 10 }).catch(() => null);
+      return Array.isArray(res?.data) ? res.data : database.getRecentActivities({ kabupaten: selectedKab || undefined, kecamatan: activeKecamatan || undefined });
+    },
+  });
+
+  const { data: timeSeriesData = [] } = useQuery({
+    queryKey: ['timeSeries', selectedKab, activeKecamatan],
+    queryFn: async () => {
+      const res = await apiClient.dashboard.getTimeseries().catch(() => null);
+      return Array.isArray(res?.data) ? res.data : database.getTimeSeriesData({ kabupaten: selectedKab || undefined, kecamatan: activeKecamatan || undefined });
+    },
+  });
+
+  const { data: followUpData = [] } = useQuery({
+    queryKey: ['followUpData', selectedKab],
+    queryFn: async () => {
+      const res = await apiClient.dashboard.getFollowUp().catch(() => null);
+      return Array.isArray(res?.data) ? res.data : [];
+    },
+  });
+
   const { data: schools = [] } = useQuery({
     queryKey: ['schools', selectedKab, activeKecamatan],
     queryFn: () => database.getSchools({
       kabupaten: selectedKab || undefined,
       kecamatan: activeKecamatan || undefined
     }),
-  });
-
-  const { data: kabStats = [] } = useQuery({
-    queryKey: ['kabStats'],
-    queryFn: database.getKabupatenStats,
-  });
-
-  const { data: kecStats = [] } = useQuery({
-    queryKey: ['kecStats', selectedKab],
-    queryFn: () => database.getKecamatanStats(selectedKab || undefined),
-  });
-
-  const { data: modulProgress = [] } = useQuery({
-    queryKey: ['modulProgress', selectedKab, activeKecamatan],
-    queryFn: () => database.getModulProgress({ kabupaten: selectedKab || undefined, kecamatan: activeKecamatan || undefined }),
-  });
-
-  const { data: recentActivities = [] } = useQuery({
-    queryKey: ['recentActivities', selectedKab, activeKecamatan],
-    queryFn: () => database.getRecentActivities({ kabupaten: selectedKab || undefined, kecamatan: activeKecamatan || undefined }),
-  });
-
-  const { data: timeSeriesData = [] } = useQuery({
-    queryKey: ['timeSeries', selectedKab, activeKecamatan],
-    queryFn: () => database.getTimeSeriesData({ kabupaten: selectedKab || undefined, kecamatan: activeKecamatan || undefined }),
   });
 
   const { data: radarData = [] } = useQuery({
@@ -140,22 +173,33 @@ export default function Dashboard({ activeKecamatan, setActiveKecamatan, userRol
     { id: '2', context: 'Keterlibatan Orang Tua', suggestion: 'Skor kemitraan Anda di bawah rata-rata kecamatan.', actionText: 'Lihat Panduan Komite', actionLink: '#' }
   ];
 
-  // Real KPI Calculations
-  const total = schools.length;
-  const sudah = schools.filter((s) => s.status === 'sudah').length;
-  const sebagian = schools.filter((s) => s.status === 'sebagian').length;
-  const belum = total - sudah - sebagian;
-  const rate = total > 0 ? Math.round((sudah / total) * 1000) / 10 : 0;
+  // Real KPI Calculations (from API summaryResponse or fallback schools array)
+  const total = Number(summaryResponse?.total_sekolah || schools.length || 1238);
+  const sudah = Number(summaryResponse?.sudah || 0);
+  const sebagian = Number(summaryResponse?.sebagian || 0);
+  const belum = Number(summaryResponse?.belum || (total - sudah - sebagian));
+  const rate = Number(summaryResponse?.response_rate || 0.0);
 
-  const followUp = schools.filter((s) => s.status === 'belum');
+  const followUp = followUpData.length > 0 ? followUpData : schools.filter((s) => s.status === 'belum');
   const totalPages = Math.max(1, Math.ceil(followUp.length / perPage));
   const pagedFollowUp = followUp.slice((currentPage - 1) * perPage, currentPage * perPage);
 
-  const { data: selStats } = useQuery({
-    queryKey: ['selStats'],
-    queryFn: database.getSELSummaryStats,
+  const { data: selStatsResponse } = useQuery({
+    queryKey: ['selStatsApi'],
+    queryFn: async () => {
+      const res = await apiClient.get<any>('/sel/summary-stats').catch(() => null);
+      return res?.data;
+    },
     enabled: userRole === 'admin',
   });
+
+  const selStats = selStatsResponse || {
+    totalDiobservasi: 0,
+    rataGuruAll: 0,
+    rataMuridAll: 0,
+    butuhIntervensi: 0,
+    topSekolah: '-',
+  };
 
   const reminderMutation = useMutation({
     mutationFn: (id: string) => database.sendReminder(id),
@@ -392,9 +436,9 @@ export default function Dashboard({ activeKecamatan, setActiveKecamatan, userRol
               selectedKab === '' ? 'bg-primary text-white shadow-sm' : 'bg-bg text-text-secondary hover:text-text-primary'
             }`}
           >
-            Semua Wilayah (1.238 SD)
+            Semua Wilayah ({total.toLocaleString()} SD)
           </button>
-          {KABUPATEN_LIST.map((k) => (
+          {KABUPATEN_LIST.filter(k => k.key !== 'semua').map((k) => (
             <button
               key={k.id}
               onClick={() => { setSelectedKab(k.name); setActiveKecamatan(null); }}
@@ -429,43 +473,45 @@ export default function Dashboard({ activeKecamatan, setActiveKecamatan, userRol
       </div>
 
       {/* SEL Insight Banner */}
-      {selStats && (
-        <div className="rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/5 via-transparent to-accent/5 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-primary/10 rounded-xl">
-              <Brain className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <h4 className="text-xs font-bold text-text-primary">Observasi SEL • Ringkasan Lapangan</h4>
-              <p className="text-[10px] text-text-secondary mt-0.5">Data dari {selStats.totalDiobservasi} sekolah yang sudah diobservasi enumerator</p>
-            </div>
+      <div className="rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/5 via-transparent to-accent/5 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-primary/10 rounded-xl">
+            <Brain className="h-5 w-5 text-primary" />
           </div>
-          <div className="flex flex-wrap gap-3 text-center">
-            {[
-              { label: 'Diobservasi', value: `${selStats.totalDiobservasi} SD`, icon: Users, color: 'text-primary' },
-              { label: 'Rata Guru', value: `${selStats.rataGuruAll}/4`, icon: GraduationCap, color: 'text-status-sudah' },
-              { label: 'Rata Murid', value: `${selStats.rataMuridAll}/4`, icon: Users, color: 'text-accent' },
-              { label: 'Perlu Intervensi', value: `${selStats.butuhIntervensi} SD`, icon: AlertTriangle, color: 'text-status-belum' },
-            ].map(item => {
-              const Icon = item.icon;
-              return (
-                <div key={item.label} className="flex items-center gap-1.5 bg-surface rounded-xl px-3 py-2 border border-border/60">
-                  <Icon className={`h-3.5 w-3.5 ${item.color}`} />
-                  <div className="text-left">
-                    <div className={`text-[11px] font-black ${item.color}`}>{item.value}</div>
-                    <div className="text-[9px] text-text-secondary">{item.label}</div>
-                  </div>
-                </div>
-              );
-            })}
+          <div>
+            <h4 className="text-xs font-bold text-text-primary">Observasi SEL • Ringkasan Lapangan</h4>
+            <p className="text-[10px] text-text-secondary mt-0.5">
+              {(selStats?.totalDiobservasi || 0) > 0
+                ? `Data dari ${selStats.totalDiobservasi} sekolah yang telah diobservasi enumerator`
+                : 'Belum ada data observasi SEL terdaftar (0 Sesi Selesai)'}
+            </p>
           </div>
-          <Link to="/analisis-sel"
-            className="flex-shrink-0 text-[11px] font-bold text-primary hover:text-primary-dark flex items-center gap-1.5 whitespace-nowrap transition-colors bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-xl">
-            <span>Lihat Analisis SEL</span>
-            <ChevronRight className="h-3.5 w-3.5" />
-          </Link>
         </div>
-      )}
+        <div className="flex flex-wrap gap-3 text-center">
+          {[
+            { label: 'Diobservasi', value: `${selStats?.totalDiobservasi || 0} SD`, icon: Users, color: 'text-primary' },
+            { label: 'Rata Guru', value: `${(selStats?.rataGuruAll || 0).toFixed(1)}/4`, icon: GraduationCap, color: 'text-status-sudah' },
+            { label: 'Rata Murid', value: `${(selStats?.rataMuridAll || 0).toFixed(1)}/4`, icon: Users, color: 'text-accent' },
+            { label: 'Perlu Intervensi', value: `${selStats?.butuhIntervensi || 0} SD`, icon: AlertTriangle, color: 'text-status-belum' },
+          ].map(item => {
+            const Icon = item.icon;
+            return (
+              <div key={item.label} className="flex items-center gap-1.5 bg-surface rounded-xl px-3 py-2 border border-border/60">
+                <Icon className={`h-3.5 w-3.5 ${item.color}`} />
+                <div className="text-left">
+                  <div className={`text-[11px] font-black ${item.color}`}>{item.value}</div>
+                  <div className="text-[9px] text-text-secondary">{item.label}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <Link to="/analisis-sel"
+          className="flex-shrink-0 text-[11px] font-bold text-primary hover:text-primary-dark flex items-center gap-1.5 whitespace-nowrap transition-colors bg-primary/10 hover:bg-primary/20 px-3 py-1.5 rounded-xl">
+          <span>Lihat Analisis SEL</span>
+          <ChevronRight className="h-3.5 w-3.5" />
+        </Link>
+      </div>
 
       {/* Row 2: Charts */}
 

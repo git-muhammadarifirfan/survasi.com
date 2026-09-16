@@ -95,6 +95,16 @@ router.get('/', async (req, res) => {
       params.push(`%${cleanKec}%`);
     }
 
+    if (status && status.trim() !== '') {
+      whereClauses.push('sp.status_sekolah LIKE ?');
+      params.push(`%${status.trim()}%`);
+    }
+
+    if (jenjang && jenjang.trim() !== '') {
+      whereClauses.push('sp.jenjang LIKE ?');
+      params.push(`%${jenjang.trim()}%`);
+    }
+
     if (search && search.trim() !== '') {
       whereClauses.push('(sp.nama LIKE ? OR sp.npsn LIKE ? OR sp.alamat LIKE ?)');
       const searchPct = `%${search.trim()}%`;
