@@ -360,10 +360,46 @@ export const database = {
     status?: string;
     search?: string;
   }): Promise<School[]> => {
-    // 1. Try public getOptions endpoint first (unauthenticated friendly for registration dropdown)
+    // 1. Try full authenticated getAll query from MySQL backend
+    try {
+      const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
+      const res = await apiClient.sekolah.getAll({
+        kabupaten_id: kabId,
+        kecamatan: filters?.kecamatan,
+        status: filters?.status,
+        search: filters?.search,
+        limit: 2000,
+      });
+      if (res?.success && Array.isArray(res.data)) {
+        return res.data.map((s: any) => ({
+          id: String(s.id),
+          npsn: s.npsn || '',
+          nama: s.nama || '',
+          kecamatan: s.kecamatan_nama || s.kecamatan || '',
+          kabupaten: s.kabupaten_nama || s.kabupaten || '',
+          status: s.status || s.status_pengisian || 'belum',
+          jenjang: s.jenjang || 'SD',
+          statusSekolah: s.status_sekolah || 'Negeri',
+          totalGuru: s.total_guru || 0,
+          totalSiswa: s.total_siswa || 0,
+          akreditasi: s.akreditasi || 'A',
+          alamat: s.alamat || '',
+          email: s.email || '',
+          telepon: s.telepon || '',
+          user_id: s.user_id,
+          is_registered: Boolean(s.is_registered),
+          x: 0,
+          y: 0,
+        }));
+      }
+    } catch (err) {
+      console.warn('[data-source] getSchools API error:', err);
+    }
+
+    // 2. Public getOptions fallback if unauthenticated
     try {
       const optRes = await apiClient.sekolah.getOptions().catch(() => null);
-      if (optRes?.success && Array.isArray(optRes.data) && optRes.data.length > 0) {
+      if (optRes?.success && Array.isArray(optRes.data) && optRes.data.length > 0 && !filters?.status && !filters?.search) {
         return optRes.data.map((s: any) => ({
           id: String(s.id),
           npsn: s.npsn || '',
@@ -387,41 +423,6 @@ export const database = {
       }
     } catch (err) {
       console.warn('[data-source] getOptions fallback:', err);
-    }
-
-    // 2. Try full authenticated getAll query if available
-    try {
-      const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
-      const res = await apiClient.sekolah.getAll({
-        kabupaten_id: kabId,
-        status: filters?.status,
-        search: filters?.search,
-        limit: 2000,
-      });
-      if (res?.success && Array.isArray(res.data)) {
-        return res.data.map((s: any) => ({
-          id: String(s.id),
-          npsn: s.npsn,
-          nama: s.nama,
-          kecamatan: s.kecamatan_nama || s.kecamatan || '',
-          kabupaten: s.kabupaten_nama || s.kabupaten || '',
-          status: s.status || 'belum',
-          jenjang: s.jenjang || 'SD',
-          statusSekolah: s.status_sekolah || 'Negeri',
-          totalGuru: s.total_guru || 0,
-          totalSiswa: s.total_siswa || 0,
-          akreditasi: s.akreditasi || 'A',
-          alamat: s.alamat || '',
-          email: s.email || '',
-          telepon: s.telepon || '',
-          user_id: s.user_id,
-          is_registered: Boolean(s.is_registered),
-          x: 0,
-          y: 0,
-        }));
-      }
-    } catch (err) {
-      console.warn('[data-source] getSchools fallback:', err);
     }
 
     return schoolsData.filter(s => {

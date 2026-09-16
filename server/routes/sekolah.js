@@ -96,8 +96,14 @@ router.get('/', async (req, res) => {
     }
 
     if (status && status.trim() !== '') {
-      whereClauses.push('sp.status_sekolah LIKE ?');
-      params.push(`%${status.trim()}%`);
+      const trimmedStatus = status.trim().toLowerCase();
+      if (['sudah', 'sebagian', 'belum'].includes(trimmedStatus)) {
+        whereClauses.push('sp.status_pengisian = ?');
+        params.push(trimmedStatus);
+      } else {
+        whereClauses.push('sp.status_sekolah LIKE ?');
+        params.push(`%${status.trim()}%`);
+      }
     }
 
     if (jenjang && jenjang.trim() !== '') {
