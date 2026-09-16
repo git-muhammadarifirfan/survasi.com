@@ -108,6 +108,7 @@ app.use('/api/auth',       require('./routes/auth'));
 app.use('/api/users',      require('./routes/users'));
 app.use('/api/notifikasi', require('./routes/notifikasi'));
 app.use('/api/dashboard',  require('./routes/dashboard'));
+app.use('/api/kemendikdasmen', require('./routes/kemendikdasmen'));
 app.use('/api/sekolah',    require('./routes/sekolah'));
 app.use('/api/responden',  require('./routes/responden'));
 app.use('/api/analisis',   require('./routes/analisis'));

@@ -160,6 +160,7 @@ export interface SELObservasiSession {
   siswaDisabilitasL: number;
   siswaDisabilitasP: number;
   jangkauanSiswa: 1 | 2 | 3 | 4;
+  jumlahSiswaSebagianKecil?: number | null;
   kelasDiamati: string;
   namaGuruInisial: string;
   jenisKelaminGuru: 'L' | 'P';
@@ -173,6 +174,8 @@ export interface SELDimensiScore {
   label: string;
   guruSkor: number;
   muridSkor: number;
+  kelasSkor?: number;
+  lingkunganSkor?: number;
   rataRata: number;
 }
 
@@ -256,6 +259,8 @@ function computeSELScore(session: SELObservasiSession): SELSchoolScore {
     label: SEL_DIMENSI_LABEL[d],
     guruSkor: hitungSkorRata(jawabanMap, 'guru', d),
     muridSkor: hitungSkorRata(jawabanMap, 'murid', d),
+    kelasSkor: hitungSkorRata(jawabanMap, undefined, d, 'kelas'),
+    lingkunganSkor: hitungSkorRata(jawabanMap, undefined, d, 'lingkungan'),
     rataRata: hitungSkorRata(jawabanMap, undefined, d),
   }));
 
@@ -1158,6 +1163,7 @@ export const database = {
             siswaDisabilitasL: r.siswa_disabilitas_l || 0,
             siswaDisabilitasP: r.siswa_disabilitas_p || 0,
             jangkauanSiswa: r.jangkauan_siswa || 1,
+            jumlahSiswaSebagianKecil: r.jumlah_siswa_sebagian_kecil || null,
             kelasDiamati: r.kelas_diamati || '',
             namaGuruInisial: r.guru_inisial || '',
             jenisKelaminGuru: r.guru_jk || 'L',

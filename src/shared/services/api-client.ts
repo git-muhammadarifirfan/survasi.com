@@ -205,7 +205,10 @@ export const apiClient = {
       return fetchJson<ListResponse<any>>(`/sekolah?${query}`);
     },
 
-    getById: (id: number) =>
+    getById: (id: number | string) =>
+      fetchJson<ApiResponse<any>>(`/sekolah/${id}`),
+
+    getDetail: (id: number | string) =>
       fetchJson<ApiResponse<any>>(`/sekolah/${id}`),
 
     update: (id: number, data: any) =>
@@ -457,6 +460,51 @@ export const apiClient = {
 
     getActivityLog: () =>
       fetchJson<ApiResponse<any[]>>('/setting/activity-log'),
+  },
+
+  // ── Kemendikdasmen (Government School Data API Proxy) ──────────────────────
+  kemendikdasmen: {
+    /** Cari sekolah via Kemendikdasmen API */
+    cariSekolah: (params: {
+      keyword?: string;
+      kode_wilayah?: string;
+      bentuk_pendidikan_id?: number;
+      status_sekolah?: number;
+      page_size?: number;
+      page_number?: number;
+    }) =>
+      fetchJson<any>('/kemendikdasmen/cari-sekolah', {
+        method: 'POST',
+        body: JSON.stringify(params),
+      }),
+
+    /** Get full detail of a school */
+    getDetail: (sekolahId: string) =>
+      fetchJson<any>(`/kemendikdasmen/detail/${sekolahId}`),
+
+    /** Get student data (peserta didik) */
+    getPesertaDidik: (sekolahId: string) =>
+      fetchJson<any>(`/kemendikdasmen/peserta-didik/${sekolahId}`),
+
+    /** Get teacher/staff data (PTK) */
+    getPTK: (sekolahId: string) =>
+      fetchJson<any>(`/kemendikdasmen/ptk/${sekolahId}`),
+
+    /** Get study group data (rombongan belajar) */
+    getRombonganBelajar: (sekolahId: string) =>
+      fetchJson<any>(`/kemendikdasmen/rombongan-belajar/${sekolahId}`),
+
+    /** Get accreditation data */
+    getAkreditasi: (sekolahId: string) =>
+      fetchJson<any>(`/kemendikdasmen/akreditasi/${sekolahId}`),
+
+    /** Get facilities data */
+    getSaranaPrasarana: (sekolahId: string) =>
+      fetchJson<any>(`/kemendikdasmen/sarana-prasarana/${sekolahId}`),
+
+    /** Get all data for a school (detail + all sub-endpoints in parallel) */
+    getAllData: (sekolahId: string) =>
+      fetchJson<{ success: boolean; sekolah_id: string; data: any }>(`/kemendikdasmen/all/${sekolahId}`),
   },
 };
 

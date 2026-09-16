@@ -12,12 +12,12 @@ import { database, KABUPATEN_LIST, KECAMATAN_LIST } from '../../../shared/data/d
 import type { SELJawaban, SELObservasiSession, SELSchoolScore } from '../../../shared/data/data-source';
 import {
   SEL_INDIKATORS, SEL_DIMENSI_ORDER, SEL_DIMENSI_LABEL,
-  SEL_SKOR_LABEL, getIndikatorsByFilter,
+  SEL_SKOR_LABEL, SEL_DESKRIPSI_SUBDIMENSI, getIndikatorsByFilter,
 } from '../../../shared/data/sel-indicators';
 import type { SELDimensi, SELSkor } from '../../../shared/data/sel-indicators';
 import {
   ClipboardList, ChevronLeft, ChevronRight, Save, Send, CheckCircle2,
-  Eye, EyeOff, MapPin, Users, BookOpen, Brain, AlertCircle, X,
+  Eye, EyeOff, MapPin, Users, BookOpen, Brain, AlertCircle, X, Info,
   School, Star, RefreshCw, Filter, XCircle, Clock, CheckCircle, Sparkles, Building2, Trees,
   GraduationCap, List, Search, Calendar
 } from 'lucide-react';
@@ -41,9 +41,9 @@ const LOKASI_OPTIONS = ['Ruang kelas', 'Halaman sekolah', 'Lorong kelas', 'Kanti
 const WAKTU_OPTIONS = ['Sebelum masuk kelas', 'Istirahat', 'Pulang sekolah', 'Ekstrakurikuler'];
 const JANGKAUAN_OPTIONS = [
   { value: 1 as const, label: 'Menjangkau seluruh siswa' },
-  { value: 2 as const, label: 'Lebih dari separuh siswa' },
-  { value: 3 as const, label: 'Kurang separuh siswa' },
-  { value: 4 as const, label: 'Hanya sebagian kecil siswa' },
+  { value: 2 as const, label: 'Menjangkau lebih dari separuh siswa' },
+  { value: 3 as const, label: 'Menjangkau kurang separuh siswa' },
+  { value: 4 as const, label: 'Hanya sebagian kecil siswa (jika memungkinkan sertakan jumlah, jika memilih ini)' },
 ];
 
 function buildInitialJawaban(): SELJawaban[] {
@@ -193,6 +193,7 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
   const [lokasiDiamati, setLokasiDiamati] = useState<string[]>([]);
   const [waktuPengamatan, setWaktuPengamatan] = useState<string[]>([]);
   const [jangkauanSiswa, setJangkauanSiswa] = useState<1 | 2 | 3 | 4>(2);
+  const [jumlahSiswaSebagianKecil, setJumlahSiswaSebagianKecil] = useState<number | ''>('');
   const [jumlahSiswaL, setJumlahSiswaL] = useState(0);
   const [jumlahSiswaP, setJumlahSiswaP] = useState(0);
   const [disabilitasL, setDisabilitasL] = useState(0);
@@ -246,6 +247,7 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
           if (parsed.lokasiDiamati) setLokasiDiamati(parsed.lokasiDiamati);
           if (parsed.waktuPengamatan) setWaktuPengamatan(parsed.waktuPengamatan);
           if (parsed.jangkauanSiswa) setJangkauanSiswa(parsed.jangkauanSiswa);
+          if (parsed.jumlahSiswaSebagianKecil !== undefined) setJumlahSiswaSebagianKecil(parsed.jumlahSiswaSebagianKecil);
           if (parsed.jumlahSiswaL !== undefined) setJumlahSiswaL(parsed.jumlahSiswaL);
           if (parsed.jumlahSiswaP !== undefined) setJumlahSiswaP(parsed.jumlahSiswaP);
           if (parsed.disabilitasL !== undefined) setDisabilitasL(parsed.disabilitasL);
@@ -269,14 +271,14 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
 
     const draftData = {
       kabupaten, kecamatan, sekolahNama, selectedSekolahId, observerNama, tanggal,
-      lokasiDiamati, waktuPengamatan, jangkauanSiswa, jumlahSiswaL, jumlahSiswaP,
+      lokasiDiamati, waktuPengamatan, jangkauanSiswa, jumlahSiswaSebagianKecil, jumlahSiswaL, jumlahSiswaP,
       disabilitasL, disabilitasP, kelas, guruInisial, guruJK, mapel, jawaban, stepIdx,
       savedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
     };
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draftData));
   }, [
     kabupaten, kecamatan, sekolahNama, selectedSekolahId, observerNama, tanggal,
-    lokasiDiamati, waktuPengamatan, jangkauanSiswa, jumlahSiswaL, jumlahSiswaP,
+    lokasiDiamati, waktuPengamatan, jangkauanSiswa, jumlahSiswaSebagianKecil, jumlahSiswaL, jumlahSiswaP,
     disabilitasL, disabilitasP, kelas, guruInisial, guruJK, mapel, jawaban, stepIdx
   ]);
 
@@ -423,6 +425,7 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
     return list;
   }, [dbSchoolsList, kabupaten, kecamatan]);
 
+
   const handleSelectSchoolFromDb = (schNama: string) => {
     setSekolahNama(schNama);
     const matched = dbSchoolsList.find(s => s.nama.toLowerCase().trim() === schNama.toLowerCase().trim());
@@ -430,6 +433,46 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
       if (matched.kecamatan) setKecamatan(matched.kecamatan);
       if (matched.kabupaten) setKabupaten(matched.kabupaten);
       if (matched.id) setSelectedSekolahId(Number(matched.id) || null);
+
+      // Auto-fill Jumlah Siswa from school data (referensi dari Data Sekolah)
+      const totalSiswa = Number(matched.totalSiswa || (matched as any).total_siswa) || 0;
+      if (totalSiswa > 0) {
+        // Approximate L/P split (roughly 50/50 if no breakdown available)
+        const approxL = Math.round(totalSiswa * 0.51);
+        const approxP = totalSiswa - approxL;
+        setJumlahSiswaL(approxL);
+        setJumlahSiswaP(approxP);
+      }
+
+      // Try to fetch more accurate data from Kemendikdasmen API via NPSN
+      if (matched.npsn) {
+        (async () => {
+          try {
+            const { apiClient } = await import('../../../shared/services/api-client');
+            const searchRes = await apiClient.kemendikdasmen.cariSekolah({
+              keyword: matched.npsn,
+              page_size: 1,
+              page_number: 1,
+            });
+            const sekolahIdKemdik =
+              searchRes?.data?.[0]?.sekolah_id ||
+              searchRes?.result?.[0]?.sekolah_id ||
+              searchRes?.results?.[0]?.sekolah_id;
+            if (sekolahIdKemdik) {
+              const pdRes = await apiClient.kemendikdasmen.getPesertaDidik(sekolahIdKemdik);
+              const pd = pdRes?.data || pdRes || {};
+              const siswaL = pd?.laki_laki || pd?.jumlah_laki || pd?.l;
+              const siswaP = pd?.perempuan || pd?.jumlah_perempuan || pd?.p;
+              if (siswaL !== undefined && siswaP !== undefined) {
+                setJumlahSiswaL(Number(siswaL) || 0);
+                setJumlahSiswaP(Number(siswaP) || 0);
+              }
+            }
+          } catch {
+            // Silently ignore — fallback to approximation above
+          }
+        })();
+      }
     }
   };
 
@@ -545,6 +588,7 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
       siswa_disabilitas_l: disabilitasL,
       siswa_disabilitas_p: disabilitasP,
       jangkauan_siswa: jangkauanSiswa,
+      jumlah_siswa_sebagian_kecil: jangkauanSiswa === 4 && jumlahSiswaSebagianKecil !== '' ? Number(jumlahSiswaSebagianKecil) : null,
       kelas_diamati: kelas || '4A',
       guru_inisial: guruInisial || 'GR',
       guru_jk: guruJK,
@@ -767,15 +811,62 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
               ))}
             </div>
           </div>
-          <div className="space-y-2">
-            <label className="font-bold text-text-secondary uppercase text-[10px]">Jangkauan Siswa saat Observasi</label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {jangkauanOptionsList.map(opt => (
-                <button key={opt.value + opt.label} type="button" onClick={() => setJangkauanSiswa(opt.value as any)}
-                  className={`p-3 rounded-xl border-2 text-left text-[11px] font-semibold transition-smooth cursor-pointer ${jangkauanSiswa === opt.value ? 'border-primary bg-primary/5 text-primary shadow-sm' : 'border-border bg-bg text-text-secondary hover:border-primary/30'
-                    }`}>{opt.label}</button>
-              ))}
+          <div className="space-y-2.5">
+            <label className="font-bold text-text-secondary uppercase text-[10px] tracking-wider">
+              Jangkauan Siswa saat Observasi
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {jangkauanOptionsList.map(opt => {
+                const isSelected = jangkauanSiswa === opt.value;
+                const cleanText = opt.label.replace(/\s*\(jika memungkinkan.*\)/i, '').trim();
+                return (
+                  <button
+                    key={opt.value + opt.label}
+                    type="button"
+                    onClick={() => setJangkauanSiswa(opt.value as any)}
+                    className={`p-3.5 rounded-xl border-2 text-left text-xs font-semibold transition-all duration-200 cursor-pointer flex items-center justify-between group ${
+                      isSelected
+                        ? 'border-primary bg-primary/5 text-primary shadow-xs ring-1 ring-primary/20'
+                        : 'border-border bg-bg text-text-secondary hover:border-primary/30 hover:bg-bg/80'
+                    }`}
+                  >
+                    <span>{cleanText}</span>
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ml-2 transition-all ${
+                      isSelected ? 'border-primary bg-primary text-white' : 'border-border bg-bg group-hover:border-primary/40'
+                    }`}>
+                      {isSelected && <CheckCircle2 className="w-3 h-3 stroke-[2.5]" />}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
+
+            {/* Sub-panel khusus pilihan 4: Hanya sebagian kecil siswa */}
+            {jangkauanSiswa === 4 && (
+              <div className="mt-2.5 p-3.5 rounded-xl border border-primary/25 bg-gradient-to-r from-primary/5 to-primary/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fadeIn shadow-xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-lg bg-primary text-white shadow-xs">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-text-primary">Jumlah Siswa yang Diamati</div>
+                    <div className="text-[11px] text-text-secondary">Sertakan estimasi jumlah siswa jika memungkinkan (opsional)</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    max="500"
+                    placeholder="Misal: 5"
+                    value={jumlahSiswaSebagianKecil}
+                    onChange={(e) => setJumlahSiswaSebagianKecil(e.target.value ? parseInt(e.target.value, 10) : '')}
+                    className="w-28 px-3 py-1.5 text-xs border-2 border-primary/40 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-white text-text-primary font-bold shadow-xs text-center"
+                  />
+                  <span className="text-xs font-bold text-text-secondary">Siswa</span>
+                </div>
+              </div>
+            )}
           </div>
           <div className="border-t border-border pt-4">
             <h4 className="text-xs font-bold text-text-primary mb-3 flex items-center gap-2">
@@ -875,6 +966,20 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
                     </span>
                     <div className={`flex-1 h-px ${subjek === 'guru' ? 'bg-primary/20' : 'bg-accent/20'}`} />
                   </div>
+
+                  {/* Deskripsi Sub-dimensi Header dari Dokumen Resmi BSAN-SEL */}
+                  {SEL_DESKRIPSI_SUBDIMENSI[subjek]?.[currentStep.id as SELDimensi] && (
+                    <div className="mb-3.5 px-3.5 py-2.5 rounded-xl bg-surface border border-primary/20 text-xs text-text-primary font-medium flex items-start gap-2.5 shadow-xs">
+                      <div className="p-1 rounded-lg bg-primary/10 text-primary shrink-0 mt-0.5">
+                        <Info className="h-3.5 w-3.5" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-primary block">Fokus Observasi ({subjek === 'guru' ? 'Guru' : 'Murid'}):</span>
+                        <p className="text-xs font-semibold text-text-primary mt-0.5">{SEL_DESKRIPSI_SUBDIMENSI[subjek][currentStep.id as SELDimensi]}</p>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-3">
                     {inds.map(ind => (
                       <IndikatorCard key={ind.id} indikator={ind}
@@ -1207,16 +1312,25 @@ function SessionDetailModal({ session, onClose, onDelete }: {
                 </h4>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
                   {[
-                    ['Mata Pelajaran', session.mataPelajaran || '—'],
-                    ['Siswa Laki-laki', `${session.jumlahSiswaL || 0} Siswa`],
-                    ['Siswa Perempuan', `${session.jumlahSiswaP || 0} Siswa`],
-                    ['Siswa Disabilitas', `${(session.siswaDisabilitasL || 0) + (session.siswaDisabilitasP || 0)} Siswa`],
+                    ['Mata Pelajaran', session.mataPelajaran || (session as any).mata_pelajaran || '—'],
+                    ['Jangkauan Siswa', (() => {
+                      const val = Number(session.jangkauanSiswa || (session as any).jangkauan_siswa || 2);
+                      const count = session.jumlahSiswaSebagianKecil ?? (session as any).jumlah_siswa_sebagian_kecil;
+                      if (val === 1) return 'Menjangkau seluruh siswa';
+                      if (val === 2) return 'Menjangkau lebih dari separuh';
+                      if (val === 3) return 'Menjangkau kurang separuh';
+                      if (val === 4) return count ? `Sebagian kecil (${count} Siswa)` : 'Hanya sebagian kecil siswa';
+                      return 'Menjangkau lebih dari separuh';
+                    })()],
+                    ['Siswa Laki-laki', `${session.jumlahSiswaL || (session as any).jumlah_siswa_l || 0} Siswa`],
+                    ['Siswa Perempuan', `${session.jumlahSiswaP || (session as any).jumlah_siswa_p || 0} Siswa`],
+                    ['Siswa Disabilitas', `${(session.siswaDisabilitasL || (session as any).siswa_disabilitas_l || 0) + (session.siswaDisabilitasP || (session as any).siswa_disabilitas_p || 0)} Siswa`],
                     ['Status Pengisian', session.status || 'submitted'],
                     ['Waktu Pengajuan', (session as any).submittedAt || (session as any).submitted_at ? new Date((session as any).submittedAt || (session as any).submitted_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : session.tanggal],
                   ].map(([k, v]) => (
                     <div key={k} className="bg-white rounded-lg p-2.5 border border-slate-200">
                       <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wide">{k}</div>
-                      <div className="font-semibold text-slate-800 mt-0.5 text-xs">{v}</div>
+                      <div className="font-semibold text-slate-800 mt-0.5 text-xs truncate" title={String(v)}>{v}</div>
                     </div>
                   ))}
                 </div>

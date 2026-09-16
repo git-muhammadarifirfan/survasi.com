@@ -420,4 +420,26 @@ router.post('/submit', submitLimiter, async (req, res) => {
   }
 });
 
+// ─── POST /api/survey/draft (Update status_pengisian to 'sebagian' on draft save) ──
+router.post('/draft', async (req, res) => {
+  try {
+    const { sekolah_id } = req.body;
+    const sekolahId = sekolah_id ? parseInt(sekolah_id) : (req.user?.sekolah_id || null);
+
+    if (sekolahId) {
+      await pool.execute(`
+        UPDATE satuan_pendidikan
+        SET status_pengisian = CASE WHEN status_pengisian = 'sudah' THEN 'sudah' ELSE 'sebagian' END,
+            last_updated = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `, [sekolahId]);
+    }
+
+    return res.json({ success: true, message: 'Draft tersimpan. Status pengisian sekolah menjadi sebagian mengisi.' });
+  } catch (err) {
+    console.error('[SURVEY] draft update error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal memperbarui status draft.' });
+  }
+});
+
 module.exports = router;

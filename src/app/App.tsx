@@ -20,6 +20,7 @@ const KecamatanMap = lazy(() => import('../features/peta/pages/KecamatanMapPage'
 const Kuisioner = lazy(() => import('../features/kuisioner/pages/KuisionerPage'));
 const DataResponden = lazy(() => import('../features/responden/pages/DataRespondenPage'));
 const DataSatuanPendidikan = lazy(() => import('../features/sekolah/pages/DataSekolahPage'));
+const SchoolProfilePage = lazy(() => import('../features/sekolah/pages/SchoolProfilePage'));
 const ModulBsan = lazy(() => import('../features/analisis/pages/ModulBsanPage'));
 const ProporsiModul = lazy(() => import('../features/analisis/pages/ProporsiModulPage'));
 const GapFunnel = lazy(() => import('../features/analisis/pages/GapFunnelPage'));
@@ -96,6 +97,9 @@ function AppContent({
                 <Route path="/" element={<Dashboard activeKecamatan={activeKecamatan} setActiveKecamatan={setActiveKecamatan} userRole={userRole} />} />
                 <Route path="/map" element={<KecamatanMap />} />
                 <Route path="/sekolah" element={<DataSatuanPendidikan userRole={userRole} />} />
+                <Route path="/sekolah/detail/:id" element={<SchoolProfilePage userRole={userRole} />} />
+                <Route path="/sekolah/:id" element={<SchoolProfilePage userRole={userRole} />} />
+                <Route path="/profil-sekolah/:id" element={<SchoolProfilePage userRole={userRole} />} />
                 <Route path="/suara" element={<SuaraResponden activeKecamatan={activeKecamatan} userRole={userRole} />} />
                 <Route path="/setting" element={<Setting />} />
 

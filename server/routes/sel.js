@@ -16,7 +16,7 @@
  */
 
 const router = require('express').Router();
-const pool   = require('../db/pool');
+const pool = require('../db/pool');
 const { authMiddleware, adminOnly } = require('../middleware/auth');
 const { submitLimiter } = require('../middleware/rateLimiter');
 
@@ -293,7 +293,7 @@ router.post('/sesi', submitLimiter, async (req, res) => {
       lokasi_diamati, waktu_pengamatan,
       jumlah_siswa_l, jumlah_siswa_p,
       siswa_disabilitas_l, siswa_disabilitas_p,
-      jangkauan_siswa, kelas_diamati,
+      jangkauan_siswa, jumlah_siswa_sebagian_kecil, kelas_diamati,
       guru_inisial, nama_guru_inisial,
       guru_jk, jenis_kelamin_guru,
       mata_pelajaran, jawaban,
@@ -324,6 +324,8 @@ router.post('/sesi', submitLimiter, async (req, res) => {
     const tanggalVal = tanggal || tanggal_observasi || new Date().toISOString().slice(0, 10);
     const guruInisialVal = guru_inisial || nama_guru_inisial || 'GR';
     const guruJkVal = guru_jk || jenis_kelamin_guru || 'P';
+    const jangkauanVal = Number(jangkauan_siswa || 2);
+    const jumlahSebagianKecilVal = (jangkauanVal === 4 && jumlah_siswa_sebagian_kecil) ? parseInt(jumlah_siswa_sebagian_kecil, 10) : null;
 
     // Insert sesi
     const [sesiResult] = await conn.execute(`
@@ -332,17 +334,17 @@ router.post('/sesi', submitLimiter, async (req, res) => {
         lokasi_diamati, waktu_pengamatan,
         jumlah_siswa_l, jumlah_siswa_p,
         siswa_disabilitas_l, siswa_disabilitas_p,
-        jangkauan_siswa, kelas_diamati,
+        jangkauan_siswa, jumlah_siswa_sebagian_kecil, kelas_diamati,
         guru_inisial, guru_jk, mata_pelajaran,
         status, submitted_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', NOW())
     `, [
       sekolahId, req.user?.id || null, tanggalVal, observer_nama || req.user?.nama || 'Observer Pengawas',
       Array.isArray(lokasi_diamati) ? JSON.stringify(lokasi_diamati) : (lokasi_diamati ? JSON.stringify([lokasi_diamati]) : JSON.stringify(['Ruang Kelas'])),
       Array.isArray(waktu_pengamatan) ? JSON.stringify(waktu_pengamatan) : (waktu_pengamatan ? JSON.stringify([waktu_pengamatan]) : JSON.stringify(['Jam Pelajaran'])),
       jumlah_siswa_l || 0, jumlah_siswa_p || 0,
       siswa_disabilitas_l || 0, siswa_disabilitas_p || 0,
-      jangkauan_siswa || 2, kelas_diamati || '4A',
+      jangkauanVal, jumlahSebagianKecilVal, kelas_diamati || '4A',
       guruInisialVal, guruJkVal, mata_pelajaran || 'Tematik',
     ]);
 
@@ -402,7 +404,7 @@ router.post('/sesi', submitLimiter, async (req, res) => {
     }
 
     await conn.commit();
-    return res.status(201).json({ success: true, sesi_id: sesiId, message: 'Sesi observasi SEL berhasil disimpan ke database MySQL!' });
+    return res.status(201).json({ success: true, sesi_id: sesiId, message: 'Sesi observasi SEL berhasil disimpan!' });
   } catch (err) {
     await conn.rollback();
     console.error('[SEL] submit sesi error:', err);
@@ -431,7 +433,7 @@ router.get('/sesi', async (req, res) => {
         sso.jumlah_siswa_l, sso.jumlah_siswa_p,
         sso.siswa_disabilitas_l, sso.siswa_disabilitas_p,
         sso.kelas_diamati, sso.guru_inisial, sso.guru_jk,
-        sso.mata_pelajaran, sso.jangkauan_siswa,
+        sso.mata_pelajaran, sso.jangkauan_siswa, sso.jumlah_siswa_sebagian_kecil,
         sp.nama AS sekolah_nama, sp.npsn,
         k.nama  AS kecamatan,
         kb.nama AS kabupaten
@@ -679,26 +681,36 @@ router.get('/analisis/scores', async (req, res) => {
         -- Kesadaran Diri
         ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_diri' AND si.subjek = 'guru' THEN sjo.skor END), 2) AS kd_guru,
         ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_diri' AND si.subjek = 'murid' THEN sjo.skor END), 2) AS kd_murid,
+        ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_diri' AND si.konteks = 'kelas' THEN sjo.skor END), 2) AS kd_kelas,
+        ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_diri' AND si.konteks = 'lingkungan' THEN sjo.skor END), 2) AS kd_lingkungan,
         ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_diri' THEN sjo.skor END), 2) AS kd_rata,
 
         -- Regulasi Emosi
         ROUND(AVG(CASE WHEN sd.kode = 'regulasi_emosi' AND si.subjek = 'guru' THEN sjo.skor END), 2) AS re_guru,
         ROUND(AVG(CASE WHEN sd.kode = 'regulasi_emosi' AND si.subjek = 'murid' THEN sjo.skor END), 2) AS re_murid,
+        ROUND(AVG(CASE WHEN sd.kode = 'regulasi_emosi' AND si.konteks = 'kelas' THEN sjo.skor END), 2) AS re_kelas,
+        ROUND(AVG(CASE WHEN sd.kode = 'regulasi_emosi' AND si.konteks = 'lingkungan' THEN sjo.skor END), 2) AS re_lingkungan,
         ROUND(AVG(CASE WHEN sd.kode = 'regulasi_emosi' THEN sjo.skor END), 2) AS re_rata,
 
         -- Kesadaran Sosial
         ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_sosial' AND si.subjek = 'guru' THEN sjo.skor END), 2) AS ks_guru,
         ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_sosial' AND si.subjek = 'murid' THEN sjo.skor END), 2) AS ks_murid,
+        ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_sosial' AND si.konteks = 'kelas' THEN sjo.skor END), 2) AS ks_kelas,
+        ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_sosial' AND si.konteks = 'lingkungan' THEN sjo.skor END), 2) AS ks_lingkungan,
         ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_sosial' THEN sjo.skor END), 2) AS ks_rata,
 
         -- Keterampilan Relasi
         ROUND(AVG(CASE WHEN sd.kode = 'keterampilan_relasi' AND si.subjek = 'guru' THEN sjo.skor END), 2) AS kr_guru,
         ROUND(AVG(CASE WHEN sd.kode = 'keterampilan_relasi' AND si.subjek = 'murid' THEN sjo.skor END), 2) AS kr_murid,
+        ROUND(AVG(CASE WHEN sd.kode = 'keterampilan_relasi' AND si.konteks = 'kelas' THEN sjo.skor END), 2) AS kr_kelas,
+        ROUND(AVG(CASE WHEN sd.kode = 'keterampilan_relasi' AND si.konteks = 'lingkungan' THEN sjo.skor END), 2) AS kr_lingkungan,
         ROUND(AVG(CASE WHEN sd.kode = 'keterampilan_relasi' THEN sjo.skor END), 2) AS kr_rata,
 
         -- Tanggung Jawab
         ROUND(AVG(CASE WHEN sd.kode = 'tanggung_jawab' AND si.subjek = 'guru' THEN sjo.skor END), 2) AS tj_guru,
         ROUND(AVG(CASE WHEN sd.kode = 'tanggung_jawab' AND si.subjek = 'murid' THEN sjo.skor END), 2) AS tj_murid,
+        ROUND(AVG(CASE WHEN sd.kode = 'tanggung_jawab' AND si.konteks = 'kelas' THEN sjo.skor END), 2) AS tj_kelas,
+        ROUND(AVG(CASE WHEN sd.kode = 'tanggung_jawab' AND si.konteks = 'lingkungan' THEN sjo.skor END), 2) AS tj_lingkungan,
         ROUND(AVG(CASE WHEN sd.kode = 'tanggung_jawab' THEN sjo.skor END), 2) AS tj_rata,
 
         -- Kuisioner Score calculation
@@ -742,6 +754,8 @@ router.get('/analisis/scores', async (req, res) => {
           label: 'Kesadaran Diri',
           guruSkor: parseFloat(r.kd_guru || r.guru_total || '0'),
           muridSkor: parseFloat(r.kd_murid || r.murid_total || '0'),
+          kelasSkor: parseFloat(r.kd_kelas || r.total_rata || '0'),
+          lingkunganSkor: parseFloat(r.kd_lingkungan || r.total_rata || '0'),
           rataRata: parseFloat(r.kd_rata || r.total_rata || '0'),
         },
         {
@@ -749,6 +763,8 @@ router.get('/analisis/scores', async (req, res) => {
           label: 'Regulasi Emosi',
           guruSkor: parseFloat(r.re_guru || r.guru_total || '0'),
           muridSkor: parseFloat(r.re_murid || r.murid_total || '0'),
+          kelasSkor: parseFloat(r.re_kelas || r.total_rata || '0'),
+          lingkunganSkor: parseFloat(r.re_lingkungan || r.total_rata || '0'),
           rataRata: parseFloat(r.re_rata || r.total_rata || '0'),
         },
         {
@@ -756,6 +772,8 @@ router.get('/analisis/scores', async (req, res) => {
           label: 'Kesadaran Sosial',
           guruSkor: parseFloat(r.ks_guru || r.guru_total || '0'),
           muridSkor: parseFloat(r.ks_murid || r.murid_total || '0'),
+          kelasSkor: parseFloat(r.ks_kelas || r.total_rata || '0'),
+          lingkunganSkor: parseFloat(r.ks_lingkungan || r.total_rata || '0'),
           rataRata: parseFloat(r.ks_rata || r.total_rata || '0'),
         },
         {
@@ -763,6 +781,8 @@ router.get('/analisis/scores', async (req, res) => {
           label: 'Keterampilan Relasi',
           guruSkor: parseFloat(r.kr_guru || r.guru_total || '0'),
           muridSkor: parseFloat(r.kr_murid || r.murid_total || '0'),
+          kelasSkor: parseFloat(r.kr_kelas || r.total_rata || '0'),
+          lingkunganSkor: parseFloat(r.kr_lingkungan || r.total_rata || '0'),
           rataRata: parseFloat(r.kr_rata || r.total_rata || '0'),
         },
         {
@@ -770,6 +790,8 @@ router.get('/analisis/scores', async (req, res) => {
           label: 'Tanggung Jawab',
           guruSkor: parseFloat(r.tj_guru || r.guru_total || '0'),
           muridSkor: parseFloat(r.tj_murid || r.murid_total || '0'),
+          kelasSkor: parseFloat(r.tj_kelas || r.total_rata || '0'),
+          lingkunganSkor: parseFloat(r.tj_lingkungan || r.total_rata || '0'),
           rataRata: parseFloat(r.tj_rata || r.total_rata || '0'),
         },
       ]
@@ -778,6 +800,45 @@ router.get('/analisis/scores', async (req, res) => {
     return res.json({ success: true, data: formatted });
   } catch (err) {
     console.error('[SEL] scores error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── GET /api/sel/analisis/jangkauan-distribution ─────────────────────────────
+router.get('/analisis/jangkauan-distribution', async (req, res) => {
+  try {
+    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
+
+    const [rows] = await pool.execute(`
+      SELECT 
+        sso.jangkauan_siswa AS code,
+        COALESCE(sko.label, 
+          CASE sso.jangkauan_siswa
+            WHEN 1 THEN 'Menjangkau seluruh siswa'
+            WHEN 2 THEN 'Menjangkau lebih dari separuh siswa'
+            WHEN 3 THEN 'Menjangkau kurang separuh siswa'
+            WHEN 4 THEN 'Hanya sebagian kecil siswa (jika memungkinkan sertakan jumlah, jika memilih ini)'
+            ELSE 'Lainnya'
+          END
+        ) AS jangkauan_label,
+        COUNT(DISTINCT sso.id) AS jumlah_sesi,
+        ROUND(AVG(sjo.skor), 2) AS rata_skor,
+        SUM(sso.jumlah_siswa_sebagian_kecil) AS total_siswa_sebagian_kecil,
+        ROUND(AVG(sso.jumlah_siswa_sebagian_kecil), 1) AS avg_siswa_sebagian_kecil
+      FROM sel_sesi_observasi sso
+      LEFT JOIN sel_konteks_options sko ON sko.kategori = 'jangkauan' AND sko.urutan = sso.jangkauan_siswa
+      LEFT JOIN sel_jawaban_observasi sjo ON sjo.sesi_id = sso.id
+      JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
+      JOIN kecamatan k ON sp.kecamatan_id = k.id
+      WHERE sso.deleted_at IS NULL
+        AND (? IS NULL OR k.kabupaten_id = ?)
+      GROUP BY sso.jangkauan_siswa, sko.label
+      ORDER BY sso.jangkauan_siswa ASC
+    `, [kabupatenId, kabupatenId]);
+
+    return res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error('[SEL] jangkauan distribution error:', err);
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
