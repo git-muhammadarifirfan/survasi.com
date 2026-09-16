@@ -198,7 +198,7 @@ export const apiClient = {
 
   // ── Sekolah ────────────────────────────────────────────────────────────────
   sekolah: {
-    getAll: (params?: { kabupaten_id?: number; kecamatan_id?: number; status?: string; jenjang?: string; search?: string; page?: number; limit?: number }) => {
+    getAll: (params?: { kabupaten_id?: number; kecamatan_id?: number; kecamatan?: string; status?: string; jenjang?: string; search?: string; page?: number; limit?: number }) => {
       const query = new URLSearchParams(
         Object.fromEntries(Object.entries(params || {}).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))
       ).toString();
