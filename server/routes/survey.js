@@ -333,10 +333,25 @@ router.post('/submit', submitLimiter, async (req, res) => {
       kelas_mengajar, no_wa, jawaban
     } = req.body;
 
-    let sekolahId = sekolah_id ? parseInt(sekolah_id) : (req.user?.sekolah_id || 1);
+    let sekolahId = sekolah_id ? parseInt(sekolah_id) : (req.user?.sekolah_id || null);
+    let npsnVal = (npsn && typeof npsn === 'string' && npsn.length <= 20) ? npsn : null;
+
+    // If sekolahId not provided, search by school name or NPSN
+    if (!sekolahId && npsn) {
+      const [spMatch] = await conn.execute(
+        `SELECT id, npsn, kecamatan_id FROM satuan_pendidikan WHERE nama = ? OR npsn = ? LIMIT 1`,
+        [npsn, npsn]
+      );
+      if (spMatch.length > 0) {
+        sekolahId = spMatch[0].id;
+        npsnVal = spMatch[0].npsn;
+      }
+    }
+
+    if (!sekolahId) sekolahId = 1;
+
     let kabId = kabupaten_id ? parseInt(kabupaten_id) : (req.user?.kabupaten_id || 1);
     let kecId = kecamatan_id ? parseInt(kecamatan_id) : (req.user?.kecamatan_id || 1);
-    let npsnVal = npsn || null;
 
     if (sekolahId) {
       const [spRows] = await conn.execute(
@@ -347,11 +362,37 @@ router.post('/submit', submitLimiter, async (req, res) => {
         [sekolahId]
       );
       if (spRows.length > 0) {
-        npsnVal = npsnVal || spRows[0].npsn;
-        kecId = spRows[0].kecamatan_id;
-        kabId = spRows[0].kabupaten_id;
+        npsnVal = spRows[0].npsn || npsnVal;
+        kecId = spRows[0].kecamatan_id || kecId;
+        kabId = spRows[0].kabupaten_id || kabId;
       }
     }
+
+    // Sanitize ENUMs and length-sensitive columns
+    let jk = 'L';
+    if (jenis_kelamin === 'P' || (typeof jenis_kelamin === 'string' && jenis_kelamin.toLowerCase().startsWith('p'))) {
+      jk = 'P';
+    }
+
+    let penMod = 'Ya';
+    if (penerima_modul === 'Tidak' || (typeof penerima_modul === 'string' && penerima_modul.toLowerCase().includes('tidak'))) {
+      penMod = 'Tidak';
+    }
+
+    let stImpl = 'sudah';
+    if (status_implementasi === 'sebagian') stImpl = 'sebagian';
+    else if (status_implementasi === 'belum') stImpl = 'belum';
+    else if (typeof status_implementasi === 'string') {
+      const sLower = status_implementasi.toLowerCase();
+      if (sLower.includes('belum')) stImpl = 'belum';
+      else if (sLower.includes('sebagian')) stImpl = 'sebagian';
+    }
+
+    const cleanNama = (nama || req.user?.nama || 'Responden Survei').substring(0, 200);
+    const cleanPosisi = (posisi || req.user?.jabatan || 'Guru').substring(0, 100);
+    const cleanNpsn = npsnVal ? String(npsnVal).substring(0, 20) : null;
+    const cleanKelas = kelas_mengajar ? String(kelas_mengajar).substring(0, 50) : 'Semua Kelas';
+    const cleanNoWa = no_wa ? String(no_wa).substring(0, 30) : null;
 
     // Insert responden
     const [respResult] = await conn.execute(`
@@ -362,18 +403,18 @@ router.post('/submit', submitLimiter, async (req, res) => {
         kelas_mengajar, no_wa, submitted_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `, [
-      nama || req.user?.nama || 'Responden Survei',
-      jenis_kelamin || 'L',
-      posisi || req.user?.jabatan || 'Guru / Operator',
+      cleanNama,
+      jk,
+      cleanPosisi,
       sekolahId,
-      npsnVal,
+      cleanNpsn,
       kabId,
       kecId,
-      penerima_modul || 'Ya',
+      penMod,
       Array.isArray(penyelenggara_pelatihan) ? penyelenggara_pelatihan.join(', ') : (penyelenggara_pelatihan || 'Dinas Pendidikan'),
-      status_implementasi || 'sudah',
-      kelas_mengajar || 'Semua Kelas',
-      no_wa || null
+      stImpl,
+      cleanKelas,
+      cleanNoWa
     ]);
 
     const respondenId = respResult.insertId;

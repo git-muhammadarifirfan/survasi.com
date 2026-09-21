@@ -266,14 +266,18 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
         return q ? answers[q.id] : null;
       };
 
+      const q4Val = getAnsByCode('Q4');
+      const matchedSchool = dbSchoolsList.find(s => s.nama === q4Val || s.npsn === q4Val || s.id === Number(q4Val))
+        || (userProfile?.sekolah_id ? dbSchoolsList.find(s => s.id === userProfile.sekolah_id) : null);
+
       const payload = {
-        nama: getAnsByCode('Q1') || userProfile?.nama || 'Pengawas Sidoarjo',
+        nama: getAnsByCode('Q1') || userProfile?.nama || 'Responden Survei',
         jenis_kelamin: getAnsByCode('Q2') === 'Perempuan' ? 'P' : 'L',
-        posisi: getAnsByCode('Q3') || 'Pengawas Sekolah',
-        sekolah_id: userProfile?.sekolah_id || 1,
-        npsn: getAnsByCode('Q4') || '20512345',
-        kabupaten_id: 1,
-        kecamatan_id: 1,
+        posisi: getAnsByCode('Q3') || userProfile?.jabatan || 'Guru Kelas',
+        sekolah_id: matchedSchool?.id || userProfile?.sekolah_id || null,
+        npsn: matchedSchool?.npsn || (typeof q4Val === 'string' && q4Val.length <= 20 ? q4Val : null),
+        kabupaten_id: matchedSchool?.kabupaten_id || userProfile?.kabupaten_id || 1,
+        kecamatan_id: matchedSchool?.kecamatan_id || userProfile?.kecamatan_id || 1,
         penerima_modul: getAnsByCode('Q7') || 'Ya',
         penyelenggara_pelatihan: getAnsByCode('Q8'),
         status_implementasi: getAnsByCode('Q9') || 'sudah',
