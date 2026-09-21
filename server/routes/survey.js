@@ -353,18 +353,35 @@ router.post('/submit', submitLimiter, async (req, res) => {
     let kabId = kabupaten_id ? parseInt(kabupaten_id) : (req.user?.kabupaten_id || 1);
     let kecId = kecamatan_id ? parseInt(kecamatan_id) : (req.user?.kecamatan_id || 1);
 
+    // Lookup school and fallback to first valid school in DB if missing
+    let spRows = [];
     if (sekolahId) {
-      const [spRows] = await conn.execute(
-        `SELECT sp.npsn, sp.kecamatan_id, k.kabupaten_id 
+      [spRows] = await conn.execute(
+        `SELECT sp.id, sp.npsn, sp.kecamatan_id, k.kabupaten_id 
          FROM satuan_pendidikan sp 
          JOIN kecamatan k ON sp.kecamatan_id = k.id 
          WHERE sp.id = ? LIMIT 1`,
         [sekolahId]
       );
-      if (spRows.length > 0) {
-        npsnVal = spRows[0].npsn || npsnVal;
-        kecId = spRows[0].kecamatan_id || kecId;
-        kabId = spRows[0].kabupaten_id || kabId;
+    }
+
+    if (spRows.length > 0) {
+      sekolahId = spRows[0].id;
+      npsnVal = spRows[0].npsn || npsnVal;
+      kecId = spRows[0].kecamatan_id;
+      kabId = spRows[0].kabupaten_id;
+    } else {
+      const [firstSp] = await conn.execute(
+        `SELECT sp.id, sp.npsn, sp.kecamatan_id, k.kabupaten_id 
+         FROM satuan_pendidikan sp 
+         JOIN kecamatan k ON sp.kecamatan_id = k.id 
+         LIMIT 1`
+      );
+      if (firstSp.length > 0) {
+        sekolahId = firstSp[0].id;
+        npsnVal = firstSp[0].npsn || npsnVal;
+        kecId = firstSp[0].kecamatan_id;
+        kabId = firstSp[0].kabupaten_id;
       }
     }
 
@@ -433,11 +450,14 @@ router.post('/submit', submitLimiter, async (req, res) => {
           else terstrukturVal = j.value;
         }
 
-        await conn.execute(`
-          INSERT INTO jawaban_survey (
-            responden_id, pertanyaan_id, jawaban_terstruktur, jawaban_bebas, jawaban_multi
-          ) VALUES (?, ?, ?, ?, ?)
-        `, [respondenId, j.pertanyaan_id, terstrukturVal, bebasVal, multiVal]);
+        const pId = parseInt(j.pertanyaan_id);
+        if (!isNaN(pId)) {
+          await conn.execute(`
+            INSERT INTO jawaban_survey (
+              responden_id, pertanyaan_id, jawaban_terstruktur, jawaban_bebas, jawaban_multi
+            ) VALUES (?, ?, ?, ?, ?)
+          `, [respondenId, pId, terstrukturVal, bebasVal, multiVal]);
+        }
       }
     }
 
@@ -455,7 +475,7 @@ router.post('/submit', submitLimiter, async (req, res) => {
   } catch (err) {
     await conn.rollback();
     console.error('[SURVEY] submit error:', err);
-    return res.status(500).json({ success: false, message: 'Gagal mengirim survei.' });
+    return res.status(500).json({ success: false, message: `Gagal mengirim survei: ${err.message || 'Error internal server'}` });
   } finally {
     conn.release();
   }
