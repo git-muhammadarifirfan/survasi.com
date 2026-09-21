@@ -137,45 +137,38 @@ router.get('/kabupaten-stats', async (req, res) => {
 // ─── GET /api/dashboard/modul-progress ──────────────────────────────────────
 router.get('/modul-progress', async (req, res) => {
   try {
+    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
+
+    // Use modul_bsan table with pertanyaan_survey and jawaban_survey for real data
     const [rows] = await pool.execute(`
       SELECT
-        m.id,
-        m.kode,
-        m.nama,
-        COUNT(DISTINCT p.id) AS totalPertanyaan,
-        COUNT(DISTINCT j.id) AS terisi,
-        ROUND(
-          COUNT(DISTINCT j.id) / NULLIF(COUNT(DISTINCT p.id) * (SELECT COUNT(*) FROM satuan_pendidikan), 0) * 100, 1
-        ) AS progres
-      FROM moduls m
-      LEFT JOIN instrumen_pertanyaan p ON p.modul_id = m.id AND p.deleted_at IS NULL
-      LEFT JOIN jawaban_survey j ON j.pertanyaan_id = p.id
-      GROUP BY m.id, m.kode, m.nama
-      ORDER BY m.id ASC
-    `).catch(() => [[]]);
-
-    if (!rows || rows.length === 0) {
-      return res.json({
-        success: true,
-        data: [
-          { id: 1, kode: 'M1', nama: 'Modul 1: Kepemimpinan & Manajemen Sekolah', totalPertanyaan: 25, terisi: 22, progres: 88.0 },
-          { id: 2, kode: 'M2', nama: 'Modul 2: Iklim Keamanan & Keselamatan', totalPertanyaan: 30, terisi: 24, progres: 80.0 },
-          { id: 3, kode: 'M3', nama: 'Modul 3: Pembelajaran Sosial Emosional (SEL)', totalPertanyaan: 58, terisi: 45, progres: 77.5 },
-        ]
-      });
-    }
+        mb.id,
+        mb.kode,
+        mb.nama,
+        COUNT(DISTINCT ps.id) AS totalPertanyaan,
+        COUNT(DISTINCT js.id) AS terisi,
+        CASE
+          WHEN COUNT(DISTINCT ps.id) = 0 THEN 0
+          ELSE ROUND(
+            COUNT(DISTINCT js.id) / (COUNT(DISTINCT ps.id) * GREATEST(1, (
+              SELECT COUNT(DISTINCT rs2.id) FROM responden_survey rs2
+              WHERE (? IS NULL OR rs2.kabupaten_id = ?)
+                AND rs2.deleted_at IS NULL
+            ))) * 100, 1
+          )
+        END AS progres
+      FROM modul_bsan mb
+      LEFT JOIN pertanyaan_survey ps ON ps.modul_id = mb.id AND ps.is_active = 1
+      LEFT JOIN jawaban_survey js ON js.pertanyaan_id = ps.id
+      WHERE mb.is_active = 1
+      GROUP BY mb.id, mb.kode, mb.nama, mb.urutan
+      ORDER BY mb.urutan ASC
+    `, [kabupatenId, kabupatenId]);
 
     return res.json({ success: true, data: rows });
   } catch (err) {
     console.error('[Dashboard] modul-progress error:', err);
-    return res.json({
-      success: true,
-      data: [
-        { id: 1, kode: 'M1', nama: 'Modul 1: Kepemimpinan & Manajemen Sekolah', totalPertanyaan: 25, terisi: 22, progres: 88.0 },
-        { id: 2, kode: 'M2', nama: 'Modul 2: Iklim Keamanan & Keselamatan', totalPertanyaan: 30, terisi: 24, progres: 80.0 },
-        { id: 3, kode: 'M3', nama: 'Modul 3: Pembelajaran Sosial Emosional (SEL)', totalPertanyaan: 58, terisi: 45, progres: 77.5 },
-      ]
-    });
+    return res.json({ success: true, data: [] });
   }
 });
 

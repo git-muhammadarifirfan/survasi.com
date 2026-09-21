@@ -141,17 +141,19 @@ router.get('/', async (req, res) => {
         sp.latitude, sp.longitude,
         sp.status_pengisian AS status,
         sp.last_updated,
+        sp.target_observasi,
         k.nama   AS kecamatan,
         kb.id    AS kabupaten_id,
         kb.nama  AS kabupaten,
         MAX(u.id)     AS user_id,
-        MAX(CASE WHEN u.id IS NOT NULL THEN 1 ELSE 0 END) AS is_registered
+        MAX(CASE WHEN u.id IS NOT NULL THEN 1 ELSE 0 END) AS is_registered,
+        (SELECT COUNT(*) FROM sel_sesi_observasi sso WHERE sso.sekolah_id = sp.id AND sso.deleted_at IS NULL) AS observasi_count
       FROM satuan_pendidikan sp
       JOIN kecamatan k ON sp.kecamatan_id = k.id
       JOIN kabupaten kb ON k.kabupaten_id = kb.id
       LEFT JOIN users u ON (u.sekolah_id = sp.id OR (sp.email IS NOT NULL AND u.email = sp.email) OR u.email = CONCAT(sp.npsn, '@survasi.com')) AND u.is_active = TRUE
       WHERE ${whereSql}
-      GROUP BY sp.id, sp.npsn, sp.nama, sp.jenjang, sp.status_sekolah, sp.akreditasi, sp.alamat, sp.email, sp.telepon, sp.total_guru, sp.total_siswa, sp.latitude, sp.longitude, sp.status_pengisian, sp.last_updated, k.nama, kb.id, kb.nama
+      GROUP BY sp.id, sp.npsn, sp.nama, sp.jenjang, sp.status_sekolah, sp.akreditasi, sp.alamat, sp.email, sp.telepon, sp.total_guru, sp.total_siswa, sp.latitude, sp.longitude, sp.status_pengisian, sp.last_updated, sp.target_observasi, k.nama, kb.id, kb.nama
       ORDER BY 
         CASE 
           WHEN sp.status_pengisian = 'sudah' THEN 1
@@ -189,7 +191,8 @@ router.get('/:id', async (req, res) => {
   try {
     const [rows] = await pool.execute(`
       SELECT
-        sp.*, k.nama AS kecamatan, kb.nama AS kabupaten, kb.id AS kabupaten_id
+        sp.*, k.nama AS kecamatan, kb.nama AS kabupaten, kb.id AS kabupaten_id,
+        (SELECT COUNT(*) FROM sel_sesi_observasi sso WHERE sso.sekolah_id = sp.id AND sso.deleted_at IS NULL) AS observasi_count
       FROM satuan_pendidikan sp
       JOIN kecamatan k ON sp.kecamatan_id = k.id
       JOIN kabupaten kb ON k.kabupaten_id = kb.id

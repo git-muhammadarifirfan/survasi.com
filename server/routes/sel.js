@@ -404,7 +404,31 @@ router.post('/sesi', submitLimiter, async (req, res) => {
     }
 
     await conn.commit();
-    return res.status(201).json({ success: true, sesi_id: sesiId, message: 'Sesi observasi SEL berhasil disimpan!' });
+
+    // Check target observasi warning
+    let warning = null;
+    try {
+      const [targetRows] = await pool.execute(`
+        SELECT sp.target_observasi,
+          (SELECT COUNT(*) FROM sel_sesi_observasi sso2 WHERE sso2.sekolah_id = sp.id AND sso2.deleted_at IS NULL) AS observasi_count
+        FROM satuan_pendidikan sp WHERE sp.id = ?
+      `, [sekolahId]);
+      if (targetRows.length > 0) {
+        const { target_observasi, observasi_count } = targetRows[0];
+        if (observasi_count > target_observasi) {
+          warning = `Sekolah ini sudah melebihi target observasi (${observasi_count}/${target_observasi} sesi). Data tetap tersimpan dan dihitung dalam analisis.`;
+        } else if (observasi_count === target_observasi) {
+          warning = `Target observasi sekolah ini telah tercapai (${observasi_count}/${target_observasi} sesi).`;
+        }
+      }
+    } catch (_) { /* ignore target check error */ }
+
+    return res.status(201).json({
+      success: true,
+      sesi_id: sesiId,
+      message: 'Sesi observasi SEL berhasil disimpan!',
+      warning,
+    });
   } catch (err) {
     await conn.rollback();
     console.error('[SEL] submit sesi error:', err);
@@ -839,6 +863,76 @@ router.get('/analisis/jangkauan-distribution', async (req, res) => {
     return res.json({ success: true, data: rows });
   } catch (err) {
     console.error('[SEL] jangkauan distribution error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── GET /api/sel/summary-stats (Dashboard SEL Insight Banner) ────────────────
+router.get('/summary-stats', async (req, res) => {
+  try {
+    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
+
+    const [rows] = await pool.execute(`
+      SELECT
+        COUNT(DISTINCT sso.sekolah_id) AS totalDiobservasi,
+        ROUND(AVG(CASE WHEN si.subjek = 'guru'  THEN sjo.skor END), 2) AS rataGuruAll,
+        ROUND(AVG(CASE WHEN si.subjek = 'murid' THEN sjo.skor END), 2) AS rataMuridAll,
+        COUNT(DISTINCT sso.id) AS totalSesi
+      FROM sel_sesi_observasi sso
+      JOIN sel_jawaban_observasi sjo ON sjo.sesi_id = sso.id
+      JOIN sel_indikator si ON sjo.indikator_id = si.id
+      JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
+      JOIN kecamatan k ON sp.kecamatan_id = k.id
+      WHERE sjo.skor IS NOT NULL
+        AND sso.deleted_at IS NULL
+        AND (? IS NULL OR k.kabupaten_id = ?)
+    `, [kabupatenId, kabupatenId]);
+
+    // Count schools needing intervention (avg score < 2.5)
+    const [interventionRows] = await pool.execute(`
+      SELECT COUNT(*) AS butuhIntervensi FROM (
+        SELECT sso.sekolah_id, AVG(sjo.skor) AS avg_skor
+        FROM sel_sesi_observasi sso
+        JOIN sel_jawaban_observasi sjo ON sjo.sesi_id = sso.id
+        JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
+        JOIN kecamatan k ON sp.kecamatan_id = k.id
+        WHERE sjo.skor IS NOT NULL
+          AND sso.deleted_at IS NULL
+          AND (? IS NULL OR k.kabupaten_id = ?)
+        GROUP BY sso.sekolah_id
+        HAVING avg_skor < 2.5
+      ) sub
+    `, [kabupatenId, kabupatenId]);
+
+    // Top school by score
+    const [topRows] = await pool.execute(`
+      SELECT sp.nama AS topSekolah
+      FROM sel_sesi_observasi sso
+      JOIN sel_jawaban_observasi sjo ON sjo.sesi_id = sso.id
+      JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
+      JOIN kecamatan k ON sp.kecamatan_id = k.id
+      WHERE sjo.skor IS NOT NULL
+        AND sso.deleted_at IS NULL
+        AND (? IS NULL OR k.kabupaten_id = ?)
+      GROUP BY sso.sekolah_id, sp.nama
+      ORDER BY AVG(sjo.skor) DESC
+      LIMIT 1
+    `, [kabupatenId, kabupatenId]);
+
+    const result = rows[0] || {};
+    return res.json({
+      success: true,
+      data: {
+        totalDiobservasi: result.totalDiobservasi || 0,
+        rataGuruAll: parseFloat(result.rataGuruAll || '0'),
+        rataMuridAll: parseFloat(result.rataMuridAll || '0'),
+        butuhIntervensi: interventionRows[0]?.butuhIntervensi || 0,
+        topSekolah: topRows[0]?.topSekolah || '-',
+        totalSesi: result.totalSesi || 0,
+      }
+    });
+  } catch (err) {
+    console.error('[SEL] summary-stats error:', err);
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });

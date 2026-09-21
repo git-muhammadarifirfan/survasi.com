@@ -225,4 +225,129 @@ router.get('/activity-log', async (req, res) => {
   }
 });
 
+// ─── GET /api/setting/target-observasi ────────────────────────────────────────
+router.get('/target-observasi', adminOnly, async (req, res) => {
+  try {
+    // Get global default
+    const [settingRows] = await pool.execute(
+      `SELECT setting_value FROM app_settings WHERE setting_key = 'default_target_observasi'`
+    );
+    const defaultTarget = settingRows.length > 0 ? parseInt(settingRows[0].setting_value) : 2;
+
+    // Get per-school targets with observation counts
+    const [schoolRows] = await pool.execute(`
+      SELECT 
+        sp.id, sp.npsn, sp.nama, sp.target_observasi,
+        k.nama AS kecamatan, kb.nama AS kabupaten,
+        COUNT(DISTINCT sso.id) AS observasi_count
+      FROM satuan_pendidikan sp
+      JOIN kecamatan k ON sp.kecamatan_id = k.id
+      JOIN kabupaten kb ON k.kabupaten_id = kb.id
+      LEFT JOIN sel_sesi_observasi sso ON sso.sekolah_id = sp.id AND sso.deleted_at IS NULL
+      WHERE sp.deleted_at IS NULL
+      GROUP BY sp.id, sp.npsn, sp.nama, sp.target_observasi, k.nama, kb.nama
+      ORDER BY kb.nama, k.nama, sp.nama
+    `);
+
+    return res.json({
+      success: true,
+      data: {
+        default_target: defaultTarget,
+        schools: schoolRows,
+      }
+    });
+  } catch (err) {
+    console.error('[Setting] target-observasi GET error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── PUT /api/setting/target-observasi ────────────────────────────────────────
+router.put('/target-observasi', adminOnly, async (req, res) => {
+  try {
+    const { default_target, apply_to_all } = req.body;
+    if (!default_target || default_target < 1 || default_target > 20) {
+      return res.status(400).json({ success: false, message: 'Target harus antara 1-20.' });
+    }
+
+    // Update global default
+    await pool.execute(
+      `INSERT INTO app_settings (setting_key, setting_value, updated_by)
+       VALUES ('default_target_observasi', ?, ?)
+       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by)`,
+      [String(default_target), req.user.id]
+    );
+
+    // Optionally apply to all schools
+    if (apply_to_all) {
+      await pool.execute(
+        `UPDATE satuan_pendidikan SET target_observasi = ? WHERE deleted_at IS NULL`,
+        [default_target]
+      );
+    }
+
+    return res.json({
+      success: true,
+      message: apply_to_all
+        ? `Target observasi global diubah ke ${default_target}x dan diterapkan ke semua sekolah.`
+        : `Target observasi default diubah ke ${default_target}x.`
+    });
+  } catch (err) {
+    console.error('[Setting] target-observasi PUT error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── PUT /api/setting/target-observasi/batch ─────────────────────────────────
+// NOTE: Must be defined BEFORE /:sekolahId to avoid Express matching 'batch' as param
+router.put('/target-observasi/batch', adminOnly, async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    const { items } = req.body; // array of { sekolah_id, target }
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, message: 'Data batch tidak valid.' });
+    }
+
+    await conn.beginTransaction();
+    for (const item of items) {
+      if (item.target >= 1 && item.target <= 20) {
+        await conn.execute(
+          `UPDATE satuan_pendidikan SET target_observasi = ? WHERE id = ?`,
+          [item.target, item.sekolah_id]
+        );
+      }
+    }
+    await conn.commit();
+
+    return res.json({ success: true, message: `Target observasi ${items.length} sekolah berhasil diperbarui.` });
+  } catch (err) {
+    await conn.rollback();
+    console.error('[Setting] target-observasi batch error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  } finally {
+    conn.release();
+  }
+});
+
+// ─── PUT /api/setting/target-observasi/:sekolahId ────────────────────────────
+router.put('/target-observasi/:sekolahId', adminOnly, async (req, res) => {
+  try {
+    const { target } = req.body;
+    const sekolahId = parseInt(req.params.sekolahId);
+    if (!target || target < 1 || target > 20) {
+      return res.status(400).json({ success: false, message: 'Target harus antara 1-20.' });
+    }
+
+    await pool.execute(
+      `UPDATE satuan_pendidikan SET target_observasi = ? WHERE id = ?`,
+      [target, sekolahId]
+    );
+
+    return res.json({ success: true, message: `Target observasi sekolah berhasil diubah ke ${target}x.` });
+  } catch (err) {
+    console.error('[Setting] target-observasi per-school PUT error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 module.exports = router;

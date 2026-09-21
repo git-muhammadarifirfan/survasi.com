@@ -518,62 +518,44 @@ export const database = {
   },
 
   getKabupatenStats: async (): Promise<KabupatenStat[]> => {
-    return new Promise((resolve) => {
-      const stats: Record<string, KabupatenStat> = {
-        'Kab. Sidoarjo': { kabupaten: 'Kab. Sidoarjo', total: 0, belum: 0, sebagian: 0, sudah: 0, rate: 0, color: '#4A57C4' },
-        'Kota Batu': { kabupaten: 'Kota Batu', total: 0, belum: 0, sebagian: 0, sudah: 0, rate: 0, color: '#6C7AE0' },
-        'Kab. Tuban': { kabupaten: 'Kab. Tuban', total: 0, belum: 0, sebagian: 0, sudah: 0, rate: 0, color: '#2FB344' }
-      };
-
-      schoolsData.forEach(s => {
-        if (stats[s.kabupaten]) {
-          stats[s.kabupaten].total++;
-          stats[s.kabupaten][s.status]++;
-        }
-      });
-
-      const list = Object.values(stats).map(item => {
-        item.rate = item.total > 0 ? Math.round(((item.sudah + item.sebagian * 0.5) / item.total) * 100) : 0;
-        return item;
-      }).sort((a, b) => b.rate - a.rate);
-
-      setTimeout(() => resolve(list), 100);
-    });
+    try {
+      const res = await apiClient.dashboard.getKabupatenStats();
+      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+        return res.data.map((r: any) => ({
+          kabupaten: r.kabupaten,
+          total: Number(r.total_sekolah || r.total || 0),
+          belum: Number(r.belum || 0),
+          sebagian: Number(r.sebagian || 0),
+          sudah: Number(r.sudah || 0),
+          rate: Number(r.response_rate || r.rate || 0),
+          color: r.warna_chart || '#4A57C4',
+        }));
+      }
+    } catch (err) {
+      console.warn('[data-source] getKabupatenStats API error:', err);
+    }
+    return [];
   },
 
   getKecamatanStats: async (kabupatenFilter?: string): Promise<KecamatanStat[]> => {
-    return new Promise((resolve) => {
-      const filtered = kabupatenFilter
-        ? schoolsData.filter(s => s.kabupaten === kabupatenFilter)
-        : schoolsData;
-
-      const stats: Record<string, KecamatanStat> = {};
-
-      filtered.forEach(s => {
-        if (!stats[s.kecamatan]) {
-          stats[s.kecamatan] = {
-            kecamatan: s.kecamatan,
-            kabupaten: s.kabupaten,
-            total: 0,
-            belum: 0,
-            sebagian: 0,
-            sudah: 0,
-            rate: 0
-          };
-        }
-        stats[s.kecamatan].total++;
-        stats[s.kecamatan][s.status]++;
-      });
-
-      const list = Object.values(stats)
-        .map(item => {
-          item.rate = item.total > 0 ? Math.round((item.sudah / item.total) * 100) : 0;
-          return item;
-        })
-        .sort((a, b) => b.rate - a.rate);
-
-      setTimeout(() => resolve(list), 100);
-    });
+    try {
+      const kabId = kabupatenFilter ? KABUPATEN_NAME_TO_ID[kabupatenFilter] : undefined;
+      const res = await apiClient.dashboard.getRegionalStats(kabId);
+      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+        return res.data.map((r: any) => ({
+          kecamatan: r.kecamatan,
+          kabupaten: r.kabupaten,
+          total: Number(r.total_sekolah || r.total || 0),
+          belum: Number(r.belum || 0),
+          sebagian: Number(r.sebagian || 0),
+          sudah: Number(r.sudah || 0),
+          rate: Number(r.response_rate || r.rate || 0),
+        }));
+      }
+    } catch (err) {
+      console.warn('[data-source] getKecamatanStats API error:', err);
+    }
+    return [];
   },
 
   getModulProgress: async (filters?: { kabupaten?: string; kecamatan?: string }): Promise<ModulProgress[]> => {
@@ -655,66 +637,44 @@ export const database = {
   },
 
   getTimeSeriesData: async (filters?: { kabupaten?: string; kecamatan?: string }): Promise<TimeSeriesPoint[]> => {
-    return new Promise((resolve) => {
-      const filtered = schoolsData.filter(s => {
-        let match = true;
-        if (filters?.kabupaten && s.kabupaten !== filters.kabupaten) match = false;
-        if (filters?.kecamatan && s.kecamatan !== filters.kecamatan) match = false;
-        return match;
-      });
-
-      const total = filtered.length || 100;
-      const data: TimeSeriesPoint[] = [
-        { date: '1 Sep', sudah: Math.floor(total * 0.05), sebagian: Math.floor(total * 0.08) },
-        { date: '2 Sep', sudah: Math.floor(total * 0.15), sebagian: Math.floor(total * 0.18) },
-        { date: '3 Sep', sudah: Math.floor(total * 0.28), sebagian: Math.floor(total * 0.25) },
-        { date: '4 Sep', sudah: Math.floor(total * 0.42), sebagian: Math.floor(total * 0.32) },
-        { date: '5 Sep', sudah: Math.floor(total * 0.58), sebagian: Math.floor(total * 0.35) },
-        { date: '6 Sep', sudah: Math.floor(total * 0.68), sebagian: Math.floor(total * 0.28) },
-        { date: '7 Sep', sudah: Math.floor(total * 0.75), sebagian: Math.floor(total * 0.22) },
-      ];
-      setTimeout(() => resolve(data), 100);
-    });
+    try {
+      const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
+      const res = await apiClient.dashboard.getTimeseries(kabId);
+      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+        return res.data.map((r: any) => ({
+          date: r.date || r.tanggal || '',
+          sudah: Number(r.sudah || 0),
+          sebagian: Number(r.sebagian || 0),
+        }));
+      }
+    } catch (err) {
+      console.warn('[data-source] getTimeSeriesData API error:', err);
+    }
+    return [];
   },
 
   getSuaraRespondenData: async (filters?: { kabupaten?: string; kecamatan?: string }): Promise<any[]> => {
-    return new Promise((resolve) => {
-      const filtered = schoolsData.filter(s => {
-        let match = true;
-        if (filters?.kabupaten && s.kabupaten !== filters.kabupaten) match = false;
-        if (filters?.kecamatan && s.kecamatan !== filters.kecamatan) match = false;
-        return match;
+    try {
+      const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
+      const res = await apiClient.suara.getAll({
+        kabupaten_id: kabId,
+        limit: 50,
       });
-
-      const templates = [
-        { m: 'Modul 1: Literasi & Numerasi', s: 'positif', c: 'Penerapan modul literasi dasar berjalan sangat lancar dibantu media ajar manipulatif, anak-anak jadi lebih antusias.' },
-        { m: 'Modul 4: Lingkungan Belajar', s: 'negatif', c: 'Kami sangat membutuhkan bantuan tambahan laptop untuk laboratorium komputer agar pembelajaran literasi digital bisa maksimal.' },
-        { m: 'Modul 2: Pengembangan Karakter', s: 'netral', c: 'Pelaksanaan projek P5 terkendala koordinasi waktu dan penyediaan bahan ajar pendukung yang minim dari komite.' },
-        { m: 'Modul 3: Kepemimpinan Instruksional', s: 'positif', c: 'Supervisi akademik oleh kepala sekolah sudah rutin dilakukan, sangat membantu peningkatan kompetensi pengajaran guru.' },
-        { m: 'Modul 5: Kemitraan Orang Tua', s: 'negatif', c: 'Kehadiran wali murid di forum kelas orang tua masih rendah karena mayoritas bekerja shift pabrik.' },
-        { m: 'Modul 4: Lingkungan Belajar', s: 'negatif', c: 'Jaringan internet di sekolah kami sering mati saat siang hari, mengganggu latihan ujian numerasi online.' },
-        { m: 'Modul 1: Literasi & Numerasi', s: 'netral', c: 'Kami membutuhkan buku bacaan tingkat awal yang lebih bervariasi untuk pojok baca kelas.' },
-        { m: 'Modul 2: Pengembangan Karakter', s: 'positif', c: 'Anak-anak mulai terbiasa dengan budaya 5S setiap pagi di gerbang sekolah.' },
-        { m: 'Modul 5: Kemitraan Orang Tua', s: 'positif', c: 'Grup paguyuban wali murid sangat aktif membantu kegiatan peringatan hari besar agama di sekolah.' },
-        { m: 'Modul 3: Kepemimpinan Instruksional', s: 'negatif', c: 'Pelatihan guru KKG di tingkat gugus kurang merata, kami harap dinas sering turun langsung.' }
-      ];
-
-      const limit = Math.min(filtered.length, 50);
-      const data = filtered.slice(0, limit).map((s, idx) => {
-        const t = templates[idx % templates.length];
-        return {
-          id: s.id,
-          schoolName: s.nama,
-          kecamatan: s.kecamatan,
-          modul: t.m,
-          comment: t.c,
-          sentiment: t.s,
-          date: `2026-08-${String(20 - (idx % 10)).padStart(2, '0')}`
-        };
-      });
-
-      setTimeout(() => resolve(data), 100);
-    });
+      if (res?.success && Array.isArray(res.data)) {
+        return res.data.map((r: any) => ({
+          id: String(r.id),
+          schoolName: r.sekolah || r.school_name || '',
+          kecamatan: r.kecamatan || '',
+          modul: r.modul || '',
+          comment: r.komentar || r.comment || '',
+          sentiment: r.sentimen || r.sentiment || 'netral',
+          date: r.tanggal ? String(r.tanggal).slice(0, 10) : '',
+        }));
+      }
+    } catch (err) {
+      console.warn('[data-source] getSuaraRespondenData API error:', err);
+    }
+    return [];
   },
 
   getGapFunnelData: async (filters?: { kabupaten?: string; kecamatan?: string }): Promise<FunnelStep[]> => {
@@ -725,29 +685,9 @@ export const database = {
         return res.data;
       }
     } catch (err) {
-      console.warn('[data-source] getGapFunnelData fallback:', err);
+      console.warn('[data-source] getGapFunnelData API error:', err);
     }
-
-    const filtered = schoolsData.filter(s => {
-      let match = true;
-      if (filters?.kabupaten && s.kabupaten !== filters.kabupaten) match = false;
-      if (filters?.kecamatan && s.kecamatan !== filters.kecamatan) match = false;
-      return match;
-    });
-
-    const total = filtered.length;
-    const mengisi = filtered.filter(s => s.status === 'sudah' || s.status === 'sebagian').length;
-    const memenuhiM1 = Math.round(mengisi * 0.78);
-    const memenuhiM2 = Math.round(memenuhiM1 * 0.70);
-    const memenuhiM3 = Math.round(memenuhiM2 * 0.62);
-
-    return [
-      { name: 'Total Sasaran Sekolah', schools: total, percentage: 100 },
-      { name: 'Mengisi Survei (Aktif)', schools: mengisi, percentage: total > 0 ? Math.round((mengisi / total) * 100) : 0 },
-      { name: 'Memenuhi Tahap 1 & 2', schools: memenuhiM1, percentage: total > 0 ? Math.round((memenuhiM1 / total) * 100) : 0 },
-      { name: 'Memenuhi Standar Mutu', schools: memenuhiM2, percentage: total > 0 ? Math.round((memenuhiM2 / total) * 100) : 0 },
-      { name: 'Lulus Kategori Utama', schools: memenuhiM3, percentage: total > 0 ? Math.round((memenuhiM3 / total) * 100) : 0 },
-    ];
+    return [];
   },
 
   getMatriksKuadranData: async (filters?: { kabupaten?: string; kecamatan?: string }): Promise<MatrixPoint[]> => {
@@ -765,41 +705,9 @@ export const database = {
         }));
       }
     } catch (err) {
-      console.warn('[data-source] getMatriksKuadranData fallback:', err);
+      console.warn('[data-source] getMatriksKuadranData API error:', err);
     }
-
-    const filtered = schoolsData.filter(s => {
-      let match = true;
-      if (filters?.kabupaten && s.kabupaten !== filters.kabupaten) match = false;
-      if (filters?.kecamatan && s.kecamatan !== filters.kecamatan) match = false;
-      return match;
-    });
-
-    return filtered.map((s, idx) => {
-      let implementation = 0;
-      let readiness = 0;
-      const seed = (s.npsn ? parseInt(s.npsn) : idx) % 100;
-
-      if (s.status === 'sudah') {
-        implementation = 60 + (seed % 35);
-        readiness = 65 + (seed % 30);
-      } else if (s.status === 'sebagian') {
-        implementation = 35 + (seed % 30);
-        readiness = 40 + (seed % 35);
-      } else {
-        implementation = 15 + (seed % 25);
-        readiness = 20 + (seed % 30);
-      }
-
-      return {
-        id: s.id,
-        name: s.nama,
-        kecamatan: s.kecamatan,
-        implementation,
-        readiness,
-        status: s.status
-      };
-    }).slice(0, 150);
+    return [];
   },
 
   getTantanganData: async (filters?: { kabupaten?: string; kecamatan?: string }): Promise<ChallengeStat[]> => {
@@ -816,48 +724,55 @@ export const database = {
         }));
       }
     } catch (err) {
-      console.warn('[data-source] getTantanganData fallback:', err);
+      console.warn('[data-source] getTantanganData API error:', err);
     }
-
-    return [
-      { category: 'Keterbatasan Perangkat Digital / Laptop', count: 348, percentage: 36.8, color: '#E5484D' },
-      { category: 'Jaringan Internet Tidak Stabil', count: 236, percentage: 25.0, color: '#F5A623' },
-      { category: 'Kurangnya Pelatihan Guru tentang BSAN', count: 155, percentage: 16.4, color: '#4A57C4' },
-      { category: 'Bahan Ajar Cetak Belum Lengkap', count: 121, percentage: 12.8, color: '#6C7AE0' },
-      { category: 'Kurang Kemitraan dari Orang Tua', count: 85, percentage: 9.0, color: '#2FB344' },
-    ];
+    return [];
   },
 
   getRecentActivities: async (filters?: { kabupaten?: string; kecamatan?: string }): Promise<{ schoolName: string; status: string; time: string }[]> => {
-    return new Promise((resolve) => {
-      const filtered = schoolsData.filter(s => {
-        let match = true;
-        if (filters?.kabupaten && s.kabupaten !== filters.kabupaten) match = false;
-        if (filters?.kecamatan && s.kecamatan !== filters.kecamatan) match = false;
-        return match;
-      });
-
-      const list = filtered
-        .filter(s => s.status !== 'belum')
-        .slice(0, 5)
-        .map((s, idx) => ({
-          schoolName: s.nama,
-          status: s.status,
-          time: `Hari ini, 0${(idx % 8) + 8}:24 WIB`
+    try {
+      const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
+      const res = await apiClient.dashboard.getActivities({ kabupaten_id: kabId, limit: 5 });
+      if (res?.success && Array.isArray(res.data)) {
+        return res.data.map((r: any) => ({
+          schoolName: r.sekolah || r.schoolName || r.nama || '',
+          status: r.status || r.status_pengisian || 'belum',
+          time: r.time || r.waktu || r.last_updated || '',
         }));
-      resolve(list);
-    });
+      }
+    } catch (err) {
+      console.warn('[data-source] getRecentActivities API error:', err);
+    }
+    return [];
   },
 
   getFollowUpList: async (kabupatenFilter?: string): Promise<School[]> => {
-    return new Promise((resolve) => {
-      const filtered = kabupatenFilter
-        ? schoolsData.filter(s => s.kabupaten === kabupatenFilter)
-        : schoolsData;
-
-      const list = filtered.filter(s => s.status === 'belum').slice(0, 20);
-      resolve(list);
-    });
+    try {
+      const kabId = kabupatenFilter ? KABUPATEN_NAME_TO_ID[kabupatenFilter] : undefined;
+      const res = await apiClient.dashboard.getFollowUp(kabId);
+      if (res?.success && Array.isArray(res.data)) {
+        return res.data.map((s: any) => ({
+          id: String(s.id),
+          npsn: s.npsn || '',
+          nama: s.nama || '',
+          kecamatan: s.kecamatan || '',
+          kabupaten: s.kabupaten || '',
+          status: s.status || 'belum',
+          jenjang: s.jenjang || 'SD',
+          statusSekolah: s.status_sekolah || 'Negeri',
+          totalGuru: s.total_guru || 0,
+          totalSiswa: s.total_siswa || 0,
+          akreditasi: s.akreditasi || '',
+          alamat: s.alamat || '',
+          email: s.email || '',
+          telepon: s.telepon || '',
+          x: 0, y: 0,
+        }));
+      }
+    } catch (err) {
+      console.warn('[data-source] getFollowUpList API error:', err);
+    }
+    return [];
   },
 
   sendReminder: async (schoolId: string): Promise<boolean> => {
@@ -867,247 +782,98 @@ export const database = {
   },
 
   getProporsiModulData: async (kabupaten?: string): Promise<ProporsiModulData> => {
-    return new Promise((resolve) => {
-      const targetKab = kabupaten || 'Kab. Sidoarjo';
-      const respondents = respondentsData.filter(r => r.kabupaten === targetKab);
-      const totalResponden = respondents.length || (targetKab === 'Kota Batu' ? 273 : targetKab === 'Kab. Tuban' ? 715 : 113);
+    try {
+      const kabId = kabupaten ? KABUPATEN_NAME_TO_ID[kabupaten] : undefined;
+      const res = await apiClient.analisis.getProporsi(kabId);
+      if (res?.success && res.data) {
+        const d = res.data as any;
 
-      const yaCount = respondents.filter(r => r.penerima === 'Ya').length;
-      const tidakCount = totalResponden - yaCount;
-      const yaPercent = Math.round((yaCount / totalResponden) * 100) || (targetKab === 'Kota Batu' ? 54 : targetKab === 'Kab. Tuban' ? 55 : 37);
-      const tidakPercent = 100 - yaPercent;
+        // Map API response to ProporsiModulData interface
+        const proporsiPenerima = (() => {
+          if (Array.isArray(d.proporsiPenerima)) {
+            const yaRow = d.proporsiPenerima.find((r: any) => r.penerima_modul === 'Ya');
+            const tidakRow = d.proporsiPenerima.find((r: any) => r.penerima_modul === 'Tidak');
+            const totalResponden = (yaRow?.jumlah || 0) + (tidakRow?.jumlah || 0);
+            return {
+              ya: Number(yaRow?.persen || 0),
+              tidak: Number(tidakRow?.persen || 0),
+              totalResponden,
+            };
+          }
+          return { ya: 0, tidak: 0, totalResponden: 0 };
+        })();
 
-      // Group distribution per kecamatan
-      const kecMap: Record<string, { ya: number; tidak: number; total: number }> = {};
-      respondents.forEach(r => {
-        if (!r.kecamatan) return;
-        if (!kecMap[r.kecamatan]) kecMap[r.kecamatan] = { ya: 0, tidak: 0, total: 0 };
-        kecMap[r.kecamatan].total++;
-        if (r.penerima === 'Ya') kecMap[r.kecamatan].ya++;
-        else kecMap[r.kecamatan].tidak++;
-      });
+        const distribusiPerKecamatan = Array.isArray(d.distribusiPerKecamatan)
+          ? d.distribusiPerKecamatan.map((r: any) => ({
+              kecamatan: r.kecamatan,
+              ya: Number(r.ya_persen || 0),
+              tidak: Number(r.tidak_persen || 0),
+            }))
+          : [];
 
-      let distribusiPerKecamatan = Object.keys(kecMap).map(k => {
-        const item = kecMap[k];
-        const yaP = Math.round((item.ya / item.total) * 100);
-        return { kecamatan: k, ya: yaP, tidak: 100 - yaP };
-      });
+        const statusImplementasiPosisi = Array.isArray(d.statusImplementasiPosisi)
+          ? d.statusImplementasiPosisi.map((r: any) => ({
+              posisi: r.posisi,
+              belumMenerima: Number(r.belum_menerima || 0),
+              tidakMenerapkan: Number(r.tidak_menerapkan || 0),
+              sebagian: Number(r.sebagian || 0),
+              sudah: Number(r.sudah || 0),
+            }))
+          : [];
 
-      if (distribusiPerKecamatan.length === 0) {
-        // Fallback kecamatan list if empty
-        const kecs = targetKab === 'Kota Batu' ? ['Batu', 'Bumiaji', 'Junrejo'] :
-                     targetKab === 'Kab. Tuban' ? ['Tuban', 'Jenu', 'Merakurak', 'Semanding', 'Palang', 'Widang', 'Bancar'] :
-                     ['Sidoarjo', 'Buduran', 'Candi', 'Porong', 'Krembung', 'Krian', 'Waru', 'Taman'];
-        distribusiPerKecamatan = kecs.map((k, i) => ({
-          kecamatan: k,
-          ya: 45 + (i * 5) % 25,
-          tidak: 55 - (i * 5) % 25
-        }));
-      }
+        const statusImplementasiKecamatan = Array.isArray(d.statusImplementasiKecamatan)
+          ? d.statusImplementasiKecamatan.map((r: any) => ({
+              kecamatan: r.kecamatan,
+              belumMenerima: Number(r.belum_menerima || 0),
+              tidakMenerapkan: Number(r.tidak_menerapkan || 0),
+              sebagian: Number(r.sebagian || 0),
+              sudah: Number(r.sudah || 0),
+            }))
+          : [];
 
-      // Penyelenggara Pelatihan
-      const penMap: Record<string, number> = {};
-      respondents.forEach(r => {
-        if (r.penyelenggara && r.penyelenggara !== '-') {
-          const items = r.penyelenggara.split(/[,;]/);
-          items.forEach(it => {
-            let clean = it.trim();
-            if (clean.length > 25) {
-              if (clean.toLowerCase().includes('inovasi')) clean = 'INOVASI / Dinas';
-              else if (clean.toLowerCase().includes('kkg') || clean.toLowerCase().includes('kkks')) clean = 'Diseminasi KKG / KKKS';
-              else if (clean.toLowerCase().includes('internal') || clean.toLowerCase().includes('sekolah')) clean = 'Pelatihan Internal Sekolah';
-              else clean = clean.slice(0, 22) + '...';
-            }
-            if (clean) penMap[clean] = (penMap[clean] || 0) + 1;
-          });
-        }
-      });
+        // These sub-sections can come from API if added later, for now compute from the API data we have
+        const totalResponden = proporsiPenerima.totalResponden || 1;
 
-      let penyelenggaraPelatihan = Object.keys(penMap).map(k => ({ nama: k, jumlah: penMap[k] })).sort((a, b) => b.jumlah - a.jumlah).slice(0, 8);
-      if (penyelenggaraPelatihan.length === 0) {
-        penyelenggaraPelatihan = [
-          { nama: 'INOVASI - Dinas Pendidikan', jumlah: Math.round(totalResponden * 0.45) },
-          { nama: 'Diseminasi KKG / KKKS', jumlah: Math.round(totalResponden * 0.38) },
-          { nama: 'Pelatihan Internal Sekolah', jumlah: Math.round(totalResponden * 0.22) },
-          { nama: 'Mandiri / Online Platform', jumlah: Math.round(totalResponden * 0.15) }
-        ];
-      }
-
-      // Status Implementasi per Posisi
-      const posMap: Record<string, { belumMenerima: number; tidakMenerapkan: number; sebagian: number; sudah: number; total: number }> = {};
-      respondents.forEach(r => {
-        let pos = (r.posisi || 'Guru').trim();
-        // Clean long free-text position answers
-        if (pos.length > 25) {
-          if (pos.toLowerCase().includes('guru kelas 1')) pos = 'Guru Kelas 1';
-          else if (pos.toLowerCase().includes('guru kelas 2')) pos = 'Guru Kelas 2';
-          else if (pos.toLowerCase().includes('guru kelas 3')) pos = 'Guru Kelas 3';
-          else if (pos.toLowerCase().includes('guru kelas 4')) pos = 'Guru Kelas 4';
-          else if (pos.toLowerCase().includes('guru kelas 5')) pos = 'Guru Kelas 5';
-          else if (pos.toLowerCase().includes('guru kelas 6')) pos = 'Guru Kelas 6';
-          else if (pos.toLowerCase().includes('pjok')) pos = 'Guru PJOK';
-          else if (pos.toLowerCase().includes('kepala sekolah')) pos = 'Kepala Sekolah';
-          else pos = pos.slice(0, 22) + '...';
-        }
-        if (!posMap[pos]) posMap[pos] = { belumMenerima: 0, tidakMenerapkan: 0, sebagian: 0, sudah: 0, total: 0 };
-        posMap[pos].total++;
-        if (r.penerima === 'Tidak') posMap[pos].belumMenerima++;
-        else if (r.statusImplementasi === 'sudah') posMap[pos].sudah++;
-        else if (r.statusImplementasi === 'sebagian') posMap[pos].sebagian++;
-        else posMap[pos].tidakMenerapkan++;
-      });
-
-      let statusImplementasiPosisi = Object.keys(posMap).map(p => {
-        const item = posMap[p];
-        const tot = item.total || 1;
         return {
-          posisi: p,
-          belumMenerima: Math.round((item.belumMenerima / tot) * 100),
-          tidakMenerapkan: Math.round((item.tidakMenerapkan / tot) * 100),
-          sebagian: Math.round((item.sebagian / tot) * 100),
-          sudah: Math.round((item.sudah / tot) * 100)
+          proporsiPenerima,
+          distribusiPerKecamatan,
+          penyelenggaraPelatihan: d.penyelenggaraPelatihan || [],
+          statusImplementasiPosisi,
+          statusImplementasiKecamatan,
+          kemudahanModul: d.kemudahanModul || { kelasAwal: { mudah: [], sulit: [] }, kelasTinggi: { mudah: [], sulit: [] } },
+          mediaPembelajaran: d.mediaPembelajaran || { kelasAwal: [], kelasTinggi: [] },
+          keterlibatanSiswa: d.keterlibatanSiswa || [],
+          refleksiGuru: d.refleksiGuru || [],
+          dukunganKepsek: d.dukunganKepsek || [],
+          rencanaAksi: d.rencanaAksi || [],
+          kondisiFasilitas: d.kondisiFasilitas || [],
+          rasioGuruSiswa: d.rasioGuruSiswa || [],
+          kelayakanRuangKelas: d.kelayakanRuangKelas || [],
         };
-      }).slice(0, 10);
-
-      if (statusImplementasiPosisi.length === 0) {
-        statusImplementasiPosisi = [
-          { posisi: 'Kepala Sekolah', belumMenerima: 15, tidakMenerapkan: 5, sebagian: 30, sudah: 50 },
-          { posisi: 'Guru Kelas Awal (1-3)', belumMenerima: 25, tidakMenerapkan: 10, sebagian: 35, sudah: 30 },
-          { posisi: 'Guru Kelas Tinggi (4-6)', belumMenerima: 30, tidakMenerapkan: 12, sebagian: 32, sudah: 26 },
-          { posisi: 'Guru Mapel / PJOK', belumMenerima: 40, tidakMenerapkan: 15, sebagian: 28, sudah: 17 }
-        ];
       }
+    } catch (err) {
+      console.warn('[data-source] getProporsiModulData API error:', err);
+    }
 
-      // Status Implementasi per Kecamatan
-      const kecImplMap: Record<string, { belumMenerima: number; tidakMenerapkan: number; sebagian: number; sudah: number; total: number }> = {};
-      respondents.forEach(r => {
-        let kec = (r.kecamatan || '').trim();
-        if (!kec) return;
-        if (kec.length > 25) {
-          kec = kec.slice(0, 22) + '...';
-        }
-        if (!kecImplMap[kec]) kecImplMap[kec] = { belumMenerima: 0, tidakMenerapkan: 0, sebagian: 0, sudah: 0, total: 0 };
-        kecImplMap[kec].total++;
-        if (r.penerima === 'Tidak') kecImplMap[kec].belumMenerima++;
-        else if (r.statusImplementasi === 'sudah') kecImplMap[kec].sudah++;
-        else if (r.statusImplementasi === 'sebagian') kecImplMap[kec].sebagian++;
-        else kecImplMap[kec].tidakMenerapkan++;
-      });
-
-      let statusImplementasiKecamatan = Object.keys(kecImplMap).map(k => {
-        const item = kecImplMap[k];
-        const tot = item.total || 1;
-        return {
-          kecamatan: k,
-          belumMenerima: Math.round((item.belumMenerima / tot) * 100),
-          tidakMenerapkan: Math.round((item.tidakMenerapkan / tot) * 100),
-          sebagian: Math.round((item.sebagian / tot) * 100),
-          sudah: Math.round((item.sudah / tot) * 100)
-        };
-      }).slice(0, 10);
-
-      if (statusImplementasiKecamatan.length === 0) {
-        statusImplementasiKecamatan = distribusiPerKecamatan.map((d, i) => ({
-          kecamatan: d.kecamatan,
-          belumMenerima: d.tidak,
-          tidakMenerapkan: 10,
-          sebagian: 30 + (i * 3) % 15,
-          sudah: Math.max(0, d.ya - 10 - ((i * 3) % 15))
-        }));
-      }
-
-      const data: ProporsiModulData = {
-        proporsiPenerima: { ya: yaPercent, tidak: tidakPercent, totalResponden },
-        distribusiPerKecamatan,
-        penyelenggaraPelatihan,
-        statusImplementasiPosisi,
-        statusImplementasiKecamatan,
-        kemudahanModul: {
-          kelasAwal: {
-            mudah: [
-              { modul: 'Alur 1: Tema 1-5 (Tubuhku & Karakter)', persen: 72 },
-              { modul: 'Alur 2: Tema 6-7 (Keunikan & Emosi)', persen: 65 },
-              { modul: 'Alur 3: Tema 8-10 (Jaga Diri & Literasi)', persen: 58 },
-            ],
-            sulit: [
-              { modul: 'Alur 1: Tema 1-5 (Tubuhku & Karakter)', persen: 28 },
-              { modul: 'Alur 2: Tema 6-7 (Keunikan & Emosi)', persen: 35 },
-              { modul: 'Alur 3: Tema 8-10 (Jaga Diri & Literasi)', persen: 42 },
-            ],
-          },
-          kelasTinggi: {
-            mudah: [
-              { modul: 'Alur 1: Tema 1-4 (Perasaan & Afirmasi)', persen: 68 },
-              { modul: 'Alur 2: Tema 5-9 (Persahabatan & Tanggung Jawab)', persen: 62 },
-              { modul: 'Alur 3: Tema 10-12 (Kampanye & Refleksi)', persen: 54 },
-            ],
-            sulit: [
-              { modul: 'Alur 1: Tema 1-4 (Perasaan & Afirmasi)', persen: 32 },
-              { modul: 'Alur 2: Tema 5-9 (Persahabatan & Tanggung Jawab)', persen: 38 },
-              { modul: 'Alur 3: Tema 10-12 (Kampanye & Refleksi)', persen: 46 },
-            ],
-          },
-        },
-        mediaPembelajaran: {
-          kelasAwal: [
-            { media: 'Kartu Afirmasi Positif & Emosi', persen: 82 },
-            { media: 'Video & LKPD Interaktif', persen: 74 },
-            { media: 'Poster Menjaga Diri & Area Pribadi', persen: 68 },
-            { media: 'Papan Ular Tangga & Puzzle Tubuhku', persen: 56 },
-            { media: 'Stiker Emoji & Roda Emosi', persen: 48 },
-          ],
-          kelasTinggi: [
-            { media: 'Peta Tubuh & Kartu Cerita', persen: 78 },
-            { media: 'Video & Media Gambar', persen: 72 },
-            { media: 'Kartu Berhenti, Berpikir & Bertindak', persen: 64 },
-            { media: 'Poster Hak Anak & Kampanye', persen: 58 },
-            { media: 'Buku Cerita & Stiker Pembaca', persen: 45 },
-          ],
-        },
-        keterlibatanSiswa: [
-          { kategori: 'Sangat Aktif (>70% partisipasi)', persen: 38, jumlah: Math.round(totalResponden * 0.38) },
-          { kategori: 'Aktif (50-70% partisipasi)', persen: 42, jumlah: Math.round(totalResponden * 0.42) },
-          { kategori: 'Kurang Aktif (<50% partisipasi)', persen: 20, jumlah: Math.round(totalResponden * 0.20) },
-        ],
-        refleksiGuru: [
-          'Siswa menjadi jauh lebih terbuka menyampaikan emosi dan perasaan setelah penerapan media Kartu Roda Emosi.',
-          'Pembiasaan kesepakatan kelas terbukti menekan angka perundungan verbal di kalangan siswa.',
-          'Diperlukan pendampingan berkala bagi sekolah yang belum mengimplementasikan modul secara penuh.',
-          'Refleksi rutin antara guru dan kepala sekolah meningkatkan kesepahaman strategi manajemen kelas aman.',
-        ],
-        dukunganKepsek: [
-          { metode: 'Memimpin Refleksi Guru Berkala', jumlah: Math.round(totalResponden * 0.65) },
-          { metode: 'Sosialisasi BSAN ke Wali Murid', jumlah: Math.round(totalResponden * 0.58) },
-          { metode: 'Membangun Kolaborasi Pihak Luar', jumlah: Math.round(totalResponden * 0.45) },
-          { metode: 'Integrasi Kurikulum BSAN', jumlah: Math.round(totalResponden * 0.40) },
-        ],
-        rencanaAksi: [
-          { program: 'Menyusun SOP Pencegahan Kekerasan', jumlah: Math.round(totalResponden * 0.72) },
-          { program: 'Membentuk Tim TPKK Sekolah', jumlah: Math.round(totalResponden * 0.68) },
-          { program: 'Program Pembiasaan Karakter Harian', jumlah: Math.round(totalResponden * 0.62) },
-          { program: 'Kotak Aduan & Poster Sekolah Aman', jumlah: Math.round(totalResponden * 0.55) },
-        ],
-        kondisiFasilitas: distribusiPerKecamatan.map((d, i) => ({
-          kecamatan: d.kecamatan,
-          baik: 70 + (i * 4) % 20,
-          cukup: 15 + (i * 2) % 10,
-          rusak: 15 - (i * 3) % 10
-        })),
-        rasioGuruSiswa: distribusiPerKecamatan.map((d, i) => ({
-          kecamatan: d.kecamatan,
-          rasio: 18 + (i * 3) % 12
-        })),
-        kelayakanRuangKelas: distribusiPerKecamatan.map((d, i) => ({
-          kecamatan: d.kecamatan,
-          rombel: 60 + i * 10,
-          kelasLayak: Math.round((60 + i * 10) * (0.85 + (i % 3) * 0.04)),
-          persentase: Math.round(85 + (i % 3) * 4)
-        }))
-      };
-
-      setTimeout(() => resolve(data), 100);
-    });
+    // Empty fallback
+    return {
+      proporsiPenerima: { ya: 0, tidak: 0, totalResponden: 0 },
+      distribusiPerKecamatan: [],
+      penyelenggaraPelatihan: [],
+      statusImplementasiPosisi: [],
+      statusImplementasiKecamatan: [],
+      kemudahanModul: { kelasAwal: { mudah: [], sulit: [] }, kelasTinggi: { mudah: [], sulit: [] } },
+      mediaPembelajaran: { kelasAwal: [], kelasTinggi: [] },
+      keterlibatanSiswa: [],
+      refleksiGuru: [],
+      dukunganKepsek: [],
+      rencanaAksi: [],
+      kondisiFasilitas: [],
+      rasioGuruSiswa: [],
+      kelayakanRuangKelas: [],
+    };
   },
+
 
   // ─── SEL API Functions ───────────────────────────────────────
 
@@ -1191,12 +957,9 @@ export const database = {
         return res.data;
       }
     } catch (err) {
-      console.warn('[data-source] getSELScores fallback:', err);
+      console.warn('[data-source] getSELScores API error:', err);
     }
-
-    return SEL_MOCK_SESSIONS
-      .filter(s => !filters?.kabupaten || s.kabupaten === filters.kabupaten)
-      .map(s => computeSELScore(s));
+    return [];
   },
 
   getSELHeatmap: async (kabupaten?: string): Promise<SELHeatmapRow[]> => {
@@ -1219,45 +982,9 @@ export const database = {
         }));
       }
     } catch (err) {
-      console.warn('[data-source] getSELHeatmap fallback:', err);
+      console.warn('[data-source] getSELHeatmap API error:', err);
     }
-
-    const mockScores = SEL_MOCK_SESSIONS.map(s => computeSELScore(s));
-    const kecMap: Record<string, { total: number; sum: number; dimSum: Record<SELDimensi, number>; count: number; kabupaten: string }> = {};
-    mockScores.forEach(sc => {
-      if (!kecMap[sc.kecamatan]) {
-        kecMap[sc.kecamatan] = {
-          total: 0,
-          sum: 0,
-          count: 0,
-          kabupaten: sc.kabupaten,
-          dimSum: { kesadaran_diri: 0, regulasi_emosi: 0, kesadaran_sosial: 0, keterampilan_relasi: 0, tanggung_jawab: 0 }
-        };
-      }
-      kecMap[sc.kecamatan].count++;
-      kecMap[sc.kecamatan].sum += sc.totalRata;
-      sc.dimensi.forEach(d => {
-        kecMap[sc.kecamatan].dimSum[d.dimensi] += d.rataRata;
-      });
-    });
-
-    return Object.keys(kecMap).map(k => {
-      const item = kecMap[k];
-      const cnt = item.count || 1;
-      return {
-        kecamatan: k,
-        kabupaten: item.kabupaten,
-        jumlahSekolah: cnt,
-        dimensiScores: {
-          kesadaran_diri: Math.round((item.dimSum.kesadaran_diri / cnt) * 100) / 100,
-          regulasi_emosi: Math.round((item.dimSum.regulasi_emosi / cnt) * 100) / 100,
-          kesadaran_sosial: Math.round((item.dimSum.kesadaran_sosial / cnt) * 100) / 100,
-          keterampilan_relasi: Math.round((item.dimSum.keterampilan_relasi / cnt) * 100) / 100,
-          tanggung_jawab: Math.round((item.dimSum.tanggung_jawab / cnt) * 100) / 100,
-        },
-        rataRata: Math.round((item.sum / cnt) * 100) / 100,
-      };
-    });
+    return [];
   },
 
   getSELMatriksData: async (filters?: {
@@ -1280,20 +1007,9 @@ export const database = {
         }));
       }
     } catch (err) {
-      console.warn('[data-source] getSELMatriksData fallback:', err);
+      console.warn('[data-source] getSELMatriksData API error:', err);
     }
-
-    const mockScores = SEL_MOCK_SESSIONS.map(s => computeSELScore(s));
-    return mockScores.map(sc => ({
-      id: sc.sekolahId,
-      name: sc.sekolahNama,
-      kecamatan: sc.kecamatan,
-      kuisionerScore: sc.kuisionerScore,
-      selScore: sc.totalRata,
-      guruSkor: sc.guruTotal,
-      muridSkor: sc.muridTotal,
-      status: sc.kuisionerScore >= 60 ? 'sudah' : 'sebagian',
-    }));
+    return [];
   },
 
   getSELSummaryStats: async (): Promise<{
@@ -1315,16 +1031,9 @@ export const database = {
         };
       }
     } catch (err) {
-      console.warn('[data-source] getSELSummaryStats fallback:', err);
+      console.warn('[data-source] getSELSummaryStats API error:', err);
     }
-
-    const scores = SEL_MOCK_SESSIONS.map(s => computeSELScore(s));
-    const totalDiobservasi = scores.length;
-    const rataGuruAll = Math.round((scores.reduce((a, b) => a + b.guruTotal, 0) / (totalDiobservasi || 1)) * 10) / 10;
-    const rataMuridAll = Math.round((scores.reduce((a, b) => a + b.muridTotal, 0) / (totalDiobservasi || 1)) * 10) / 10;
-    const butuhIntervensi = scores.filter(s => s.totalRata < 2.5).length;
-    const topSekolah = scores.sort((a, b) => b.totalRata - a.totalRata)[0]?.sekolahNama || '-';
-    return { totalDiobservasi, rataGuruAll, rataMuridAll, butuhIntervensi, topSekolah };
+    return { totalDiobservasi: 0, rataGuruAll: 0, rataMuridAll: 0, butuhIntervensi: 0, topSekolah: '-' };
   },
 
   saveObservasiSEL: async (session: Omit<SELObservasiSession, 'id'>): Promise<SELObservasiSession> => {
