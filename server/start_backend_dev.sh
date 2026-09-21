@@ -9,35 +9,6 @@ LOG="/home/devsurvasi/htdocs/noc.survasi.com/server/debug.log"
 DIR="/home/devsurvasi/htdocs/noc.survasi.com/server"
 PIDFILE="/home/devsurvasi/htdocs/noc.survasi.com/server/.node.pid"
 
-# Cek apakah server sudah jalan via PID atau Port 3001
-if [ -f "$PIDFILE" ]; then
-    PID=$(cat "$PIDFILE")
-    if kill -0 "$PID" 2>/dev/null; then
-        exit 0
-    fi
-fi
-
-# Cek apakah port 3001 sudah aktif (berarti server sudah nyala)
-PORT=${PORT:-3001}
-if netstat -tuln 2>/dev/null | grep -q ":$PORT " || ss -tuln 2>/dev/null | grep -q ":$PORT "; then
-    echo "=== $(date) — Server already running on port $PORT ===" >> "$LOG"
-    exit 0
-fi
-
-echo "=== $(date) — Starting Dev Server ===" >> "$LOG"
-
-# 1. Cari Node.js dari NVM
-NODE_BIN=$(find /home/devsurvasi/.nvm -name 'node' -type f 2>/dev/null | head -1)
-NPM_BIN="$(dirname "$NODE_BIN")/npm"
-export PATH="$(dirname "$NODE_BIN"):$PATH"
-
-echo "Node: $NODE_BIN" >> "$LOG"
-
-if [ -z "$NODE_BIN" ]; then
-    echo "GAGAL: Node.js tidak ditemukan!" >> "$LOG"
-    exit 1
-fi
-
 # 2. Masuk ke folder server
 cd "$DIR" || exit 1
 
@@ -45,6 +16,33 @@ cd "$DIR" || exit 1
 if [ -f ".env.development" ]; then
     cp .env.development .env
     echo "Using .env.development (dbnocsurvasi)" >> "$LOG"
+fi
+
+# Extract PORT from .env (default 3002)
+PORT=$(grep -E '^PORT=' .env 2>/dev/null | cut -d '=' -f2 | tr -d '\r"' "'")
+PORT=${PORT:-3002}
+
+# Cek apakah server sudah jalan via PID atau PORT
+if [ -f "$PIDFILE" ]; then
+    PID=$(cat "$PIDFILE")
+    if kill -0 "$PID" 2>/dev/null; then
+        exit 0
+    fi
+fi
+
+if netstat -tuln 2>/dev/null | grep -q ":$PORT " || ss -tuln 2>/dev/null | grep -q ":$PORT "; then
+    echo "=== $(date) — Server already running on port $PORT ===" >> "$LOG"
+    exit 0
+fi
+
+# Cari Node.js dari NVM
+NODE_BIN=$(find /home/devsurvasi/.nvm -name 'node' -type f 2>/dev/null | head -1)
+NPM_BIN="$(dirname "$NODE_BIN")/npm"
+export PATH="$(dirname "$NODE_BIN"):$PATH"
+
+if [ -z "$NODE_BIN" ]; then
+    echo "GAGAL: Node.js tidak ditemukan!" >> "$LOG"
+    exit 1
 fi
 
 # 4. Install dependencies (hanya kalau node_modules belum ada)

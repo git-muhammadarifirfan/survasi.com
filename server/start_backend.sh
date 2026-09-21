@@ -9,7 +9,14 @@ LOG="/home/survasi/htdocs/survasi.com/server/debug.log"
 DIR="/home/survasi/htdocs/survasi.com/server"
 PIDFILE="/home/survasi/htdocs/survasi.com/server/.node.pid"
 
-# Cek apakah server sudah jalan via PID atau Port 3001
+# 2. Masuk ke folder server
+cd "$DIR" || exit 1
+
+# Extract PORT from .env if present (default 3001)
+PORT=$(grep -E '^PORT=' .env 2>/dev/null | cut -d '=' -f2 | tr -d '\r"' "'")
+PORT=${PORT:-3001}
+
+# Cek apakah server sudah jalan via PID atau PORT
 if [ -f "$PIDFILE" ]; then
     PID=$(cat "$PIDFILE")
     if kill -0 "$PID" 2>/dev/null; then
@@ -17,8 +24,6 @@ if [ -f "$PIDFILE" ]; then
     fi
 fi
 
-# Cek apakah port 3001 sudah aktif (berarti server sudah nyala)
-PORT=${PORT:-3001}
 if netstat -tuln 2>/dev/null | grep -q ":$PORT " || ss -tuln 2>/dev/null | grep -q ":$PORT "; then
     echo "=== $(date) — Server already running on port $PORT ===" >> "$LOG"
     exit 0
