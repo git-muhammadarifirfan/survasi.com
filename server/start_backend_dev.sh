@@ -9,13 +9,19 @@ LOG="/home/devsurvasi/htdocs/noc.survasi.com/server/debug.log"
 DIR="/home/devsurvasi/htdocs/noc.survasi.com/server"
 PIDFILE="/home/devsurvasi/htdocs/noc.survasi.com/server/.node.pid"
 
-# Cek apakah server sudah jalan
+# Cek apakah server sudah jalan via PID atau Port 3001
 if [ -f "$PIDFILE" ]; then
     PID=$(cat "$PIDFILE")
     if kill -0 "$PID" 2>/dev/null; then
-        # Server masih jalan, skip
         exit 0
     fi
+fi
+
+# Cek apakah port 3001 sudah aktif (berarti server sudah nyala)
+PORT=${PORT:-3001}
+if netstat -tuln 2>/dev/null | grep -q ":$PORT " || ss -tuln 2>/dev/null | grep -q ":$PORT "; then
+    echo "=== $(date) — Server already running on port $PORT ===" >> "$LOG"
+    exit 0
 fi
 
 echo "=== $(date) — Starting Dev Server ===" >> "$LOG"
