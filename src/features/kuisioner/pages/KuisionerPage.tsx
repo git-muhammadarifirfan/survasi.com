@@ -267,17 +267,17 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
       };
 
       const q4Val = getAnsByCode('Q4');
-      const matchedSchool = dbSchoolsList.find(s => s.nama === q4Val || s.npsn === q4Val || s.id === Number(q4Val))
-        || (userProfile?.sekolah_id ? dbSchoolsList.find(s => s.id === userProfile.sekolah_id) : null);
+      const matchedSchool = dbSchoolsList.find(s => s.nama === q4Val || s.npsn === q4Val || String(s.id) === String(q4Val))
+        || (userProfile?.sekolah_id ? dbSchoolsList.find(s => String(s.id) === String(userProfile.sekolah_id)) : null);
 
       const payload = {
         nama: getAnsByCode('Q1') || userProfile?.nama || 'Responden Survei',
         jenis_kelamin: getAnsByCode('Q2') === 'Perempuan' ? 'P' : 'L',
         posisi: getAnsByCode('Q3') || userProfile?.jabatan || 'Guru Kelas',
-        sekolah_id: matchedSchool?.id || userProfile?.sekolah_id || null,
+        sekolah_id: matchedSchool ? Number(matchedSchool.id) : (userProfile?.sekolah_id || null),
         npsn: matchedSchool?.npsn || (typeof q4Val === 'string' && q4Val.length <= 20 ? q4Val : null),
-        kabupaten_id: matchedSchool?.kabupaten_id || userProfile?.kabupaten_id || 1,
-        kecamatan_id: matchedSchool?.kecamatan_id || userProfile?.kecamatan_id || 1,
+        kabupaten_id: userProfile?.kabupaten_id || 1,
+        kecamatan_id: userProfile?.kecamatan_id || 1,
         penerima_modul: getAnsByCode('Q7') || 'Ya',
         penyelenggara_pelatihan: getAnsByCode('Q8'),
         status_implementasi: getAnsByCode('Q9') || 'sudah',
