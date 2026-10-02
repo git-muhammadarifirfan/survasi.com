@@ -174,8 +174,8 @@ export interface SELDimensiScore {
   label: string;
   guruSkor: number;
   muridSkor: number;
-  kelasSkor?: number;
-  lingkunganSkor?: number;
+  kelasSkor?: number | null;
+  lingkunganSkor?: number | null;
   rataRata: number;
 }
 
@@ -953,8 +953,9 @@ export const database = {
     try {
       const kabId = filters?.kabupaten ? KABUPATEN_NAME_TO_ID[filters.kabupaten] : undefined;
       const res = await apiClient.sel.getScores(kabId);
-      if (res?.success && Array.isArray(res.data)) {
-        return res.data;
+      if (res?.success && Array.isArray(res.data) && res.data.length > 0) {
+        // Backend /analisis/scores already returns fully formatted SELSchoolScore[]
+        return res.data as SELSchoolScore[];
       }
     } catch (err) {
       console.warn('[data-source] getSELScores API error:', err);
@@ -1020,14 +1021,15 @@ export const database = {
     topSekolah: string;
   }> => {
     try {
-      const res = await apiClient.sel.getSummary();
+      // Use /sel/summary-stats which has totalDiobservasi, rataGuruAll, rataMuridAll, butuhIntervensi, topSekolah
+      const res = await apiClient.sel.getSummaryStats();
       if (res?.success && res.data) {
         return {
-          totalDiobservasi: Number(res.data.total_sesi ?? res.data.total_diobservasi ?? 0),
-          rataGuruAll: Number(res.data.rata_guru ?? res.data.rata_guru_all ?? 0),
-          rataMuridAll: Number(res.data.rata_murid ?? res.data.rata_murid_all ?? 0),
-          butuhIntervensi: Number(res.data.butuh_intervensi ?? 0),
-          topSekolah: res.data.top_sekolah || '-',
+          totalDiobservasi: Number(res.data.totalDiobservasi ?? res.data.total_diobservasi ?? res.data.total_sesi ?? 0),
+          rataGuruAll: parseFloat(String(res.data.rataGuruAll ?? res.data.rata_guru ?? 0)),
+          rataMuridAll: parseFloat(String(res.data.rataMuridAll ?? res.data.rata_murid ?? 0)),
+          butuhIntervensi: Number(res.data.butuhIntervensi ?? res.data.butuh_intervensi ?? 0),
+          topSekolah: res.data.topSekolah || res.data.top_sekolah || '-',
         };
       }
     } catch (err) {

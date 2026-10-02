@@ -242,36 +242,49 @@ export default function AnalisisSEL() {
   });
   const stats = statsRes;
 
-  // Aggregated radar: rata-rata semua sekolah
+  // Aggregated radar: rata-rata semua sekolah (hanya skor valid > 0 dari database)
   const avgRadarData = SEL_DIMENSI_ORDER.map(d => {
-    const guruVals = scores.map(s => s.dimensi.find(dd => dd.dimensi === d)?.guruSkor || 0);
-    const muridVals = scores.map(s => s.dimensi.find(dd => dd.dimensi === d)?.muridSkor || 0);
-    const avgGuru  = scores.length ? Math.round((guruVals.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : 0;
-    const avgMurid = scores.length ? Math.round((muridVals.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : 0;
+    const guruVals = scores.map(s => s.dimensi.find(dd => dd.dimensi === d)?.guruSkor || 0).filter(v => v > 0);
+    const muridVals = scores.map(s => s.dimensi.find(dd => dd.dimensi === d)?.muridSkor || 0).filter(v => v > 0);
+    const avgGuru  = guruVals.length ? Math.round((guruVals.reduce((a, b) => a + b, 0) / guruVals.length) * 10) / 10 : 0;
+    const avgMurid = muridVals.length ? Math.round((muridVals.reduce((a, b) => a + b, 0) / muridVals.length) * 10) / 10 : 0;
     return { subject: SEL_DIMENSI_LABEL[d], Guru: avgGuru, Murid: avgMurid, fullMark: 4 };
   });
 
-  // Bar chart 1: avg per dimensi, guru vs murid
+  // Bar chart 1: avg per dimensi, guru vs murid (hanya skor valid > 0 dari database)
   const barData = SEL_DIMENSI_ORDER.map(d => {
-    const guruVals = scores.map(s => s.dimensi.find(dd => dd.dimensi === d)?.guruSkor || 0);
-    const muridVals = scores.map(s => s.dimensi.find(dd => dd.dimensi === d)?.muridSkor || 0);
+    const guruVals = scores.map(s => s.dimensi.find(dd => dd.dimensi === d)?.guruSkor || 0).filter(v => v > 0);
+    const muridVals = scores.map(s => s.dimensi.find(dd => dd.dimensi === d)?.muridSkor || 0).filter(v => v > 0);
     return {
       dimensi: SEL_DIMENSI_LABEL[d].split(' ')[0], // short
-      Guru: scores.length ? Math.round((guruVals.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : 0,
-      Murid: scores.length ? Math.round((muridVals.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : 0,
+      Guru: guruVals.length ? Math.round((guruVals.reduce((a, b) => a + b, 0) / guruVals.length) * 10) / 10 : 0,
+      Murid: muridVals.length ? Math.round((muridVals.reduce((a, b) => a + b, 0) / muridVals.length) * 10) / 10 : 0,
     };
   });
 
   // Bar chart 2: avg per dimensi, kelas vs lingkungan sekolah
+  // Only include non-zero konteks scores from database; show 0 if not available
   const konteksBarData = SEL_DIMENSI_ORDER.map(d => {
-    const kelasVals = scores.map(s => s.dimensi.find(dd => dd.dimensi === d)?.kelasSkor ?? s.dimensi.find(dd => dd.dimensi === d)?.rataRata ?? 0);
-    const lingVals = scores.map(s => s.dimensi.find(dd => dd.dimensi === d)?.lingkunganSkor ?? s.dimensi.find(dd => dd.dimensi === d)?.rataRata ?? 0);
+    const kelasVals = scores
+      .map(s => s.dimensi.find(dd => dd.dimensi === d)?.kelasSkor ?? null)
+      .filter((v): v is number => v !== null && v > 0);
+    const lingVals = scores
+      .map(s => s.dimensi.find(dd => dd.dimensi === d)?.lingkunganSkor ?? null)
+      .filter((v): v is number => v !== null && v > 0);
     return {
       dimensi: SEL_DIMENSI_LABEL[d].split(' ')[0], // short
-      Kelas: scores.length ? Math.round((kelasVals.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : 0,
-      'Lingkungan Sekolah': scores.length ? Math.round((lingVals.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10 : 0,
+      dimensiFull: SEL_DIMENSI_LABEL[d],
+      Kelas: kelasVals.length ? Math.round((kelasVals.reduce((a, b) => a + b, 0) / kelasVals.length) * 10) / 10 : 0,
+      'Lingkungan Sekolah': lingVals.length ? Math.round((lingVals.reduce((a, b) => a + b, 0) / lingVals.length) * 10) / 10 : 0,
     };
   });
+
+  // Summary stats for kelas vs lingkungan
+  const totalKelasScores = scores.flatMap(s => s.dimensi.map(d => d.kelasSkor ?? null)).filter((v): v is number => v !== null && v > 0);
+  const totalLingkunganScores = scores.flatMap(s => s.dimensi.map(d => d.lingkunganSkor ?? null)).filter((v): v is number => v !== null && v > 0);
+  const avgKelas = totalKelasScores.length ? Math.round((totalKelasScores.reduce((a, b) => a + b, 0) / totalKelasScores.length) * 10) / 10 : 0;
+  const avgLingkungan = totalLingkunganScores.length ? Math.round((totalLingkunganScores.reduce((a, b) => a + b, 0) / totalLingkunganScores.length) * 10) / 10 : 0;
+  const hasKonteksData = totalKelasScores.length > 0 || totalLingkunganScores.length > 0;
 
   // Cross validation quadrant counts
   const q1 = matriksData.filter(p => p.kuisionerScore >= 60 && p.selScore >= 2.5).length;
@@ -423,7 +436,7 @@ export default function AnalisisSEL() {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-sm font-bold text-text-primary font-display mb-0.5">Perilaku di Kelas vs Lingkungan Sekolah</h3>
-                <p className="text-[11px] text-text-secondary">Perbandingan skor rata-rata observasi berdasarkan lokasi/konteks (skala 1–4)</p>
+                <p className="text-[11px] text-text-secondary">Perbandingan skor rata-rata observasi berdasarkan lokasi/konteks — data real database (skala 1–4)</p>
               </div>
               <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
                 Konteks Observasi
@@ -437,7 +450,11 @@ export default function AnalisisSEL() {
                   <YAxis domain={[0, 4]} tickFormatter={v => v.toFixed(1)} tick={{ fill: 'var(--color-text-secondary)', fontSize: 10 }} />
                   <Tooltip
                     contentStyle={{ backgroundColor: 'var(--color-surface)', borderColor: 'var(--color-border)', borderRadius: 12, fontSize: 12 }}
-                    formatter={(v: any) => [`${v}/4`, '']}
+                    formatter={(v: any, name: any) => [`${Number(v).toFixed(2)}/4`, name]}
+                    labelFormatter={(label) => {
+                      const found = konteksBarData.find(d => d.dimensi === label);
+                      return found?.dimensiFull || label;
+                    }}
                   />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Bar dataKey="Kelas" fill="#6366F1" radius={[4, 4, 0, 0]} />
@@ -445,6 +462,40 @@ export default function AnalisisSEL() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+            {/* Summary stats per konteks dari database */}
+            {hasKonteksData ? (
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className="bg-indigo-500/8 border border-indigo-500/20 rounded-xl p-3 flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] font-bold text-text-secondary uppercase tracking-wider">Rata-rata Di Kelas</div>
+                    <div className="text-lg font-black text-indigo-600 dark:text-indigo-400 font-display">
+                      {avgKelas.toFixed(2)}<span className="text-xs text-text-secondary font-normal">/4</span>
+                    </div>
+                    <div className="text-[9px] text-text-secondary">{totalKelasScores.length} poin indikator kelas</div>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center">
+                    <BookOpen className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
+                  </div>
+                </div>
+                <div className="bg-amber-500/8 border border-amber-500/20 rounded-xl p-3 flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] font-bold text-text-secondary uppercase tracking-wider">Rata-rata Di Lingkungan</div>
+                    <div className="text-lg font-black text-amber-600 dark:text-amber-400 font-display">
+                      {avgLingkungan.toFixed(2)}<span className="text-xs text-text-secondary font-normal">/4</span>
+                    </div>
+                    <div className="text-[9px] text-text-secondary">{totalLingkunganScores.length} poin indikator lingkungan</div>
+                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center">
+                    <MapPin className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                  </div>
+                </div>
+              </div>
+            ) : scores.length > 0 ? (
+              <div className="mt-3 flex items-center gap-2 text-[10px] text-text-secondary bg-bg rounded-xl p-3 border border-border/50">
+                <Info className="h-3.5 w-3.5 text-primary shrink-0" />
+                <span>Data konteks kelas/lingkungan akan muncul setelah observer mengisi indikator dengan konteks berbeda (kelas dan lingkungan sekolah).</span>
+              </div>
+            ) : null}
           </div>
 
           {/* Summary Cards per Dimensi */}
