@@ -2,13 +2,24 @@ import React, { useState, useEffect } from 'react';
 import {
   User, Shield, Bell, Globe, Save, Lock, Key, RefreshCw, Check, CheckCircle2,
   AlertCircle, Eye, EyeOff, Laptop, Building2, Phone, Mail, FileText, BadgeCheck,
-  Send, Sparkles, ArrowRight, RotateCcw
+  Send, Sparkles, ArrowRight, RotateCcw, Target, Search, ChevronDown, ChevronUp
 } from 'lucide-react';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import { notifyToast } from '../../../shared/components/NotificationToast';
 import { apiClient } from '../../../shared/services/api-client';
 
-type SettingTabType = 'profile' | 'security' | 'notif' | 'pref';
+type SettingTabType = 'profile' | 'security' | 'notif' | 'pref' | 'target';
+
+interface TargetSchool {
+  id: number;
+  npsn: string;
+  nama: string;
+  target_observasi: number;
+  kecamatan: string;
+  kabupaten: string;
+  observasi_count: number;
+  _edited?: boolean;
+}
 
 export default function Setting() {
   const [userRole, setUserRole] = useState<'admin' | 'pengawas' | 'sekolah'>('admin');
@@ -50,6 +61,14 @@ export default function Setting() {
     theme: 'light',
     autoSaveInterval: 30,
   });
+
+  // Target Observasi State
+  const [targetDefault, setTargetDefault] = useState(2);
+  const [targetSchools, setTargetSchools] = useState<TargetSchool[]>([]);
+  const [targetLoading, setTargetLoading] = useState(false);
+  const [targetSaving, setTargetSaving] = useState(false);
+  const [targetSearch, setTargetSearch] = useState('');
+  const [applyToAll, setApplyToAll] = useState(false);
 
   // Resend Timer Countdown Effect
   useEffect(() => {
@@ -305,6 +324,95 @@ export default function Setting() {
     }
   };
 
+  // Fetch Target Observasi Data
+  const fetchTargetData = async () => {
+    setTargetLoading(true);
+    try {
+      const res = await apiClient.setting.getTargetObservasi();
+      if (res?.success && res?.data) {
+        setTargetDefault(res.data.default_target || 2);
+        setTargetSchools(
+          (res.data.schools || []).map((s: any) => ({
+            id: s.id,
+            npsn: s.npsn || '',
+            nama: s.nama || '',
+            target_observasi: s.target_observasi || 2,
+            kecamatan: s.kecamatan || '',
+            kabupaten: s.kabupaten || '',
+            observasi_count: Number(s.observasi_count || 0),
+            _edited: false,
+          }))
+        );
+      }
+    } catch (err: any) {
+      notifyToast({ type: 'error', title: 'Gagal Memuat', message: err.message || 'Gagal memuat data target observasi.' });
+    } finally {
+      setTargetLoading(false);
+    }
+  };
+
+  // Auto-fetch when target tab is selected
+  useEffect(() => {
+    if (activeTab === 'target' && userRole === 'admin' && targetSchools.length === 0) {
+      fetchTargetData();
+    }
+  }, [activeTab]);
+
+  // Save Global Default Target
+  const handleSaveGlobalTarget = async () => {
+    setTargetSaving(true);
+    try {
+      const res = await apiClient.setting.updateTargetObservasi({
+        default_target: targetDefault,
+        apply_to_all: applyToAll,
+      });
+      if (res?.success) {
+        notifyToast({ type: 'success', title: 'Berhasil', message: res.message });
+        if (applyToAll) {
+          setTargetSchools(prev => prev.map(s => ({ ...s, target_observasi: targetDefault, _edited: false })));
+        }
+      } else {
+        notifyToast({ type: 'error', title: 'Gagal', message: res?.message || 'Gagal menyimpan.' });
+      }
+    } catch (err: any) {
+      notifyToast({ type: 'error', title: 'Error', message: err.message || 'Gagal menyimpan target.' });
+    } finally {
+      setTargetSaving(false);
+    }
+  };
+
+  // Save Batch Per-School Target Changes
+  const handleSaveBatchTarget = async () => {
+    const edited = targetSchools.filter(s => s._edited);
+    if (edited.length === 0) return;
+    setTargetSaving(true);
+    try {
+      const res = await apiClient.setting.updateTargetObservasiBatch(
+        edited.map(s => ({ sekolah_id: s.id, target: s.target_observasi }))
+      );
+      if (res?.success) {
+        notifyToast({ type: 'success', title: 'Berhasil', message: res.message });
+        setTargetSchools(prev => prev.map(s => ({ ...s, _edited: false })));
+      } else {
+        notifyToast({ type: 'error', title: 'Gagal', message: res?.message || 'Gagal menyimpan.' });
+      }
+    } catch (err: any) {
+      notifyToast({ type: 'error', title: 'Error', message: err.message || 'Gagal menyimpan.' });
+    } finally {
+      setTargetSaving(false);
+    }
+  };
+
+  // Filter target schools by search
+  const filteredTargetSchools = targetSearch
+    ? targetSchools.filter(s =>
+        s.nama.toLowerCase().includes(targetSearch.toLowerCase()) ||
+        s.npsn.includes(targetSearch) ||
+        s.kecamatan.toLowerCase().includes(targetSearch.toLowerCase()) ||
+        s.kabupaten.toLowerCase().includes(targetSearch.toLowerCase())
+      )
+    : targetSchools;
+
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[400px] space-y-3">
@@ -350,6 +458,9 @@ export default function Setting() {
             { id: 'security', label: 'Keamanan & Sandi (OTP)', icon: Shield, desc: 'Verifikasi Email OTP' },
             { id: 'notif', label: 'Kanal Notifikasi', icon: Bell, desc: 'Email Alert & Laporan' },
             { id: 'pref', label: 'Preferensi Dasbor', icon: Globe, desc: 'Bahasa & Autotimer' },
+            ...(userRole === 'admin' ? [
+              { id: 'target', label: 'Target Observasi', icon: Target, desc: 'Atur Target per Sekolah' },
+            ] : []),
           ].map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -902,6 +1013,194 @@ export default function Setting() {
               </div>
             </div>
           )}
+
+          {/* ═══════════════════════════════════════════════════════════════
+              TAB 5: TARGET OBSERVASI (ADMIN ONLY)
+             ═══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'target' && userRole === 'admin' && (
+            <div className="space-y-6 text-xs animate-fade-in">
+              <div className="flex items-center justify-between border-b border-border pb-3">
+                <h3 className="font-bold text-sm text-text-primary font-display flex items-center space-x-2">
+                  <Target className="h-4 w-4 text-primary" />
+                  <span>Pengaturan Target Observasi SEL per Sekolah</span>
+                </h3>
+                <button
+                  type="button"
+                  onClick={fetchTargetData}
+                  disabled={targetLoading}
+                  className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-bg border border-border hover:border-primary text-text-secondary hover:text-primary transition cursor-pointer flex items-center gap-1"
+                >
+                  <RefreshCw className={`h-3 w-3 ${targetLoading ? 'animate-spin' : ''}`} />
+                  <span>Muat Ulang</span>
+                </button>
+              </div>
+
+              {/* Global Default Setting */}
+              <div className="p-4 rounded-2xl bg-primary/5 border border-primary/20 space-y-3">
+                <p className="font-bold text-xs text-primary flex items-center gap-1.5">
+                  <Target className="h-4 w-4" />
+                  <span>Target Default Observasi Global</span>
+                </p>
+                <p className="text-[11px] text-text-secondary leading-relaxed">
+                  Tentukan berapa kali <strong>minimum observasi SEL</strong> yang harus dilakukan per sekolah.
+                  Setiap sekolah bisa di-override secara individual di tabel bawah.
+                </p>
+                <div className="flex flex-wrap items-end gap-3">
+                  <div className="space-y-1">
+                    <label className="font-bold text-text-secondary uppercase text-[10px]">Default Target</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={targetDefault}
+                        onChange={e => setTargetDefault(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))}
+                        className="w-20 rounded-xl border border-border bg-bg px-3 py-2.5 text-xs text-text-primary focus:border-primary focus:outline-none text-center font-bold"
+                      />
+                      <span className="text-text-secondary font-medium">kali observasi</span>
+                    </div>
+                  </div>
+
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={applyToAll}
+                      onChange={e => setApplyToAll(e.target.checked)}
+                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary/20 cursor-pointer"
+                    />
+                    <span className="text-[11px] text-text-primary font-medium">Terapkan ke semua sekolah</span>
+                  </label>
+
+                  <button
+                    type="button"
+                    disabled={targetSaving}
+                    onClick={handleSaveGlobalTarget}
+                    className="flex items-center gap-1.5 rounded-xl bg-primary hover:bg-primary-dark disabled:bg-primary/70 text-white px-4 py-2.5 font-bold shadow-md shadow-primary/20 transition-all cursor-pointer text-[11px]"
+                  >
+                    {targetSaving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                    <span>Simpan Default</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Per-School Table */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-xs text-text-primary uppercase tracking-wider">Target per Sekolah</h4>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Cari sekolah..."
+                      value={targetSearch}
+                      onChange={e => setTargetSearch(e.target.value)}
+                      className="w-56 rounded-xl border border-border bg-bg pl-8 pr-3 py-2 text-[11px] text-text-primary focus:border-primary focus:outline-none"
+                    />
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-secondary" />
+                  </div>
+                </div>
+
+                {targetLoading ? (
+                  <div className="flex flex-col items-center justify-center py-12 space-y-2">
+                    <RefreshCw className="h-6 w-6 text-primary animate-spin" />
+                    <p className="text-[11px] text-text-secondary">Memuat data target...</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="rounded-xl border border-border overflow-hidden">
+                      <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
+                        <table className="w-full text-[11px]">
+                          <thead className="bg-bg/80 sticky top-0 z-10">
+                            <tr className="text-left text-text-secondary uppercase font-bold tracking-wider">
+                              <th className="px-3 py-2.5">Sekolah</th>
+                              <th className="px-3 py-2.5">Kecamatan</th>
+                              <th className="px-3 py-2.5">Kabupaten</th>
+                              <th className="px-3 py-2.5 text-center">Terisi</th>
+                              <th className="px-3 py-2.5 text-center">Target</th>
+                              <th className="px-3 py-2.5">Progress</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/60">
+                            {filteredTargetSchools.map((s) => {
+                              const pct = s.target_observasi > 0 ? Math.min(100, Math.round((s.observasi_count / s.target_observasi) * 100)) : 0;
+                              const isOver = s.observasi_count > s.target_observasi;
+                              const isDone = s.observasi_count >= s.target_observasi;
+                              return (
+                                <tr key={s.id} className={`hover:bg-bg/40 transition ${s._edited ? 'bg-amber-50/40' : ''}`}>
+                                  <td className="px-3 py-2">
+                                    <p className="font-bold text-text-primary">{s.nama}</p>
+                                    <p className="text-[10px] text-text-secondary">{s.npsn}</p>
+                                  </td>
+                                  <td className="px-3 py-2 text-text-secondary">{s.kecamatan}</td>
+                                  <td className="px-3 py-2 text-text-secondary">{s.kabupaten}</td>
+                                  <td className="px-3 py-2 text-center">
+                                    <span className={`font-extrabold ${isOver ? 'text-amber-600' : isDone ? 'text-emerald-600' : 'text-text-primary'}`}>
+                                      {s.observasi_count}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      max={20}
+                                      value={s.target_observasi}
+                                      onChange={e => {
+                                        const val = Math.max(1, Math.min(20, parseInt(e.target.value) || 1));
+                                        setTargetSchools(prev => prev.map(sc => sc.id === s.id ? { ...sc, target_observasi: val, _edited: true } : sc));
+                                      }}
+                                      className="w-14 rounded-lg border border-border bg-bg px-2 py-1.5 text-center font-bold text-text-primary focus:border-primary focus:outline-none"
+                                    />
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className="flex-1 h-1.5 bg-border rounded-full overflow-hidden min-w-[60px]">
+                                        <div
+                                          className={`h-full rounded-full transition-all ${isOver ? 'bg-amber-500' : isDone ? 'bg-emerald-500' : 'bg-primary'}`}
+                                          style={{ width: `${pct}%` }}
+                                        />
+                                      </div>
+                                      <span className={`text-[10px] font-bold whitespace-nowrap ${isOver ? 'text-amber-600' : isDone ? 'text-emerald-600' : 'text-text-secondary'}`}>
+                                        {s.observasi_count}/{s.target_observasi}
+                                      </span>
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            {filteredTargetSchools.length === 0 && (
+                              <tr>
+                                <td colSpan={6} className="px-3 py-8 text-center text-text-secondary">
+                                  {targetSearch ? 'Tidak ada sekolah yang cocok.' : 'Belum ada data sekolah.'}
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Batch Save */}
+                    {targetSchools.some(s => s._edited) && (
+                      <div className="flex items-center justify-between p-3 rounded-xl bg-amber-50 border border-amber-200">
+                        <p className="text-[11px] text-amber-800 font-medium">
+                          <strong>{targetSchools.filter(s => s._edited).length}</strong> sekolah dengan perubahan target belum disimpan.
+                        </p>
+                        <button
+                          type="button"
+                          disabled={targetSaving}
+                          onClick={handleSaveBatchTarget}
+                          className="flex items-center gap-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:bg-amber-600/70 text-white px-4 py-2 font-bold shadow-md transition-all cursor-pointer text-[11px]"
+                        >
+                          {targetSaving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                          <span>Simpan Perubahan</span>
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
 
         </div>
       </div>

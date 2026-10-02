@@ -1,0 +1,218 @@
+================================================================
+ANALISIS SEL — REVIEW CARA OLAH DATA PER BAGIAN
+Halaman: /analisis-sel
+Sistem: BSAN Jawa Timur Monitoring
+Tanggal Review: Oktober 2026
+================================================================
+
+
+================================================================
+NAVIGASI: OVERVIEW SEL
+================================================================
+
+Bagian ini menampilkan ringkasan besar kondisi SEL (Social Emotional
+Learning) dari seluruh sekolah yang sudah diobservasi.
+
+
+--- 1. HEADER STATS (Kartu Angka di Atas) ---
+   Sekolah Diobservasi | Rata-rata Skor Guru | Rata-rata Skor Murid | Butuh Intervensi
+
+   Cara Olah Data:
+   - Diambil dari endpoint: GET /api/sel/summary-stats
+   - Database menghitung langsung:
+     * Jumlah sekolah unik yang punya sesi observasi
+     * Rata-rata semua skor yang diisi guru (subjek = 'guru')
+     * Rata-rata semua skor yang diisi murid (subjek = 'murid')
+     * Jumlah sekolah dengan rata-rata skor di bawah 2.5 (kategori butuh intervensi)
+   - Skala skor: 1–4 (1=Tidak Terlihat, 2=Kadang, 3=Sering, 4=Konsisten)
+
+
+--- 2. RADAR 5 DIMENSI SEL ---
+   Grafik radar berbentuk laba-laba dengan 5 sudut (5 dimensi SEL):
+   Kesadaran Diri | Regulasi Emosi | Kesadaran Sosial | Keterampilan Relasi | Tanggung Jawab
+
+   Cara Olah Data:
+   - Diambil dari endpoint: GET /api/sel/analisis/scores
+   - Untuk setiap dimensi, sistem menghitung:
+     * Rata-rata skor GURU dari semua sekolah untuk dimensi tersebut
+     * Rata-rata skor MURID dari semua sekolah untuk dimensi tersebut
+   - Hanya skor > 0 yang dihitung (data kosong/null tidak diikutkan)
+   - Contoh: Jika ada 5 sekolah, masing-masing punya skor Kesadaran Diri Guru,
+     maka diambil rata-rata dari 5 skor tersebut
+   - Dua area radar ditampilkan: biru (Guru) dan hijau (Murid)
+
+
+--- 3. PERBANDINGAN GURU VS MURID (Bar Chart) ---
+   Grafik batang yang membandingkan rata-rata skor Guru vs Murid
+   per masing-masing 5 dimensi SEL
+
+   Cara Olah Data:
+   - Sumber data sama dengan Radar: endpoint /api/sel/analisis/scores
+   - Untuk setiap dimensi:
+     * Kumpulkan semua skor Guru dari semua sekolah → hitung rata-rata
+     * Kumpulkan semua skor Murid dari semua sekolah → hitung rata-rata
+   - Nilai yang tampil = rata-rata sebenarnya dari database (bukan estimasi)
+   - Dibulatkan ke 1 angka desimal (misal: 3.2, 2.8)
+
+
+--- 4. PERILAKU DI KELAS vs LINGKUNGAN SEKOLAH (Bar Chart + Kartu Ringkasan) ---
+   Membandingkan perilaku yang terlihat SAAT DI KELAS vs SAAT DI LINGKUNGAN SEKOLAH
+   (halaman, kantin, lorong, dll)
+
+   Cara Olah Data:
+   - Sumber: endpoint /api/sel/analisis/scores
+   - Instrumen observasi memiliki dua konteks pengamatan:
+     * "kelas" = indikator yang diamati di dalam ruang kelas
+     * "lingkungan" = indikator yang diamati di luar kelas (halaman, kantin, dll)
+   - Setiap indikator di database sudah diberi label konteks: 'kelas' atau 'lingkungan'
+   - Sistem menghitung rata-rata skor per dimensi berdasarkan konteks tersebut
+   - Kartu di bawah grafik menampilkan:
+     * "Rata-rata Di Kelas" = rata-rata SEMUA skor konteks kelas dari semua sekolah/dimensi
+     * "Rata-rata Di Lingkungan" = rata-rata SEMUA skor konteks lingkungan dari semua sekolah/dimensi
+   - Catatan: Jika satu sekolah tidak punya data konteks tertentu, nilainya dikecualikan
+     (tidak menggunakan angka palsu sebagai pengganti)
+
+
+--- 5. KARTU RINGKASAN PER DIMENSI (5 kartu kecil) ---
+   5 kartu: Kesadaran Diri | Regulasi Emosi | Kesadaran Sosial | Keterampilan Relasi | Tanggung Jawab
+
+   Cara Olah Data:
+   - Untuk setiap dimensi, gabungkan skor Guru + Murid dari semua sekolah → hitung rata-rata
+   - Kategorisasi:
+     * ≥ 3.5 → KONSISTEN (warna biru)
+     * 2.5–3.4 → SERING (warna hijau)
+     * 1.5–2.4 → KADANG (warna kuning)
+     * < 1.5 → TIDAK TERLIHAT (warna merah)
+
+
+--- 6. DIMENSI TERKUAT & PERLU PERHATIAN ---
+   Dua kotak insight: dimensi dengan skor tertinggi vs terendah
+
+   Cara Olah Data:
+   - Gunakan rata-rata rataRata per dimensi dari semua sekolah
+   - Sort descending → ambil 2 teratas = "Dimensi Terkuat"
+   - Sort ascending → ambil 2 terbawah = "Perlu Perhatian"
+   - Semua data dari database, bukan estimasi
+
+
+================================================================
+NAVIGASI: HEATMAP WILAYAH
+================================================================
+
+Tabel peta panas yang menunjukkan skor SEL per kecamatan,
+memudahkan melihat wilayah mana yang kuat dan mana yang butuh perhatian.
+
+Cara Olah Data:
+- Diambil dari endpoint: GET /api/sel/analisis/heatmap
+- Query SQL mengelompokkan semua sesi observasi berdasarkan KECAMATAN
+- Untuk setiap kecamatan:
+  * Hitung jumlah sekolah/sesi yang diobservasi
+  * Hitung rata-rata skor per dimensi (kesadaran_diri, regulasi_emosi, dst)
+  * Hitung rata-rata keseluruhan (rata_rata)
+- Warna sel menunjukkan level skor:
+  * Biru (≥ 3.0) → BAIK
+  * Hijau (2.5–2.9) → BERKEMBANG BAIK
+  * Kuning (2.0–2.4) → CUKUP
+  * Merah (< 2.0) → PERLU INTERVENSI
+- Data diurutkan dari rata-rata tertinggi ke terendah
+- Filter kabupaten tersedia di atas (data langsung berubah sesuai pilihan)
+
+
+================================================================
+NAVIGASI: CROSS VALIDASI
+================================================================
+
+Memvalidasi silang antara KLAIM SEKOLAH (dari kuesioner BSAN) vs
+HASIL OBSERVASI LAPANGAN (skor SEL).
+
+--- 1. KARTU KUADRAN (Unggul, Hidden Gem, Overclaimer, Intervensi) ---
+
+   Cara Olah Data:
+   - Diambil dari endpoint: GET /api/sel/analisis/matriks
+   - Setiap sekolah dihitung dua skor:
+     (A) Skor Kuesioner BSAN (0–100%) = diambil dari jawaban survei sekolah.
+         Dihitung dari jawaban positif di tabel jawaban_survey.
+         Jika tidak ada data survei, digunakan status pengisian sebagai estimasi
+         (sudah=85, sebagian=55, belum=25)
+     (B) Skor Observasi SEL (1–4) = rata-rata skor dari sesi observasi lapangan
+   - Sekolah dikategorikan ke 4 kuadran:
+     * UNGGUL       → Kuesioner ≥ 60% DAN SEL ≥ 2.5 (konsisten tinggi)
+     * HIDDEN GEM   → Kuesioner < 60% DAN SEL ≥ 2.5 (observasi bagus tapi survei kurang)
+     * OVERCLAIMER  → Kuesioner ≥ 60% DAN SEL < 2.5 (klaim tinggi tapi observasi rendah)
+     * INTERVENSI   → Kuesioner < 60% DAN SEL < 2.5 (keduanya rendah, perlu didampingi)
+   - Angka di kartu = jumlah sekolah yang masuk tiap kuadran
+
+
+--- 2. SCATTER PLOT (Grafik Sebar) ---
+
+   Cara Olah Data:
+   - Sumber data sama dengan kuadran di atas
+   - Setiap titik = 1 sekolah
+   - Sumbu X = Skor Kuesioner BSAN (0–100%)
+   - Sumbu Y = Skor Observasi SEL (1–4)
+   - Warna titik mengikuti kategori kuadran:
+     * Hijau = Unggul
+     * Biru = Hidden Gem
+     * Kuning = Overclaimer
+     * Merah = Intervensi
+   - Garis pembagi: X = 60%, Y = 2.5
+
+
+================================================================
+NAVIGASI: DAFTAR SEKOLAH
+================================================================
+
+Tabel lengkap semua sekolah yang sudah diobservasi beserta rincian skor.
+
+Kolom: Sekolah | Guru | Murid | Kesadaran | Regulasi | Kesadaran | Keterampilan | Tanggung | Total | Status
+
+Cara Olah Data:
+- Diambil dari endpoint: GET /api/sel/analisis/scores
+- Setiap baris = 1 sekolah
+- Nilai kolom masing-masing:
+  * "Guru"     = rata-rata skor SEMUA indikator subjek guru (semua dimensi)
+  * "Murid"    = rata-rata skor SEMUA indikator subjek murid (semua dimensi)
+  * "Kesadaran Diri"     = rata-rata skor dimensi kesadaran_diri (guru+murid)
+  * "Regulasi Emosi"     = rata-rata skor dimensi regulasi_emosi (guru+murid)
+  * "Kesadaran Sosial"   = rata-rata skor dimensi kesadaran_sosial (guru+murid)
+  * "Keterampilan Relasi"= rata-rata skor dimensi keterampilan_relasi (guru+murid)
+  * "Tanggung Jawab"     = rata-rata skor dimensi tanggung_jawab (guru+murid)
+  * "Total"   = rata-rata keseluruhan semua indikator (guru+murid semua dimensi)
+  * "Status"  = hasil cross validasi (Unggul/Hidden Gem/Overclaimer/Intervensi)
+                berdasarkan perbandingan skor kuesioner vs observasi
+
+- Data diurutkan dari Total skor tertinggi ke terendah
+- Klik baris untuk lihat detail radar chart per sekolah
+- Dapat difilter berdasarkan kabupaten
+- Paginated (8 sekolah per halaman)
+
+
+================================================================
+CATATAN TEKNIS PENTING
+================================================================
+
+1. SUMBER DATA TUNGGAL
+   Semua angka di halaman Analisis SEL bersumber dari:
+   - Tabel: sel_sesi_observasi (data sesi observasi lapangan)
+   - Tabel: sel_jawaban_observasi (jawaban per indikator dari observer)
+   - Tabel: sel_indikator (master indikator dengan info dimensi, subjek, konteks)
+   - Tabel: sel_dimensi (master 5 dimensi SEL)
+   - Tabel: satuan_pendidikan, kecamatan, kabupaten (info lokasi sekolah)
+
+2. TIDAK ADA DATA DUMMY
+   - Semua angka dihitung langsung dari database
+   - Jika suatu dimensi/konteks tidak punya data, ditampilkan 0 atau dikecualikan
+     dari perhitungan (tidak diganti angka palsu)
+
+3. FILTER KABUPATEN
+   - Semua bagian di atas mendukung filter kabupaten
+   - Saat kabupaten dipilih, semua query di backend menambahkan WHERE kb.id = [id]
+   - Semua angka secara otomatis menyesuaikan dengan wilayah yang dipilih
+
+4. SKALA SKOR SEL
+   1 = Tidak Terlihat
+   2 = Kadang Terlihat
+   3 = Sering Terlihat
+   4 = Konsisten Terlihat
+
+================================================================

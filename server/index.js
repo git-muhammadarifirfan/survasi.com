@@ -180,7 +180,34 @@ app.listen(PORT, async () => {
       `).catch(() => {}); // Ignored if column already exists
     }
 
-    console.log('✓ Auto-patch MySQL: Soft delete (deleted_at) columns & Q4 school_select active.');
+    // Auto-patch 'target_observasi' column on satuan_pendidikan
+    await pool.execute(`
+      ALTER TABLE satuan_pendidikan
+      ADD COLUMN target_observasi INT NOT NULL DEFAULT 2
+      COMMENT 'Target jumlah sesi observasi SEL per sekolah'
+    `).catch(() => {}); // Ignored if column already exists
+
+    // Auto-patch 'app_settings' table for global admin settings
+    await pool.execute(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        setting_key VARCHAR(50) PRIMARY KEY,
+        setting_value TEXT NOT NULL,
+        updated_by INT DEFAULT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB COMMENT='Global application settings (admin configurable)'
+    `).catch(() => {});
+    await pool.execute(`
+      INSERT IGNORE INTO app_settings (setting_key, setting_value) VALUES ('default_target_observasi', '2')
+    `).catch(() => {});
+
+    // Auto-patch 'jumlah_siswa_sebagian_kecil' on sel_sesi_observasi
+    await pool.execute(`
+      ALTER TABLE sel_sesi_observasi
+      ADD COLUMN jumlah_siswa_sebagian_kecil INT DEFAULT NULL
+      COMMENT 'Jumlah siswa sebagian kecil (jika jangkauan=4)'
+    `).catch(() => {});
+
+    console.log('✓ Auto-patch MySQL: Soft delete, Q4, target_observasi, app_settings active.');
   } catch (err) {
     console.warn('[Server] DB auto-patch skipped:', err.message);
   }

@@ -194,6 +194,9 @@ export const apiClient = {
 
     getTimeseries: (kabupatenId?: number) =>
       fetchJson<ApiResponse<any[]>>(`/dashboard/timeseries${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
+
+    getModulProgress: (kabupatenId?: number) =>
+      fetchJson<ApiResponse<any[]>>(`/dashboard/modul-progress${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
   },
 
   // ── Sekolah ────────────────────────────────────────────────────────────────
@@ -380,6 +383,9 @@ export const apiClient = {
 
     getMatriks: (kabupatenId?: number) =>
       fetchJson<ApiResponse<any[]>>(`/sel/analisis/matriks${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
+
+    getSummaryStats: (kabupatenId?: number) =>
+      fetchJson<ApiResponse<any>>(`/sel/summary-stats${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
   },
 
   // ── Suara Responden ────────────────────────────────────────────────────────
@@ -460,6 +466,19 @@ export const apiClient = {
 
     getActivityLog: () =>
       fetchJson<ApiResponse<any[]>>('/setting/activity-log'),
+
+    // ── Target Observasi ──
+    getTargetObservasi: () =>
+      fetchJson<ApiResponse<{ default_target: number; schools: any[] }>>('/setting/target-observasi'),
+
+    updateTargetObservasi: (data: { default_target: number; apply_to_all?: boolean }) =>
+      fetchJson<{ success: boolean; message: string }>('/setting/target-observasi', { method: 'PUT', body: JSON.stringify(data) }),
+
+    updateTargetObservasiSekolah: (sekolahId: number, target: number) =>
+      fetchJson<{ success: boolean; message: string }>(`/setting/target-observasi/${sekolahId}`, { method: 'PUT', body: JSON.stringify({ target }) }),
+
+    updateTargetObservasiBatch: (items: { sekolah_id: number; target: number }[]) =>
+      fetchJson<{ success: boolean; message: string }>('/setting/target-observasi/batch', { method: 'PUT', body: JSON.stringify({ items }) }),
   },
 
   // ── Kemendikdasmen (Government School Data API Proxy) ──────────────────────
