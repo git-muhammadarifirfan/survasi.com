@@ -115,9 +115,9 @@ export default function LaporanEkspor() {
   });
 
   // SEL Scores data for "observasi_sel" export
-  const { data: selScores = [] } = useQuery({
-    queryKey: ['sel-scores-laporan', selectedKab],
-    queryFn: () => database.getSELScores({ kabupaten: selectedKab || undefined }),
+  const { data: exportFullDataSel } = useQuery({
+    queryKey: ['sel-laporan-full', selectedKab],
+    queryFn: () => apiClient.sel.getExportFull(selectedKab ? parseInt(selectedKab) : undefined),
     enabled: showExportModal && selectedExportType === 'observasi_sel',
   });
 
@@ -224,46 +224,83 @@ export default function LaporanEkspor() {
 
   const buildObservasiSelCsv = () => {
     const wilayah = selectedKab || 'Semua Kabupaten';
+    const fullData = exportFullDataSel?.data;
+    const sessions = fullData?.sessions || [];
+    const questions = fullData?.questions || [];
+    const answersMap = fullData?.answers || {};
+
     let out = buildBsanCsvHeader({
-      title: 'DATA HASIL OBSERVASI SOCIAL-EMOTIONAL LEARNING (SEL) BSAN',
+      title: 'DATA HASIL OBSERVASI SOCIAL-EMOTIONAL LEARNING (SEL) BSAN (RAW)',
       wilayah,
-      totalInfo: `Total Sekolah Diobservasi: ${selScores.length}`,
+      totalInfo: `Total Sesi Observasi: ${sessions.length}`,
     });
 
-    out += buildCsvRow([
+    const headers = [
       'Timestamp', 'No.', 'NPSN', 'Nama Sekolah', 'Kabupaten', 'Kecamatan', 'Tanggal Observasi',
-      'Skor Guru (1-4)', 'Skor Murid (1-4)', 'Skor Total (1-4)',
-      'Kesadaran Diri', 'Regulasi Emosi', 'Kesadaran Sosial', 'Keterampilan Relasi', 'Tanggung Jawab',
-      'Skor Kuesioner BSAN (%)', 'Status Cross Validasi'
-    ]) + '\n';
+      'Lokasi Diamati', 'Waktu Pengamatan', 'Kelas Diamati', 'Mata Pelajaran',
+      'Guru Inisial', 'Guru JK',
+      'Jangkauan Siswa', 'Jumlah Siswa (L/P)', 'Siswa Disabilitas (L/P)',
+      'Observer',
+      'Skor Guru Total (1-4)', 'Skor Murid Total (1-4)', 'Skor Total Sesi (1-4)',
+      'Kesadaran Diri (Avg)', 'Regulasi Emosi (Avg)', 'Kesadaran Sosial (Avg)', 'Keterampilan Relasi (Avg)', 'Tanggung Jawab (Avg)',
+      'Skor Kuesioner BSAN (%)'
+    ];
 
-    selScores.forEach((s, i) => {
-      const dimMap: Record<string, string> = {};
-      s.dimensi.forEach(d => { dimMap[d.dimensi] = d.rataRata?.toFixed(2) || '0.00'; });
-      const klaim = s.kuisionerScore >= 60;
-      const selOk = s.totalRata >= 2.5;
-      const status = klaim && selOk ? 'Unggul' : !klaim && selOk ? 'Hidden Gem' : klaim && !selOk ? 'Overclaimer' : 'Intervensi';
+    // Append all SEL questions to header (Score and Notes)
+    questions.forEach((q: any) => {
+      headers.push(`[${q.dimensi_nama.toUpperCase()} - ${q.subjek.toUpperCase()}] ${q.teks} (SKOR)`);
+      headers.push(`[${q.dimensi_nama.toUpperCase()} - ${q.subjek.toUpperCase()}] ${q.teks} (CATATAN)`);
+    });
+
+    out += buildCsvRow(headers) + '\n';
+
+    sessions.forEach((s: any, i: number) => {
       const ts = s.tanggal ? `${s.tanggal} 08:00:00` : new Date().toISOString().replace('T', ' ').substring(0, 19);
 
-      out += buildCsvRow([
+      let jangkauanLabel = '';
+      if (s.jangkauan_siswa === 1) jangkauanLabel = 'Seluruh Siswa di Sekolah';
+      else if (s.jangkauan_siswa === 2) jangkauanLabel = 'Seluruh Siswa di Kelas';
+      else if (s.jangkauan_siswa === 3) jangkauanLabel = 'Sebagian Besar Siswa';
+      else if (s.jangkauan_siswa === 4) jangkauanLabel = `Sebagian Kecil Siswa (${s.jumlah_siswa_sebagian_kecil} Siswa)`;
+
+      const rowData = [
         ts,
         i + 1,
-        getNpsn(s.sekolahNama),
-        s.sekolahNama,
+        s.npsn || getNpsn(s.sekolah_nama),
+        s.sekolah_nama,
         s.kabupaten,
         s.kecamatan,
-        s.tanggal,
-        s.guruTotal.toFixed(2),
-        s.muridTotal.toFixed(2),
-        s.totalRata.toFixed(2),
-        dimMap['kesadaran_diri'] || '0.00',
-        dimMap['regulasi_emosi'] || '0.00',
-        dimMap['kesadaran_sosial'] || '0.00',
-        dimMap['keterampilan_relasi'] || '0.00',
-        dimMap['tanggung_jawab'] || '0.00',
-        s.kuisionerScore,
-        status,
-      ]) + '\n';
+        s.tanggal || '',
+        s.lokasi_diamati ? JSON.parse(s.lokasi_diamati).join(', ') : '',
+        s.waktu_pengamatan ? JSON.parse(s.waktu_pengamatan).join(', ') : '',
+        s.kelas_diamati || '',
+        s.mata_pelajaran || '',
+        s.guru_inisial || '',
+        s.guru_jk || '',
+        jangkauanLabel,
+        `${s.jumlah_siswa_l || 0} / ${s.jumlah_siswa_p || 0}`,
+        `${s.siswa_disabilitas_l || 0} / ${s.siswa_disabilitas_p || 0}`,
+        s.observer_nama || '',
+        s.guru_total || '0',
+        s.murid_total || '0',
+        s.total_rata || '0',
+        s.kesadaran_diri || '0',
+        s.regulasi_emosi || '0',
+        s.kesadaran_sosial || '0',
+        s.keterampilan_relasi || '0',
+        s.tanggung_jawab || '0',
+        s.kuisioner_score || '0'
+      ];
+
+      // Append answers for each SEL question
+      const respondentAnswers = answersMap[s.id] || {};
+      questions.forEach((q: any) => {
+        const ans = respondentAnswers[q.id];
+        rowData.push(ans?.skor !== undefined && ans?.skor !== null ? ans.skor : '');
+        rowData.push(ans?.catatan || '');
+      });
+
+      out += buildCsvRow(rowData) + '\n';
     });
 
     return out;
