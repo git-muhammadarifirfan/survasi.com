@@ -7,7 +7,7 @@
 
 import { useState, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { database, KABUPATEN_LIST } from '../../../shared/data/data-source';
+import { database, KABUPATEN_LIST, schoolsData } from '../../../shared/data/data-source';
 import {
   BSAN_MODUL_LABEL, BSAN_MODUL_LABEL_ID,
   BSAN_MODUL_SUBTITLE, BSAN_MODUL_SUBTITLE_ID, BSAN_MODUL_COLOR,
@@ -24,6 +24,7 @@ import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 import html2pdf from 'html2pdf.js';
 import { apiClient } from '../../../shared/services/api-client';
 import CustomSelect from '../../../shared/components/CustomSelect';
+import { buildBsanCsvHeader, buildCsvRow, triggerDownload, safeFilename, dateStamp } from '../../../shared/utils/exportCSV';
 
 /* ─── Icon Map ─── */
 const FRAMEWORK_ICONS: Record<string, typeof Brain> = {
@@ -351,6 +352,31 @@ export default function ModulBsan() {
                     <button onClick={() => handleExport('docx')} className="flex items-center gap-2.5 w-full px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
                       <File className="h-4 w-4 text-blue-500" />
                       <div className="text-left"><div className="font-bold">Export DOCX</div><div className="text-[9px] text-slate-400">Dokumen Word</div></div>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setExportMenu(false);
+
+                        let csv = buildBsanCsvHeader({
+                          title: 'DATA FRAMEWORK MODUL BSAN & SEKOLAH SASARAN',
+                          wilayah: kabupaten,
+                        });
+
+                        csv += buildCsvRow(['Timestamp', 'No.', 'NPSN', 'Nama Sekolah', 'Kabupaten', 'Kecamatan', 'Status Pengisian', 'Akreditasi']) + '\n';
+                        const filtered = schoolsData.filter(s => !kabupaten || kabupaten === 'Semua Wilayah' || s.kabupaten === kabupaten);
+                        filtered.forEach((s, i) => {
+                          const statusLabel = s.status === 'sudah' ? 'Lengkap' : s.status === 'sebagian' ? 'Sebagian' : 'Belum Mengisi';
+                          const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+                          csv += buildCsvRow([ts, i + 1, s.npsn, s.nama, s.kabupaten, s.kecamatan, statusLabel, s.akreditasi]) + '\n';
+                        });
+
+                        const kab = safeFilename(kabupaten || 'SemuaWilayah');
+                        triggerDownload(csv, `ModulBSAN_Sekolah_${kab}_${dateStamp()}.csv`);
+                      }}
+                      className="flex items-center gap-2.5 w-full px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                    >
+                      <Download className="h-4 w-4 text-emerald-600" />
+                      <div className="text-left"><div className="font-bold">Export CSV</div><div className="text-[9px] text-slate-400">Data tabel Excel</div></div>
                     </button>
                   </div>
                 )}

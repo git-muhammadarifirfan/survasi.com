@@ -12,7 +12,7 @@ import { database, KABUPATEN_LIST } from '../../../shared/data/data-source';
 import type { ProporsiModulData } from '../../../shared/data/data-source';
 import {
   PieChart as PieIcon, ChevronDown, GraduationCap, TrendingUp, BookOpen, Users, Award, Building2,
-  CheckCircle2, Info, ArrowUpRight
+  CheckCircle2, Info, ArrowUpRight, Download
 } from 'lucide-react';
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
@@ -21,6 +21,7 @@ import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
 import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
+import { buildBsanCsvHeader, buildCsvRow, triggerDownload, safeFilename, dateStamp } from '../../../shared/utils/exportCSV';
 
 const TABS = [
   { id: 'penerima', label: 'Proporsi Penerima', icon: PieIcon },
@@ -120,14 +121,76 @@ export default function ProporsiModul() {
           </div>
         </div>
 
-        {/* Filter Kabupaten */}
-        <div className="w-52">
-          <CustomSelect
-            options={regionOptions}
-            value={kabupaten}
-            onChange={(val) => setKabupaten(val)}
-            size="md"
-          />
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Filter Kabupaten */}
+          <div className="w-52">
+            <CustomSelect
+              options={regionOptions}
+              value={kabupaten}
+              onChange={(val) => setKabupaten(val)}
+              size="md"
+            />
+          </div>
+
+          {/* Tombol Export CSV */}
+          <button
+            onClick={() => {
+              const kab = safeFilename(kabupaten || 'SemuaWilayah');
+              const tabLabel = TABS.find(t => t.id === activeTab)?.label || activeTab;
+
+              let csv = buildBsanCsvHeader({
+                title: `PROPORSI MODUL BSAN — ${tabLabel.toUpperCase()}`,
+                wilayah: kabupaten,
+              });
+
+              const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+              if (activeTab === 'penerima') {
+                csv += buildCsvRow(['Timestamp', 'No.', 'Kecamatan', 'Sudah Menerima (%)', 'Belum Menerima (%)']) + '\n';
+                data.distribusiPerKecamatan.forEach((r, i) => {
+                  csv += buildCsvRow([ts, i + 1, r.kecamatan, r.ya, r.tidak]) + '\n';
+                });
+              } else if (activeTab === 'pelatihan') {
+                csv += buildCsvRow(['Timestamp', 'No.', 'Penyelenggara Pelatihan', 'Jumlah Guru Terlatih']) + '\n';
+                data.penyelenggaraPelatihan.forEach((r, i) => {
+                  csv += buildCsvRow([ts, i + 1, r.nama, r.jumlah]) + '\n';
+                });
+              } else if (activeTab === 'implementasi') {
+                csv += buildCsvRow(['Timestamp', 'No.', 'Posisi', 'Belum Menerima (%)', 'Sebagian (%)', 'Sudah Seluruhnya (%)']) + '\n';
+                data.statusImplementasiPosisi.forEach((r, i) => {
+                  csv += buildCsvRow([ts, i + 1, r.posisi, r.belumMenerima, r.sebagian, r.sudah]) + '\n';
+                });
+              } else if (activeTab === 'kemudahan') {
+                csv += buildCsvRow(['Timestamp', 'No.', 'Modul', 'Tingkat Kemudahan (%)']) + '\n';
+                data.kemudahanModul.kelasAwal.mudah.forEach((r, i) => {
+                  csv += buildCsvRow([ts, i + 1, r.modul, r.persen]) + '\n';
+                });
+              } else if (activeTab === 'keterlibatan') {
+                csv += buildCsvRow(['Timestamp', 'No.', 'Media Pembelajaran', 'Persentase Penggunaan (%)']) + '\n';
+                data.mediaPembelajaran.kelasAwal.forEach((r, i) => {
+                  csv += buildCsvRow([ts, i + 1, r.media, r.persen]) + '\n';
+                });
+              } else if (activeTab === 'dukungan') {
+                csv += buildCsvRow(['Timestamp', 'No.', 'Bentuk Dukungan Kepala Sekolah', 'Jumlah Kepsek']) + '\n';
+                data.dukunganKepsek.forEach((r, i) => {
+                  csv += buildCsvRow([ts, i + 1, r.metode, r.jumlah]) + '\n';
+                });
+              } else if (activeTab === 'infrastruktur') {
+                csv += buildCsvRow(['Timestamp', 'No.', 'Kecamatan', 'Kondisi Baik (%)', 'Kondisi Cukup (%)', 'Kondisi Rusak (%)']) + '\n';
+                data.kondisiFasilitas.forEach((r, i) => {
+                  csv += buildCsvRow([ts, i + 1, r.kecamatan, r.baik, r.cukup, r.rusak]) + '\n';
+                });
+              } else {
+                csv += buildCsvRow(['Timestamp', 'No.', 'Kategori', 'Nilai']) + '\n';
+              }
+
+              triggerDownload(csv, `ProporsiModul_${tabLabel.replace(/\s+/g, '_')}_${kab}_${dateStamp()}.csv`);
+            }}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary hover:bg-primary-dark text-white text-xs font-bold shadow-md transition-all cursor-pointer whitespace-nowrap"
+          >
+            <Download className="h-4 w-4" />
+            <span>Ekspor CSV</span>
+          </button>
         </div>
       </div>
 

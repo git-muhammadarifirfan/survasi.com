@@ -9,8 +9,9 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { database, KABUPATEN_LIST } from '../../../shared/data/data-source';
-import { Layers, HelpCircle, ArrowDownRight, CheckCircle, AlertCircle, Info, Filter } from 'lucide-react';
+import { Layers, HelpCircle, ArrowDownRight, CheckCircle, AlertCircle, Info, Filter, Download } from 'lucide-react';
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
+import { buildBsanCsvHeader, buildCsvRow, triggerDownload, safeFilename, dateStamp } from '../../../shared/utils/exportCSV';
 
 import CustomSelect from '../../../shared/components/CustomSelect';
 import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
@@ -63,7 +64,7 @@ export default function GapFunnel({ activeKecamatan }: GapFunnelProps) {
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto min-w-[200px]">
+          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
             <CustomSelect
               options={kabOptions}
               value={selectedKab}
@@ -71,6 +72,30 @@ export default function GapFunnel({ activeKecamatan }: GapFunnelProps) {
               placeholder="Pilih Wilayah"
               size="md"
             />
+            <button
+              onClick={() => {
+                if (!funnelSteps.length) return;
+                let csv = buildBsanCsvHeader({
+                  title: 'ANALISIS GAP FUNNEL IMPLEMENTASI BSAN',
+                  wilayah: selectedKab || 'Semua Wilayah',
+                  totalInfo: `Total Tahap Funnel: ${funnelSteps.length}`,
+                });
+
+                csv += buildCsvRow(['Timestamp', 'No.', 'Tahap Funnel', 'Jumlah Sekolah', 'Persentase (%)']) + '\n';
+                funnelSteps.forEach((step, i) => {
+                  const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+                  csv += buildCsvRow([ts, i + 1, step.name, step.schools, step.percentage]) + '\n';
+                });
+
+                const kab = safeFilename(selectedKab || 'SemuaWilayah');
+                triggerDownload(csv, `GapFunnel_BSAN_${kab}_${dateStamp()}.csv`);
+              }}
+              disabled={isLoading || funnelSteps.length === 0}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap"
+            >
+              <Download className="h-4 w-4" />
+              <span>Ekspor CSV</span>
+            </button>
           </div>
         </div>
       </div>

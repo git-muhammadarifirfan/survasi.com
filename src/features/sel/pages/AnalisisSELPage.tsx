@@ -9,7 +9,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { database, KABUPATEN_LIST, KABUPATEN_NAME_TO_ID } from '../../../shared/data/data-source';
+import { database, KABUPATEN_LIST, KABUPATEN_NAME_TO_ID, schoolsData } from '../../../shared/data/data-source';
 import type { SELSchoolScore, SELHeatmapRow } from '../../../shared/data/data-source';
 import { SEL_DIMENSI_ORDER, SEL_DIMENSI_LABEL } from '../../../shared/data/sel-indicators';
 import type { SELDimensi } from '../../../shared/data/sel-indicators';
@@ -22,12 +22,13 @@ import {
   Brain, Users, GraduationCap, AlertTriangle, TrendingUp,
   ChevronDown, Filter, Eye, BookOpen, Star, Info, X,
   Award, Gem, ShieldAlert, CheckCircle2, ChevronLeft, ChevronRight,
-  MapPin
+  MapPin, Download
 } from 'lucide-react';
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
 import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
+import { buildBsanCsvHeader, buildCsvRow, triggerDownload, safeFilename, dateStamp } from '../../../shared/utils/exportCSV';
 
 // ─── Helpers ───────────────────────────────────────────────────
 
@@ -368,17 +369,81 @@ export default function AnalisisSEL() {
             );
           })}
         </div>
-        <div className="min-w-[180px]">
-          <CustomSelect
-            options={[
-              { value: '', label: 'Semua Kabupaten' },
-              ...dbKabupatenList.map(k => ({ value: k.nama, label: k.nama }))
-            ]}
-            value={selectedKab}
-            onChange={(val) => { setSelectedKab(val); setCurrentPage(1); }}
-            placeholder="Pilih Kabupaten"
-            enableSearch={true}
-          />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-[180px]">
+            <CustomSelect
+              options={[
+                { value: '', label: 'Semua Kabupaten' },
+                ...dbKabupatenList.map(k => ({ value: k.nama, label: k.nama }))
+              ]}
+              value={selectedKab}
+              onChange={(val) => { setSelectedKab(val); setCurrentPage(1); }}
+              placeholder="Pilih Kabupaten"
+              enableSearch={true}
+            />
+          </div>
+          <button
+            onClick={() => {
+              if (!scores.length) return;
+
+              const npsn = (sekolahNama: string): string => {
+                const found = schoolsData.find(
+                  s => s.nama.toLowerCase().trim() === sekolahNama.toLowerCase().trim()
+                );
+                return found?.npsn || '';
+              };
+
+              let csv = buildBsanCsvHeader({
+                title: 'DATA OBSERVASI SEL (SOCIAL-EMOTIONAL LEARNING) BSAN',
+                wilayah: selectedKab || 'Semua Kabupaten',
+                totalInfo: `Total Sekolah Diobservasi: ${scores.length}`,
+              });
+
+              const dimHeaders = SEL_DIMENSI_ORDER.map(d => SEL_DIMENSI_LABEL[d]);
+              csv += buildCsvRow([
+                'Timestamp', 'No.', 'NPSN', 'Nama Sekolah', 'Kecamatan', 'Kabupaten', 'Tanggal Observasi',
+                'Skor Guru (1-4)', 'Skor Murid (1-4)', 'Skor Total (1-4)',
+                ...dimHeaders,
+                'Skor Kuesioner BSAN (%)', 'Status Cross Validasi',
+              ]) + '\n';
+              scores.forEach((s, i) => {
+                const dimVals = SEL_DIMENSI_ORDER.map(d => {
+                  const ds = s.dimensi.find(dd => dd.dimensi === d);
+                  return ds?.rataRata?.toFixed(2) || '0.00';
+                });
+                const klaim = s.kuisionerScore >= 60;
+                const selOk = s.totalRata >= 2.5;
+                const status = klaim && selOk ? 'Unggul'
+                  : !klaim && selOk ? 'Hidden Gem'
+                  : klaim && !selOk ? 'Overclaimer'
+                  : 'Intervensi';
+                const ts = s.tanggal ? `${s.tanggal} 08:00:00` : new Date().toISOString().replace('T', ' ').substring(0, 19);
+                csv += buildCsvRow([
+                  ts,
+                  i + 1,
+                  npsn(s.sekolahNama),
+                  s.sekolahNama,
+                  s.kecamatan,
+                  s.kabupaten,
+                  s.tanggal,
+                  s.guruTotal.toFixed(2),
+                  s.muridTotal.toFixed(2),
+                  s.totalRata.toFixed(2),
+                  ...dimVals,
+                  s.kuisionerScore,
+                  status,
+                ]) + '\n';
+              });
+
+              const kab = safeFilename(selectedKab || 'SemuaKabupaten');
+              triggerDownload(csv, `AnalisisSEL_BSAN_${kab}_${dateStamp()}.csv`);
+            }}
+            disabled={isLoading || scores.length === 0}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary hover:bg-primary-dark text-white text-xs font-bold shadow-md transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap"
+          >
+            <Download className="h-4 w-4" />
+            <span>Ekspor CSV</span>
+          </button>
         </div>
       </div>
 
@@ -735,6 +800,7 @@ export default function AnalisisSEL() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-bg/40 border-b border-border">
+                  <th className="py-3 px-4 text-left text-[10px] font-bold text-text-secondary uppercase tracking-wider">Timestamp</th>
                   <th className="py-3 px-4 text-left text-[10px] font-bold text-text-secondary uppercase tracking-wider">Sekolah</th>
                   <th className="py-3 px-3 text-center text-[10px] font-bold text-text-secondary uppercase">Guru</th>
                   <th className="py-3 px-3 text-center text-[10px] font-bold text-text-secondary uppercase">Murid</th>
@@ -749,9 +815,9 @@ export default function AnalisisSEL() {
               </thead>
               <tbody>
                 {isLoading ? (
-                  <tr><td colSpan={10} className="py-12 text-center"><ThreeDotsLoader text="Memuat data analisis..." /></td></tr>
+                  <tr><td colSpan={11} className="py-12 text-center"><ThreeDotsLoader text="Memuat data analisis..." /></td></tr>
                 ) : paginatedScores.length === 0 ? (
-                  <tr><td colSpan={10} className="py-12 text-center text-text-secondary">Belum ada data.</td></tr>
+                  <tr><td colSpan={11} className="py-12 text-center text-text-secondary">Belum ada data.</td></tr>
                 ) : (
                   paginatedScores.map((score, idx) => (
                     <tr
@@ -760,6 +826,9 @@ export default function AnalisisSEL() {
                       className="border-b border-border/40 hover:bg-bg/30 cursor-pointer transition-colors animate-slide-up"
                       style={{ animationDelay: `${idx * 30}ms` }}
                     >
+                      <td className="py-3 px-4 font-mono text-text-secondary text-[10px] whitespace-nowrap">
+                        {score.tanggal ? `${score.tanggal} 08:00:00` : '2026-10-03 08:00:00'}
+                      </td>
                       <td className="py-3 px-4">
                         <p className="font-semibold text-text-primary">{score.sekolahNama}</p>
                         <p className="text-[9px] text-text-secondary">{score.kecamatan} · {score.tanggal}</p>
