@@ -331,6 +331,9 @@ export const apiClient = {
 
   // ── SEL ────────────────────────────────────────────────────────────────────
   sel: {
+    getExportFull: (kabupatenId?: number) =>
+      fetchJson<ApiResponse<{ sessions: any[]; questions: any[]; answers: any }>>(`/sel/export-full${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
+
     getIndikator: () =>
       fetchJson<ApiResponse<any[]>>('/sel/indikator'),
 

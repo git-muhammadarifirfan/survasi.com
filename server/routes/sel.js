@@ -510,6 +510,86 @@ router.get('/sesi', async (req, res) => {
   }
 });
 
+// ─── GET /api/sel/export-full ───────────────────────────────────────────────
+router.get('/export-full', async (req, res) => {
+  try {
+    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
+
+    // 1. Ambil data sesi
+    const [rows] = await pool.execute(`
+      SELECT
+        sso.id, sso.sekolah_id, sso.tanggal, sso.observer_nama, sso.status,
+        sso.lokasi_diamati, sso.waktu_pengamatan,
+        sso.jumlah_siswa_l, sso.jumlah_siswa_p,
+        sso.siswa_disabilitas_l, sso.siswa_disabilitas_p,
+        sso.kelas_diamati, sso.guru_inisial, sso.guru_jk,
+        sso.mata_pelajaran, sso.jangkauan_siswa, sso.jumlah_siswa_sebagian_kecil,
+        sp.nama AS sekolah_nama, sp.npsn,
+        k.nama  AS kecamatan,
+        kb.nama AS kabupaten,
+        
+        -- Additional Scores computed on the fly
+        ROUND((SELECT AVG(skor) FROM sel_jawaban_observasi WHERE sesi_id = sso.id), 2) AS total_rata,
+        ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id WHERE sjo.sesi_id = sso.id AND si.subjek = 'guru'), 2) AS guru_total,
+        ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id WHERE sjo.sesi_id = sso.id AND si.subjek = 'murid'), 2) AS murid_total,
+        ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id JOIN sel_dimensi sd ON si.dimensi_id = sd.id WHERE sjo.sesi_id = sso.id AND sd.kode = 'kesadaran_diri'), 2) AS kesadaran_diri,
+        ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id JOIN sel_dimensi sd ON si.dimensi_id = sd.id WHERE sjo.sesi_id = sso.id AND sd.kode = 'regulasi_emosi'), 2) AS regulasi_emosi,
+        ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id JOIN sel_dimensi sd ON si.dimensi_id = sd.id WHERE sjo.sesi_id = sso.id AND sd.kode = 'kesadaran_sosial'), 2) AS kesadaran_sosial,
+        ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id JOIN sel_dimensi sd ON si.dimensi_id = sd.id WHERE sjo.sesi_id = sso.id AND sd.kode = 'keterampilan_relasi'), 2) AS keterampilan_relasi,
+        ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id JOIN sel_dimensi sd ON si.dimensi_id = sd.id WHERE sjo.sesi_id = sso.id AND sd.kode = 'tanggung_jawab'), 2) AS tanggung_jawab,
+        COALESCE((
+          SELECT ROUND(COUNT(CASE WHEN js.jawaban_terstruktur LIKE 'Ya%' OR js.jawaban_terstruktur LIKE 'Sudah%' OR js.jawaban_terstruktur LIKE 'Lebih%' OR js.jawaban_terstruktur LIKE 'Sangat%' OR js.jawaban_terstruktur LIKE 'Lengkap%' OR js.jawaban_terstruktur LIKE 'Rutin%' THEN 1 END) / COUNT(*) * 100, 0)
+          FROM jawaban_survey js JOIN responden_survey rs ON js.responden_id = rs.id WHERE rs.sekolah_id = sso.sekolah_id
+        ), CASE WHEN sp.status_pengisian = 'sudah' THEN 85 WHEN sp.status_pengisian = 'sebagian' THEN 55 ELSE 25 END) AS kuisioner_score
+        
+      FROM sel_sesi_observasi sso
+      JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
+      JOIN kecamatan k ON sp.kecamatan_id = k.id
+      JOIN kabupaten kb ON k.kabupaten_id = kb.id
+      WHERE sso.deleted_at IS NULL
+        AND (? IS NULL OR kb.id = ?)
+      ORDER BY sso.tanggal DESC, sso.id DESC
+    `, [kabupatenId, kabupatenId]);
+
+    // 2. Ambil semua pertanyaan (indikator)
+    const [questions] = await pool.execute(`
+      SELECT si.id, si.kode, si.teks, si.subjek, sd.nama AS dimensi_nama 
+      FROM sel_indikator si 
+      JOIN sel_dimensi sd ON si.dimensi_id = sd.id 
+      ORDER BY sd.urutan, si.urutan
+    `);
+
+    // 3. Ambil jawaban
+    const ansMap = {};
+    if (rows.length > 0) {
+      const sesiIds = rows.map(r => r.id);
+      const placeholders = sesiIds.map(() => '?').join(',');
+      const [answers] = await pool.execute(`
+        SELECT sesi_id, indikator_id, skor, catatan
+        FROM sel_jawaban_observasi
+        WHERE sesi_id IN (${placeholders})
+      `, sesiIds);
+
+      answers.forEach(a => {
+        if (!ansMap[a.sesi_id]) ansMap[a.sesi_id] = {};
+        ansMap[a.sesi_id][a.indikator_id] = { skor: a.skor, catatan: a.catatan };
+      });
+    }
+
+    return res.json({ 
+      success: true, 
+      data: {
+        sessions: rows,
+        questions: questions,
+        answers: ansMap
+      } 
+    });
+  } catch (err) {
+    console.error('[SEL] export-full error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 // ─── DELETE /api/sel/sesi/:id (Soft Delete Sesi Observasi) ────────────────────
 router.delete('/sesi/:id', async (req, res) => {
   try {

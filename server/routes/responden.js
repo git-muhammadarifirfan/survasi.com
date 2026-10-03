@@ -90,13 +90,26 @@ router.get('/export-full', async (req, res) => {
       const respIds = rows.map(r => r.responden_id);
       const placeholders = respIds.map(() => '?').join(',');
       const [answers] = await pool.execute(
-        `SELECT responden_id, pertanyaan_id, jawaban_terstruktur FROM jawaban_survey WHERE responden_id IN (${placeholders})`,
+        `SELECT responden_id, pertanyaan_id, jawaban_terstruktur, jawaban_bebas, jawaban_multi FROM jawaban_survey WHERE responden_id IN (${placeholders})`,
         respIds
       );
       
       answers.forEach(a => {
         if (!ansMap[a.responden_id]) ansMap[a.responden_id] = {};
-        ansMap[a.responden_id][a.pertanyaan_id] = a.jawaban_terstruktur;
+        let finalAnswer = a.jawaban_terstruktur || a.jawaban_bebas || '';
+        if (a.jawaban_multi) {
+          try {
+            const arr = JSON.parse(a.jawaban_multi);
+            if (Array.isArray(arr)) {
+              finalAnswer = arr.join('; ');
+            } else {
+              finalAnswer = a.jawaban_multi;
+            }
+          } catch (e) {
+            finalAnswer = a.jawaban_multi;
+          }
+        }
+        ansMap[a.responden_id][a.pertanyaan_id] = finalAnswer;
       });
     }
 
