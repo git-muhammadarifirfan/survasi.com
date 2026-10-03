@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { database, schoolsData } from '../../../shared/data/data-source';
+import { apiClient } from '../../../shared/services/api-client';
 import {
   Download, CheckCircle2, Building2, ChevronLeft, ChevronRight,
   X, FileText, Users, BarChart3, Table2, Brain, Grid3X3, Layers
@@ -174,43 +175,20 @@ export default function LaporanEkspor() {
     const questions = fullData?.questions || [];
     const answersMap = fullData?.answers || {};
 
-    let out = buildBsanCsvHeader({
-      title: 'DATA HASIL SURVEI IMPLEMENTASI BSAN (RAW RESPONDEN)',
-      wilayah,
-      totalInfo: `Total Responden: ${respondents.length}`,
-    });
+    let out = '';
 
-    const headers = [
-      'Timestamp', 'No.', 'NPSN Sekolah', 'Nama Sekolah', 'Nama Responden', 'Jenis Kelamin', 'Posisi',
-      'Kabupaten', 'Kecamatan',
-      'Penerima Modul BSAN', 'Penyelenggara Pelatihan',
-      'Status Implementasi', 'Kelas Mengajar'
-    ];
-    
-    // Append all question texts to header
-    questions.forEach((q: any) => headers.push(q.teks_pertanyaan));
+    const headers = ['Timestamp'];
+    // Append all question texts to header exactly as in database
+    questions.forEach((q: any) => headers.push(q.teks_pertanyaan.trim()));
     
     out += buildCsvRow(headers) + '\n';
     
-    respondents.forEach((r: any, i: number) => {
+    respondents.forEach((r: any) => {
+      // Use submitted_at for Timestamp
       const ts = r.submitted_at || new Date().toISOString().replace('T', ' ').substring(0, 19);
-      const rowData = [
-        ts,
-        i + 1,
-        r.npsn || getNpsn(r.sekolah),
-        r.sekolah,
-        r.nama,
-        r.jenis_kelamin,
-        r.posisi,
-        r.kabupaten,
-        r.kecamatan,
-        r.penerima_modul,
-        r.penyelenggara_pelatihan || '',
-        r.status_implementasi || '',
-        r.kelas_mengajar || '',
-      ];
+      const rowData = [ts];
       
-      // Append answers for each question
+      // Append answers for exactly each question from the database
       const respondentAnswers = answersMap[r.responden_id] || {};
       questions.forEach((q: any) => {
         rowData.push(respondentAnswers[q.id] || '');
@@ -229,11 +207,7 @@ export default function LaporanEkspor() {
     const questions = fullData?.questions || [];
     const answersMap = fullData?.answers || {};
 
-    let out = buildBsanCsvHeader({
-      title: 'DATA HASIL OBSERVASI SOCIAL-EMOTIONAL LEARNING (SEL) BSAN (RAW)',
-      wilayah,
-      totalInfo: `Total Sesi Observasi: ${sessions.length}`,
-    });
+    let out = '';
 
     const headers = [
       'Timestamp', 'No.', 'NPSN', 'Nama Sekolah', 'Kabupaten', 'Kecamatan', 'Tanggal Observasi',
