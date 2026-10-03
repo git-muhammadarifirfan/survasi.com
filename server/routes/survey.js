@@ -4,13 +4,19 @@
  * @description Kuesioner BSAN survey API endpoints
  *
  * GET  /api/survey/questions → Get all 37 survey questions from DB
+ * GET  /api/survey/my-status → Status pengisian sekolah milik akun login
  * POST /api/survey/submit    → Submit survey answers
+ * POST /api/survey/draft     → Tandai sekolah sedang PROSES mengisi
  */
 
 const router = require('express').Router();
 const pool   = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth');
 const { submitLimiter } = require('../middleware/rateLimiter');
+const {
+  loadRoleMap, buildRoleMap, parseOptions,
+  toPenerimaModul, toStatusImplementasi, toJenisKelamin,
+} = require('../utils/surveyRoles');
 
 router.use(authMiddleware);
 
@@ -27,12 +33,12 @@ router.get('/questions', async (req, res) => {
       ORDER BY urutan ASC
     `);
 
-    // Parse JSON options
+    // Parse JSON options + lampirkan peran semantik (nama/sekolah/kabupaten/kecamatan, dst.)
+    const { roleById } = buildRoleMap(rows);
     const formatted = rows.map(q => ({
       ...q,
-      opsi_jawaban: typeof q.opsi_jawaban === 'string' 
-        ? JSON.parse(q.opsi_jawaban) 
-        : (q.opsi_jawaban || [])
+      opsi_jawaban: parseOptions(q.opsi_jawaban),
+      role: roleById[q.id] || null,
     }));
 
     return res.json({ success: true, data: formatted });
@@ -320,98 +326,147 @@ router.delete('/sections/:sectionKey', async (req, res) => {
   }
 });
 
+// ─── Helpers: identitas sekolah dari akun ─────────────────────────────────────
+async function loadSchoolIdentity(conn, sekolahId) {
+  if (!sekolahId) return null;
+  const [rows] = await conn.execute(`
+    SELECT sp.id, sp.npsn, sp.nama, sp.kecamatan_id, k.nama AS kecamatan,
+           k.kabupaten_id, kb.nama AS kabupaten
+    FROM satuan_pendidikan sp
+    JOIN kecamatan k ON sp.kecamatan_id = k.id
+    JOIN kabupaten kb ON k.kabupaten_id = kb.id
+    WHERE sp.id = ? AND sp.deleted_at IS NULL
+    LIMIT 1
+  `, [sekolahId]);
+  return rows[0] || null;
+}
+
+// ─── GET /api/survey/my-status (status pengisian sekolah milik akun) ─────────
+router.get('/my-status', async (req, res) => {
+  try {
+    const sekolahId = req.user?.sekolah_id || null;
+    if (!sekolahId) return res.json({ success: true, data: null });
+
+    const school = await loadSchoolIdentity(pool, sekolahId);
+    const [[st]] = await pool.execute(
+      `SELECT status_pengisian, last_updated FROM satuan_pendidikan WHERE id = ?`, [sekolahId]
+    );
+    const [respRows] = await pool.execute(`
+      SELECT id, nama, posisi, jenis_kelamin, submitted_at
+      FROM responden_survey
+      WHERE sekolah_id = ? AND deleted_at IS NULL
+      ORDER BY submitted_at DESC, id DESC
+    `, [sekolahId]);
+
+    return res.json({
+      success: true,
+      data: {
+        sekolah: school,
+        status_pengisian: st?.status_pengisian || 'belum',
+        last_updated: st?.last_updated || null,
+        total_responden: respRows.length,
+        responden: respRows,
+      },
+    });
+  } catch (err) {
+    console.error('[SURVEY] my-status error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal memuat status pengisian.' });
+  }
+});
+
 // ─── POST /api/survey/submit ─────────────────────────────────────────────────
 router.post('/submit', submitLimiter, async (req, res) => {
   const conn = await pool.getConnection();
   try {
+    const { jawaban } = req.body || {};
+    if (!Array.isArray(jawaban) || jawaban.length === 0) {
+      return res.status(400).json({ success: false, message: 'Jawaban survei kosong.' });
+    }
+
+    // 1. Sekolah: akun sekolah SELALU memakai sekolah yang terdaftar di akunnya.
+    //    Admin (mode simulasi) boleh mengirim sekolah_id eksplisit.
+    const sekolahId = req.user?.role === 'sekolah'
+      ? (req.user.sekolah_id || null)
+      : (req.body.sekolah_id ? parseInt(req.body.sekolah_id, 10) : (req.user?.sekolah_id || null));
+    const school = await loadSchoolIdentity(conn, sekolahId);
+    if (!school) {
+      return res.status(400).json({
+        success: false,
+        message: 'Akun Anda belum terhubung dengan sekolah yang valid. Hubungi admin untuk menautkan sekolah.',
+      });
+    }
+
+    // 2. Petakan jawaban ke peran semantik pertanyaan
+    const { questions, roleById } = await loadRoleMap(conn);
+    const qById = new Map(questions.map(q => [q.id, q]));
+
+    const answerByRole = {};
+    const cleanAnswers = [];
+    for (const j of jawaban) {
+      const pId = parseInt(j.pertanyaan_id, 10);
+      const q = qById.get(pId);
+      if (!q || cleanAnswers.some(a => a[0] === pId)) continue;
+
+      const role = roleById[pId];
+      let value = j.value;
+
+      // Identitas sekolah/wilayah dipaksa dari data akun (tidak bisa dimanipulasi form)
+      if (role === 'sekolah') value = school.nama;
+      if (role === 'kabupaten') {
+        const opts = parseOptions(q.opsi_jawaban);
+        const bare = school.kabupaten.replace(/^(kab\.?|kabupaten|kota)\s+/i, '').trim();
+        value = opts.find(o => o.toLowerCase() === bare.toLowerCase()) || school.kabupaten;
+      }
+      if (role === 'kecamatan') value = school.kecamatan;
+
+      let multiVal = null;
+      let terstrukturVal = null;
+      let bebasVal = null;
+      if (Array.isArray(value)) {
+        const arr = value.map(v => String(v).trim()).filter(Boolean);
+        if (arr.length === 0) continue;
+        multiVal = JSON.stringify(arr);
+      } else if (value !== undefined && value !== null && String(value).trim() !== '') {
+        const str = String(value).trim();
+        if (q.tipe === 'text') bebasVal = str;
+        else terstrukturVal = str;
+      } else {
+        continue; // jawaban kosong tidak disimpan
+      }
+
+      cleanAnswers.push([pId, terstrukturVal, bebasVal, multiVal]);
+      if (role) answerByRole[role] = Array.isArray(value) ? value : String(value).trim();
+    }
+
+    // Pastikan pertanyaan identitas sekolah & wilayah tetap tercatat walau tidak dikirim form
+    const { byRole: activeByRole } = buildRoleMap(questions.filter(q => q.is_active));
+    const forced = { sekolah: school.nama, kecamatan: school.kecamatan };
+    for (const [role, val] of Object.entries(forced)) {
+      const q = activeByRole[role];
+      if (q && !cleanAnswers.some(a => a[0] === q.id)) {
+        cleanAnswers.push([q.id, val, null, null]);
+      }
+    }
+
+    // 3. Ringkasan responden diturunkan dari jawaban per-peran (bukan dari index form)
+    const namaVal = String(answerByRole.nama || req.user?.nama || '').trim();
+    if (!namaVal) {
+      return res.status(400).json({ success: false, message: 'Nama responden wajib diisi.' });
+    }
+    const jk = toJenisKelamin(answerByRole.jenis_kelamin) || 'L';
+    const posisi = String(answerByRole.posisi || req.user?.jabatan || 'Guru').substring(0, 100);
+    const penerima = toPenerimaModul(answerByRole.penerima_modul) || 'Tidak';
+    const penyelenggaraRaw = answerByRole.penyelenggara;
+    const penyelenggara = Array.isArray(penyelenggaraRaw)
+      ? penyelenggaraRaw.join(', ')
+      : (penyelenggaraRaw ? String(penyelenggaraRaw) : null);
+    // Status implementasi hanya bermakna jika sudah menerima modul
+    const statusImpl = penerima === 'Ya' ? toStatusImplementasi(answerByRole.status_implementasi) : null;
+    const kelas = answerByRole.kelas_mengajar ? String(answerByRole.kelas_mengajar).substring(0, 50) : null;
+    const noWa = answerByRole.no_wa ? (String(answerByRole.no_wa).replace(/[^\d+]/g, '').substring(0, 20) || null) : null;
+
     await conn.beginTransaction();
 
-    const {
-      nama, jenis_kelamin, posisi, sekolah_id, npsn,
-      kabupaten_id, kecamatan_id, penerima_modul,
-      penyelenggara_pelatihan, status_implementasi,
-      kelas_mengajar, no_wa, jawaban
-    } = req.body;
-
-    let sekolahId = sekolah_id ? parseInt(sekolah_id) : (req.user?.sekolah_id || null);
-    let npsnVal = (npsn && typeof npsn === 'string' && npsn.length <= 20) ? npsn : null;
-
-    // If sekolahId not provided, search by school name or NPSN
-    if (!sekolahId && npsn) {
-      const [spMatch] = await conn.execute(
-        `SELECT id, npsn, kecamatan_id FROM satuan_pendidikan WHERE nama = ? OR npsn = ? LIMIT 1`,
-        [npsn, npsn]
-      );
-      if (spMatch.length > 0) {
-        sekolahId = spMatch[0].id;
-        npsnVal = spMatch[0].npsn;
-      }
-    }
-
-    if (!sekolahId) sekolahId = 1;
-
-    let kabId = kabupaten_id ? parseInt(kabupaten_id) : (req.user?.kabupaten_id || 1);
-    let kecId = kecamatan_id ? parseInt(kecamatan_id) : (req.user?.kecamatan_id || 1);
-
-    // Lookup school and fallback to first valid school in DB if missing
-    let spRows = [];
-    if (sekolahId) {
-      [spRows] = await conn.execute(
-        `SELECT sp.id, sp.npsn, sp.kecamatan_id, k.kabupaten_id 
-         FROM satuan_pendidikan sp 
-         JOIN kecamatan k ON sp.kecamatan_id = k.id 
-         WHERE sp.id = ? LIMIT 1`,
-        [sekolahId]
-      );
-    }
-
-    if (spRows.length > 0) {
-      sekolahId = spRows[0].id;
-      npsnVal = spRows[0].npsn || npsnVal;
-      kecId = spRows[0].kecamatan_id;
-      kabId = spRows[0].kabupaten_id;
-    } else {
-      const [firstSp] = await conn.execute(
-        `SELECT sp.id, sp.npsn, sp.kecamatan_id, k.kabupaten_id 
-         FROM satuan_pendidikan sp 
-         JOIN kecamatan k ON sp.kecamatan_id = k.id 
-         LIMIT 1`
-      );
-      if (firstSp.length > 0) {
-        sekolahId = firstSp[0].id;
-        npsnVal = firstSp[0].npsn || npsnVal;
-        kecId = firstSp[0].kecamatan_id;
-        kabId = firstSp[0].kabupaten_id;
-      }
-    }
-
-    // Sanitize ENUMs and length-sensitive columns
-    let jk = 'L';
-    if (jenis_kelamin === 'P' || (typeof jenis_kelamin === 'string' && jenis_kelamin.toLowerCase().startsWith('p'))) {
-      jk = 'P';
-    }
-
-    let penMod = 'Ya';
-    if (penerima_modul === 'Tidak' || (typeof penerima_modul === 'string' && penerima_modul.toLowerCase().includes('tidak'))) {
-      penMod = 'Tidak';
-    }
-
-    let stImpl = 'sudah';
-    if (status_implementasi === 'sebagian') stImpl = 'sebagian';
-    else if (status_implementasi === 'belum') stImpl = 'belum';
-    else if (typeof status_implementasi === 'string') {
-      const sLower = status_implementasi.toLowerCase();
-      if (sLower.includes('belum')) stImpl = 'belum';
-      else if (sLower.includes('sebagian')) stImpl = 'sebagian';
-    }
-
-    const cleanNama = (nama || req.user?.nama || 'Responden Survei').substring(0, 200);
-    const cleanPosisi = (posisi || req.user?.jabatan || 'Guru').substring(0, 100);
-    const cleanNpsn = npsnVal ? String(npsnVal).substring(0, 20) : null;
-    const cleanKelas = kelas_mengajar ? String(kelas_mengajar).substring(0, 50) : 'Semua Kelas';
-    const cleanNoWa = no_wa ? String(no_wa).substring(0, 30) : null;
-
-    // Insert responden
     const [respResult] = await conn.execute(`
       INSERT INTO responden_survey (
         nama, jenis_kelamin, posisi, sekolah_id, npsn,
@@ -420,60 +475,34 @@ router.post('/submit', submitLimiter, async (req, res) => {
         kelas_mengajar, no_wa, submitted_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `, [
-      cleanNama,
-      jk,
-      cleanPosisi,
-      sekolahId,
-      cleanNpsn,
-      kabId,
-      kecId,
-      penMod,
-      Array.isArray(penyelenggara_pelatihan) ? penyelenggara_pelatihan.join(', ') : (penyelenggara_pelatihan || 'Dinas Pendidikan'),
-      stImpl,
-      cleanKelas,
-      cleanNoWa
+      namaVal.substring(0, 200), jk, posisi, school.id, school.npsn,
+      school.kabupaten_id, school.kecamatan_id, penerima,
+      penyelenggara, statusImpl, kelas, noWa,
     ]);
-
     const respondenId = respResult.insertId;
 
-    // Insert answers
-    if (jawaban && Array.isArray(jawaban) && jawaban.length > 0) {
-      for (const j of jawaban) {
-        let multiVal = null;
-        let terstrukturVal = null;
-        let bebasVal = null;
-
-        if (Array.isArray(j.value)) {
-          multiVal = JSON.stringify(j.value);
-        } else if (typeof j.value === 'string') {
-          if (j.tipe === 'text') bebasVal = j.value;
-          else terstrukturVal = j.value;
-        }
-
-        const pId = parseInt(j.pertanyaan_id);
-        if (!isNaN(pId)) {
-          await conn.execute(`
-            INSERT INTO jawaban_survey (
-              responden_id, pertanyaan_id, jawaban_terstruktur, jawaban_bebas, jawaban_multi
-            ) VALUES (?, ?, ?, ?, ?)
-          `, [respondenId, pId, terstrukturVal, bebasVal, multiVal]);
-        }
-      }
+    if (cleanAnswers.length > 0) {
+      await conn.query(
+        `INSERT INTO jawaban_survey (responden_id, pertanyaan_id, jawaban_terstruktur, jawaban_bebas, jawaban_multi) VALUES ?`,
+        [cleanAnswers.map(a => [respondenId, ...a])]
+      );
     }
 
-    // Update status_pengisian pada sekolah sasaran
-    if (sekolahId) {
-      await conn.execute(`
-        UPDATE satuan_pendidikan
-        SET status_pengisian = 'sudah', last_updated = NOW()
-        WHERE id = ?
-      `, [sekolahId]);
-    }
+    // Status pengisian sekolah → 'sudah' (selesai mengirim)
+    await conn.execute(
+      `UPDATE satuan_pendidikan SET status_pengisian = 'sudah', last_updated = NOW() WHERE id = ?`,
+      [school.id]
+    );
+
+    await conn.execute(
+      `INSERT INTO activity_log (user_id, aksi, target_tabel, target_id, detail) VALUES (?, 'submit_survey', 'responden_survey', ?, ?)`,
+      [req.user?.id || null, respondenId, JSON.stringify({ sekolah_id: school.id, nama: namaVal })]
+    ).catch(() => {});
 
     await conn.commit();
     return res.status(201).json({ success: true, responden_id: respondenId, message: 'Survei berhasil disimpan.' });
   } catch (err) {
-    await conn.rollback();
+    await conn.rollback().catch(() => {});
     console.error('[SURVEY] submit error:', err);
     return res.status(500).json({ success: false, message: `Gagal mengirim survei: ${err.message || 'Error internal server'}` });
   } finally {
@@ -481,22 +510,32 @@ router.post('/submit', submitLimiter, async (req, res) => {
   }
 });
 
-// ─── POST /api/survey/draft (Update status_pengisian to 'sebagian' on draft save) ──
+// ─── POST /api/survey/draft ──────────────────────────────────────────────────
+// Dipanggil saat pengguna mulai/sedang mengisi. Sekolah berstatus 'belum'
+// berubah menjadi 'sebagian' (= PROSES mengisi). Status 'sudah' tidak diturunkan.
 router.post('/draft', async (req, res) => {
   try {
-    const { sekolah_id } = req.body;
-    const sekolahId = sekolah_id ? parseInt(sekolah_id) : (req.user?.sekolah_id || null);
+    const sekolahId = req.user?.role === 'sekolah'
+      ? (req.user.sekolah_id || null)
+      : (req.body?.sekolah_id ? parseInt(req.body.sekolah_id, 10) : null);
 
-    if (sekolahId) {
-      await pool.execute(`
-        UPDATE satuan_pendidikan
-        SET status_pengisian = CASE WHEN status_pengisian = 'sudah' THEN 'sudah' ELSE 'sebagian' END,
-            last_updated = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `, [sekolahId]);
+    if (!sekolahId) return res.json({ success: true, updated: false });
+
+    const [result] = await pool.execute(`
+      UPDATE satuan_pendidikan
+      SET status_pengisian = 'sebagian', last_updated = CURRENT_TIMESTAMP
+      WHERE id = ? AND status_pengisian = 'belum'
+    `, [sekolahId]);
+
+    // Perbarui jejak waktu aktivitas agar status "proses" terlihat realtime
+    if (result.affectedRows === 0) {
+      await pool.execute(
+        `UPDATE satuan_pendidikan SET last_updated = CURRENT_TIMESTAMP WHERE id = ? AND status_pengisian = 'sebagian'`,
+        [sekolahId]
+      );
     }
 
-    return res.json({ success: true, message: 'Draft tersimpan. Status pengisian sekolah menjadi sebagian mengisi.' });
+    return res.json({ success: true, updated: result.affectedRows > 0 });
   } catch (err) {
     console.error('[SURVEY] draft update error:', err);
     return res.status(500).json({ success: false, message: 'Gagal memperbarui status draft.' });

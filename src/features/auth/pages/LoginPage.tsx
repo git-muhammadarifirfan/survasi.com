@@ -12,7 +12,6 @@ import {
   RefreshCw, Lock, ArrowLeft, Send
 } from 'lucide-react';
 import { apiClient, saveToken } from '../../../shared/services/api-client';
-import { database } from '../../../shared/data/data-source';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import BrevoEmailTemplate from '../components/BrevoEmailTemplate';
 import { notifyToast } from '../../../shared/components/NotificationToast';
@@ -127,18 +126,20 @@ export default function Login({ onLogin }: LoginProps) {
     return () => clearInterval(timer);
   }, []);
 
-  // Fetch real schools from database for registration
+  // Daftar sekolah untuk registrasi (publik). Sekolah yang sudah dipakai akun lain
+  // ditandai is_registered oleh backend dan tidak bisa dipilih lagi.
   useEffect(() => {
-    if (viewMode === 'register' && dbSchoolsList.length === 0) {
+    if (viewMode === 'register') {
       setIsFetchingSchools(true);
-      database.getSchools()
-        .then((schools) => {
-          setDbSchoolsList(schools);
-        })
+      apiClient.sekolah.getOptions()
+        .then((res) => setDbSchoolsList(Array.isArray(res?.data) ? res.data : []))
         .catch(() => { })
         .finally(() => setIsFetchingSchools(false));
     }
   }, [viewMode]);
+
+  const availableSchools = dbSchoolsList.filter((s) => !Number(s.is_registered));
+  const registeredCount = dbSchoolsList.length - availableSchools.length;
 
   // Timer cooldown for OTP resend
   useEffect(() => {
@@ -712,7 +713,7 @@ export default function Login({ onLogin }: LoginProps) {
                       label="Satuan Pendidikan (Sekolah) *"
                       options={[
                         { value: '', label: isFetchingSchools ? 'Memuat daftar sekolah...' : '-- Pilih / Cari Sekolah Sasaran --' },
-                        ...dbSchoolsList.map((s) => ({
+                        ...availableSchools.map((s) => ({
                           value: String(s.id),
                           label: `${s.nama} (${s.npsn || 'NPSN'}) • Kec. ${s.kecamatan}`,
                         })),
@@ -732,6 +733,11 @@ export default function Login({ onLogin }: LoginProps) {
                       placeholder="Cari nama atau NPSN sekolah..."
                       enableSearch={true}
                     />
+                    {registeredCount > 0 && (
+                      <p className="text-[10px] text-text-secondary leading-relaxed">
+                        {registeredCount} sekolah sudah memiliki akun dan tidak ditampilkan. Satu sekolah hanya dapat didaftarkan satu kali — jika sekolah Anda tidak ada di daftar, silakan login dengan akun yang sudah terdaftar atau hubungi admin.
+                      </p>
+                    )}
                   </div>
                 )}
 

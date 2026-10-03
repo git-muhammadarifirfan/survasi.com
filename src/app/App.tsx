@@ -35,12 +35,19 @@ const Setting = lazy(() => import('../features/setting/pages/SettingPage'));
 const UserManagementPage = lazy(() => import('../features/users/pages/UserManagementPage'));
 const SurveyManagementPage = lazy(() => import('../features/survey/pages/SurveyManagementPage'));
 
+// Data monitoring harus realtime: cache singkat, refetch saat tab kembali aktif,
+// dan polling berkala selama halaman terbuka (berhenti otomatis saat tab di background).
+const REALTIME_INTERVAL_MS = 20_000;
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      refetchOnWindowFocus: false,
-      staleTime: 1000 * 60 * 5, // 5 minutes fresh cache
-      gcTime: 1000 * 60 * 15,    // 15 minutes garbage collection
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
+      refetchInterval: REALTIME_INTERVAL_MS,
+      refetchIntervalInBackground: false,
+      staleTime: 10_000,
+      gcTime: 1000 * 60 * 15,
       retry: 1,
     },
   },

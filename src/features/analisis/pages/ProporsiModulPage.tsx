@@ -1,797 +1,376 @@
 /**
  * @module features/analisis/pages
- * @description Analisis proporsi penerima modul, penyelenggara, status implementasi
- * @tables responden_survey, jawaban_survey, pertanyaan_survey, kecamatan
- * @queries database/queries/proporsi_modul.sql → semua query
- * @api GET /api/analisis/proporsi?kabupaten_id=
+ * @description Proporsi Modul BSAN — seluruh visualisasi dihitung realtime dari jawaban
+ *   survei di database (responden_survey + jawaban_survey). Narasi insight dibentuk
+ *   otomatis dari angka aktual, tanpa teks klaim statis.
+ * @api GET /api/analisis/proporsi?kabupaten_id=&kecamatan=
  */
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { database, KABUPATEN_LIST } from '../../../shared/data/data-source';
-import type { ProporsiModulData } from '../../../shared/data/data-source';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import {
-  PieChart as PieIcon, ChevronDown, GraduationCap, TrendingUp, BookOpen, Users, Award, Building2,
-  CheckCircle2, Info, ArrowUpRight, Download
+  PieChart as PieIcon, GraduationCap, TrendingUp, BookOpen, Users, Award, Building2, Quote,
 } from 'lucide-react';
-import {
-  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
-} from 'recharts';
-import AnimatedCounter from '../../../shared/components/AnimatedCounter';
-import CustomSelect from '../../../shared/components/CustomSelect';
+import { database } from '../../../shared/data/data-source';
+import type { ProporsiModulData } from '../../../shared/data/data-source';
 import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
 import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
-import { buildBsanCsvHeader, buildCsvRow, triggerDownload, safeFilename, dateStamp } from '../../../shared/utils/exportCSV';
+import ExportMenu from '../../../shared/components/ExportMenu';
+import { exportTable } from '../../../shared/utils/tableExport';
+import {
+  PageHeader, Card, StatCard, BarList, StackedRow, Legend, EmptyState,
+  WilayahFilter, wilayahText, type WilayahValue,
+} from '../../../shared/components/analytics/AnalyticsUI';
 
 const TABS = [
-  { id: 'penerima', label: 'Proporsi Penerima', icon: PieIcon },
-  { id: 'pelatihan', label: 'Distribusi Pelatihan', icon: GraduationCap },
-  { id: 'implementasi', label: 'Status Implementasi', icon: TrendingUp },
+  { id: 'penerima', label: 'Penerima Modul', icon: PieIcon },
+  { id: 'pelatihan', label: 'Pelatihan', icon: GraduationCap },
+  { id: 'implementasi', label: 'Implementasi', icon: TrendingUp },
   { id: 'kemudahan', label: 'Kemudahan Modul', icon: BookOpen },
-  { id: 'keterlibatan', label: 'Media & Keterlibatan', icon: Users },
-  { id: 'dukungan', label: 'Dukungan Kepsek & Program', icon: Award },
-  { id: 'infrastruktur', label: 'Infrastruktur Sekolah', icon: Building2 },
+  { id: 'keterlibatan', label: 'Media & Keaktifan', icon: Users },
+  { id: 'dukungan', label: 'Dukungan Kepsek', icon: Award },
+  { id: 'profil', label: 'Profil Sekolah', icon: Building2 },
 ] as const;
-
 type TabId = typeof TABS[number]['id'];
 
-// Custom Recharts Tooltip yang Rapi & Jelas
-const CustomTooltip = ({ active, payload, label }: any) => {
-  if (active && payload && payload.length) {
-    return (
-      <div className="bg-surface p-3 rounded-xl border border-border shadow-xl text-xs z-50 animate-scale-in">
-        <p className="font-bold text-text-primary mb-1.5 border-b border-border/60 pb-1">{label}</p>
-        <div className="space-y-1">
-          {payload.map((entry: any, index: number) => (
-            <div key={`item-${index}`} className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
-                <span className="text-text-secondary">{entry.name}:</span>
-              </div>
-              <span className="font-bold font-display text-text-primary">
-                {entry.value} {typeof entry.value === 'number' && entry.value <= 100 && entry.unit === '%' ? '%' : ''}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-  return null;
+const C = {
+  sudah: '#10B981', sebagian: '#F59E0B', tidak: '#94A3B8', belum: '#F43F5E',
+  indigo: '#4F46E5', violet: '#7C3AED', teal: '#0D9488',
 };
+
+const IMPL_SEGMENTS = (r: { belumMenerima: number; tidakMenerapkan: number; sebagian: number; sudah: number }) => [
+  { key: 'sudah', label: 'Sudah seluruhnya', value: r.sudah, color: C.sudah },
+  { key: 'sebagian', label: 'Sebagian', value: r.sebagian, color: C.sebagian },
+  { key: 'tidak', label: 'Menerima, belum menerapkan', value: r.tidakMenerapkan, color: C.tidak },
+  { key: 'belum', label: 'Belum menerima modul', value: r.belumMenerima, color: C.belum },
+];
+
+/** Kalimat ringkas dari item teratas sebuah distribusi */
+function topInsight(items: { label: string; persen: number; jumlah: number }[], noun: string): string | null {
+  const top = items.find(i => i.jumlah > 0);
+  if (!top) return null;
+  return `${noun} paling banyak: "${top.label}" (${top.persen}%, ${top.jumlah} responden).`;
+}
+
+function Insight({ text }: { text: string | null }) {
+  if (!text) return null;
+  return <p className="text-xs text-text-secondary leading-relaxed bg-bg border border-border/60 rounded-xl px-3 py-2">{text}</p>;
+}
 
 export default function ProporsiModul() {
   const [activeTab, setActiveTab] = useState<TabId>('penerima');
-  const [kabupaten, setKabupaten] = useState('Semua Wilayah');
+  const [wilayah, setWilayah] = useState<WilayahValue>({});
 
-  const { data, isLoading, isError, error: fetchError, refetch } = useQuery({
-    queryKey: ['proporsiModul', kabupaten],
-    queryFn: () => database.getProporsiModulData(kabupaten),
+  const { data, isLoading, isError, error, refetch, dataUpdatedAt, isFetching } = useQuery({
+    queryKey: ['proporsiModul', wilayah.kabupatenNama, wilayah.kecamatan],
+    queryFn: () => database.getProporsiModulData({ kabupaten: wilayah.kabupatenNama, kecamatan: wilayah.kecamatan }),
   });
 
-  const regionOptions = KABUPATEN_LIST.map(k => ({
-    value: k.id,
-    label: k.name,
-    icon: <span className="w-2.5 h-2.5 rounded-full shrink-0 inline-block" style={{ backgroundColor: k.color }} />
-  }));
-
-  const ActiveIcon = TABS.find(t => t.id === activeTab)?.icon || PieIcon;
-
-  // Colors Palette dari PDF & System
-  const COLOR_EMERALD = '#10B981';
-  const COLOR_ROSE = '#F43F5E';
-  const COLOR_INDIGO = '#4F46E5';
-  const COLOR_VIOLET = '#7C3AED';
-  const COLOR_AMBER = '#F59E0B';
-  const COLOR_SLATE = '#64748B';
-
-  if (isLoading) {
-    return (
-      <div className="py-20 text-center rounded-2xl bg-surface border border-border">
-        <ThreeDotsLoader text="Memuat visualisasi proporsi modul..." />
-      </div>
-    );
-  }
-
-  if (isError || !data) {
-    return (
-      <ConnectionErrorCard
-        title="Gagal Memuat Proporsi Modul"
-        message={(fetchError as any)?.message || 'Gagal terhubung ke server.'}
-        onRetry={() => refetch()}
-      />
-    );
-  }
+  const handleExport = (format: 'xlsx' | 'csv') => {
+    if (!data) return;
+    const d = data;
+    exportTable({
+      title: 'Proporsi Modul BSAN',
+      wilayah: `${wilayahText(wilayah)} • ${d.totalResponden} responden`,
+      filename: `Proporsi_Modul_${wilayahText(wilayah)}`,
+      sheets: [
+        { name: 'Penerima per Kecamatan', columns: ['Kabupaten/Kota', 'Kecamatan', 'Responden', 'Menerima Modul', 'Menerima (%)', 'Belum (%)'],
+          rows: d.distribusiPerKecamatan.map(r => [r.kabupaten, r.kecamatan, r.total, r.jumlahYa, r.ya, r.tidak]) },
+        { name: 'Penyelenggara Pelatihan', columns: ['Penyelenggara', 'Jumlah Responden', 'Persen (%)'],
+          rows: d.penyelenggaraPelatihan.map(r => [r.nama, r.jumlah, r.persen]) },
+        { name: 'Implementasi per Posisi', columns: ['Posisi', 'Responden', 'Sudah (%)', 'Sebagian (%)', 'Belum Menerapkan (%)', 'Belum Menerima (%)'],
+          rows: d.statusImplementasiPosisi.map(r => [r.posisi, r.total, r.sudah, r.sebagian, r.tidakMenerapkan, r.belumMenerima]) },
+        { name: 'Implementasi per Kecamatan', columns: ['Kecamatan', 'Responden', 'Sudah (%)', 'Sebagian (%)', 'Belum Menerapkan (%)', 'Belum Menerima (%)'],
+          rows: d.statusImplementasiKecamatan.map(r => [r.kecamatan, r.total, r.sudah, r.sebagian, r.tidakMenerapkan, r.belumMenerima]) },
+        { name: 'Kemudahan & Kesulitan', columns: ['Kelas', 'Kategori', 'Bagian Modul', 'Jumlah', 'Persen (%)'],
+          rows: [
+            ...d.kemudahanModul.kelasAwal.mudah.map(r => ['Kelas Awal', 'Mudah', r.modul, r.jumlah, r.persen]),
+            ...d.kemudahanModul.kelasAwal.sulit.map(r => ['Kelas Awal', 'Sulit', r.modul, r.jumlah, r.persen]),
+            ...d.kemudahanModul.kelasTinggi.mudah.map(r => ['Kelas Tinggi', 'Mudah', r.modul, r.jumlah, r.persen]),
+            ...d.kemudahanModul.kelasTinggi.sulit.map(r => ['Kelas Tinggi', 'Sulit', r.modul, r.jumlah, r.persen]),
+          ] },
+        { name: 'Media Pembelajaran', columns: ['Kelas', 'Media', 'Jumlah', 'Persen (%)'],
+          rows: [
+            ...d.mediaPembelajaran.kelasAwal.map(r => ['Kelas Awal', r.media, r.jumlah, r.persen]),
+            ...d.mediaPembelajaran.kelasTinggi.map(r => ['Kelas Tinggi', r.media, r.jumlah, r.persen]),
+          ] },
+        { name: 'Keaktifan & Refleksi', columns: ['Indikator', 'Pilihan', 'Jumlah', 'Persen (%)'],
+          rows: [
+            ...d.keterlibatanSiswa.map(r => ['Keaktifan murid', r.kategori, r.jumlah, r.persen]),
+            ...d.refleksiMurid.map(r => ['Refleksi dengan murid', r.label, r.jumlah, r.persen]),
+            ...d.refleksiGuruFreq.map(r => ['Refleksi dengan guru lain', r.label, r.jumlah, r.persen]),
+            ...d.kesepakatanKelas.map(r => ['Kesepakatan kelas', r.label, r.jumlah, r.persen]),
+          ] },
+        { name: 'Dukungan & Program', columns: ['Kategori', 'Bentuk', 'Jumlah', 'Persen (%)'],
+          rows: [
+            ...d.dukunganKepsek.map(r => ['Dukungan kepala sekolah', r.metode, r.jumlah, r.persen]),
+            ...d.rencanaAksi.map(r => ['Program sekolah', r.program, r.jumlah, r.persen]),
+          ] },
+        { name: 'Profil Sekolah', columns: ['Kecamatan', 'Jumlah Sekolah', 'Total Guru', 'Total Siswa', 'Rasio Siswa/Guru', 'Sekolah Selesai Survei (%)'],
+          rows: d.profilSekolah.map(r => [r.kecamatan, r.jumlahSekolah, r.totalGuru, r.totalSiswa, r.rasio, r.cakupan]) },
+      ],
+    }, format);
+  };
 
   return (
-    <div className="space-y-6 animate-fade-in pb-8">
-      {/* Header Container */}
-      <div className="rounded-2xl bg-surface p-6 shadow-card border border-border flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5 mb-1">
-            <div className="p-2 rounded-xl bg-primary/10 text-primary">
-              <ActiveIcon className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-xl font-bold font-display text-text-primary">Proporsi Modul BSAN</h2>
-              <p className="text-xs text-text-secondary">
-                Visualisasi data survei real wilayah {kabupaten} (1.101 Responden).
-              </p>
-            </div>
-          </div>
-        </div>
+    <div className="space-y-5 animate-fade-in pb-10">
+      <PageHeader
+        icon={<PieIcon className="h-5 w-5" />}
+        title="Proporsi Modul BSAN"
+        subtitle={data
+          ? `${wilayahText(wilayah)} • ${data.totalResponden} responden dari ${data.totalSekolahResponden} sekolah`
+          : wilayahText(wilayah)}
+        actions={
+          <>
+            <WilayahFilter value={wilayah} onChange={setWilayah} />
+            <ExportMenu disabled={!data} onExport={handleExport} />
+          </>
+        }
+      />
 
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Filter Kabupaten */}
-          <div className="w-52">
-            <CustomSelect
-              options={regionOptions}
-              value={kabupaten}
-              onChange={(val) => setKabupaten(val)}
-              size="md"
-            />
-          </div>
-
-          {/* Tombol Export CSV */}
-          <button
-            onClick={() => {
-              const kab = safeFilename(kabupaten || 'SemuaWilayah');
-              const tabLabel = TABS.find(t => t.id === activeTab)?.label || activeTab;
-
-              let csv = buildBsanCsvHeader({
-                title: `PROPORSI MODUL BSAN — ${tabLabel.toUpperCase()}`,
-                wilayah: kabupaten,
-              });
-
-              const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
-
-              if (activeTab === 'penerima') {
-                csv += buildCsvRow(['Timestamp', 'No.', 'Kecamatan', 'Sudah Menerima (%)', 'Belum Menerima (%)']) + '\n';
-                data.distribusiPerKecamatan.forEach((r, i) => {
-                  csv += buildCsvRow([ts, i + 1, r.kecamatan, r.ya, r.tidak]) + '\n';
-                });
-              } else if (activeTab === 'pelatihan') {
-                csv += buildCsvRow(['Timestamp', 'No.', 'Penyelenggara Pelatihan', 'Jumlah Guru Terlatih']) + '\n';
-                data.penyelenggaraPelatihan.forEach((r, i) => {
-                  csv += buildCsvRow([ts, i + 1, r.nama, r.jumlah]) + '\n';
-                });
-              } else if (activeTab === 'implementasi') {
-                csv += buildCsvRow(['Timestamp', 'No.', 'Posisi', 'Belum Menerima (%)', 'Sebagian (%)', 'Sudah Seluruhnya (%)']) + '\n';
-                data.statusImplementasiPosisi.forEach((r, i) => {
-                  csv += buildCsvRow([ts, i + 1, r.posisi, r.belumMenerima, r.sebagian, r.sudah]) + '\n';
-                });
-              } else if (activeTab === 'kemudahan') {
-                csv += buildCsvRow(['Timestamp', 'No.', 'Modul', 'Tingkat Kemudahan (%)']) + '\n';
-                data.kemudahanModul.kelasAwal.mudah.forEach((r, i) => {
-                  csv += buildCsvRow([ts, i + 1, r.modul, r.persen]) + '\n';
-                });
-              } else if (activeTab === 'keterlibatan') {
-                csv += buildCsvRow(['Timestamp', 'No.', 'Media Pembelajaran', 'Persentase Penggunaan (%)']) + '\n';
-                data.mediaPembelajaran.kelasAwal.forEach((r, i) => {
-                  csv += buildCsvRow([ts, i + 1, r.media, r.persen]) + '\n';
-                });
-              } else if (activeTab === 'dukungan') {
-                csv += buildCsvRow(['Timestamp', 'No.', 'Bentuk Dukungan Kepala Sekolah', 'Jumlah Kepsek']) + '\n';
-                data.dukunganKepsek.forEach((r, i) => {
-                  csv += buildCsvRow([ts, i + 1, r.metode, r.jumlah]) + '\n';
-                });
-              } else if (activeTab === 'infrastruktur') {
-                csv += buildCsvRow(['Timestamp', 'No.', 'Kecamatan', 'Kondisi Baik (%)', 'Kondisi Cukup (%)', 'Kondisi Rusak (%)']) + '\n';
-                data.kondisiFasilitas.forEach((r, i) => {
-                  csv += buildCsvRow([ts, i + 1, r.kecamatan, r.baik, r.cukup, r.rusak]) + '\n';
-                });
-              } else {
-                csv += buildCsvRow(['Timestamp', 'No.', 'Kategori', 'Nilai']) + '\n';
-              }
-
-              triggerDownload(csv, `ProporsiModul_${tabLabel.replace(/\s+/g, '_')}_${kab}_${dateStamp()}.csv`);
-            }}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary hover:bg-primary-dark text-white text-xs font-bold shadow-md transition-all cursor-pointer whitespace-nowrap"
-          >
-            <Download className="h-4 w-4" />
-            <span>Ekspor CSV</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Navigasi Tabs ber-Animasi */}
-      <div className="flex overflow-x-auto gap-2 pb-2 custom-scrollbar">
-        {TABS.map((tab) => {
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 custom-scrollbar">
+        {TABS.map(tab => {
           const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
+          const active = activeTab === tab.id;
           return (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex-shrink-0 flex items-center gap-2 rounded-xl px-4 py-3 text-xs font-bold border transition-all duration-300 cursor-pointer ${
-                isActive
-                  ? 'bg-primary text-white border-primary shadow-md shadow-primary/25 scale-[1.02]'
-                  : 'bg-surface text-text-secondary border-border hover:bg-bg hover:text-text-primary hover:border-border/80'
+              className={`shrink-0 inline-flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-xs font-bold border transition cursor-pointer ${
+                active ? 'bg-primary text-white border-primary shadow-sm' : 'bg-surface text-text-secondary border-border hover:text-text-primary'
               }`}
             >
-              <Icon className={`h-4 w-4 ${isActive ? 'text-white' : 'text-primary'}`} />
-              <span>{tab.label}</span>
+              <Icon className="h-4 w-4" />
+              {tab.label}
             </button>
           );
         })}
       </div>
 
-      {/* Konten Halaman */}
-      <div key={`${activeTab}-${kabupaten}`} className="space-y-6 animate-fade-in">
-          {/* ================= TAB 1: PROPORSI PENERIMA ================= */}
-          {activeTab === 'penerima' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Ringkasan & Pie Chart */}
-              <div className="lg:col-span-5 rounded-2xl bg-surface p-6 shadow-card border border-border flex flex-col justify-between space-y-6">
-                <div>
-                  <div className="flex items-center justify-between border-b border-border pb-3 mb-4">
-                    <h3 className="text-base font-bold text-text-primary font-display">
-                      Proporsi Penerima Materi Modul
-                    </h3>
-                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-primary/10 text-primary">
-                      Total {data.proporsiPenerima.totalResponden} Responden
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-text-secondary leading-relaxed mb-4">
-                    Diagram ini menggambarkan persentase pengajar dan kepala sekolah yang telah menerima modul BSAN di {kabupaten}.
-                  </p>
-
-                  <div className="h-64 w-full relative flex items-center justify-center">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={[
-                            { name: 'Menerima (Ya)', value: data.proporsiPenerima.ya },
-                            { name: 'Belum Menerima (Tidak)', value: data.proporsiPenerima.tidak },
-                          ]}
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={60}
-                          outerRadius={90}
-                          paddingAngle={4}
-                          dataKey="value"
-                          isAnimationActive={true}
-                          animationDuration={800}
-                        >
-                          <Cell fill={COLOR_EMERALD} />
-                          <Cell fill={COLOR_ROSE} />
-                        </Pie>
-                        <Tooltip content={<CustomTooltip />} />
-                        <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                      </PieChart>
-                    </ResponsiveContainer>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none pb-6">
-                      <span className="text-2xl font-extrabold font-display text-text-primary">
-                        <AnimatedCounter value={data.proporsiPenerima.ya} suffix="%" />
-                      </span>
-                      <span className="text-[10px] text-text-secondary font-medium">Menerima</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-center">
-                    <p className="text-[11px] text-text-secondary font-medium mb-0.5">Sudah Menerima</p>
-                    <p className="text-lg font-bold font-display text-emerald-600">
-                      <AnimatedCounter value={data.proporsiPenerima.ya} suffix="%" />
-                    </p>
-                  </div>
-                  <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-center">
-                    <p className="text-[11px] text-text-secondary font-medium mb-0.5">Belum Menerima</p>
-                    <p className="text-lg font-bold font-display text-rose-600">
-                      <AnimatedCounter value={data.proporsiPenerima.tidak} suffix="%" />
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Distribusi per Kecamatan */}
-              <div className="lg:col-span-7 rounded-2xl bg-surface p-6 shadow-card border border-border space-y-4">
-                <div className="border-b border-border pb-3">
-                  <h3 className="text-base font-bold text-text-primary font-display">
-                    Penerima Materi Modul per Kecamatan
-                  </h3>
-                  <p className="text-xs text-text-secondary mt-1">
-                    Sebaran cakupan modul di tiap-tiap kecamatan wilayah {kabupaten}.
-                  </p>
-                </div>
-
-                <div className="h-[360px] w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={data.distribusiPerKecamatan}
-                      layout="vertical"
-                      margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
-                      <XAxis type="number" domain={[0, 100]} unit="%" tick={{ fontSize: 11 }} />
-                      <YAxis dataKey="kecamatan" type="category" tick={{ fontSize: 11 }} width={90} tickFormatter={(val) => typeof val === 'string' && val.length > 15 ? val.slice(0, 14) + '...' : val} />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Bar
-                        dataKey="ya"
-                        name="Menerima Modul (%)"
-                        fill={COLOR_INDIGO}
-                        radius={[0, 6, 6, 0]}
-                        barSize={14}
-                        isAnimationActive={true}
-                        animationDuration={800}
-                        animationEasing="ease-out"
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ================= TAB 2: DISTRIBUSI PELATIHAN ================= */}
-          {activeTab === 'pelatihan' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Penyelenggara Pelatihan (Left Card) */}
-              <div className="lg:col-span-6 rounded-2xl bg-surface p-6 shadow-card border border-border space-y-4">
-                <div className="border-b border-border pb-3">
-                  <h3 className="text-base font-bold text-text-primary font-display">
-                    Distribusi Penyelenggara Pelatihan Modul BSAN
-                  </h3>
-                  <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                    Diagram ini menunjukkan sebaran lembaga penyelenggara pelatihan Modul BSAN. Diseminasi KKG/KKKS menjadi jalur utama pelatihan dengan jumlah tertinggi, diikuti INOVASI-Dinas Pendidikan dan jalur mandiri.
-                  </p>
-                </div>
-
-                <div className="h-[420px] w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={data.penyelenggaraPelatihan}
-                      layout="vertical"
-                      margin={{ top: 10, right: 30, left: 10, bottom: 25 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
-                      <XAxis type="number" tick={{ fontSize: 11 }} />
-                      <YAxis
-                        dataKey="nama"
-                        type="category"
-                        tick={{ fontSize: 11, fill: '#475569' }}
-                        width={150}
-                        tickFormatter={(val) => {
-                          if (typeof val === 'string' && val.length > 22) {
-                            return val.slice(0, 20) + '...';
-                          }
-                          return val;
-                        }}
-                      />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Bar
-                        dataKey="jumlah"
-                        name="Jumlah Guru Terlatih"
-                        fill={COLOR_VIOLET}
-                        radius={[0, 6, 6, 0]}
-                        barSize={18}
-                        isAnimationActive={true}
-                        animationDuration={800}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* Sebaran Kecamatan (Right Card) */}
-              <div className="lg:col-span-6 rounded-2xl bg-surface p-6 shadow-card border border-border space-y-4">
-                <div className="border-b border-border pb-3">
-                  <h3 className="text-base font-bold text-text-primary font-display">
-                    Distribusi Pelatihan BSAN per Kecamatan
-                  </h3>
-                  <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                    Grafik sebaran penerima materi modul menggambarkan cakupan pelatihan secara ringkas dan jelas di tiap kecamatan.
-                  </p>
-                </div>
-
-                <div className="h-[420px] w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={data.distribusiPerKecamatan}
-                      layout="vertical"
-                      margin={{ top: 10, right: 20, left: 10, bottom: 25 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
-                      <XAxis type="number" domain={[0, 100]} unit="%" tick={{ fontSize: 11 }} />
-                      <YAxis
-                        dataKey="kecamatan"
-                        type="category"
-                        tick={{ fontSize: 11, fill: '#475569' }}
-                        width={130}
-                        tickFormatter={(val) => {
-                          if (typeof val === 'string' && val.length > 18) {
-                            return val.slice(0, 16) + '...';
-                          }
-                          return val;
-                        }}
-                      />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: 11, paddingBottom: 10 }} />
-                      <Bar dataKey="ya" name="Pernah Pelatihan (Ya)" fill={COLOR_EMERALD} stackId="a" barSize={16} isAnimationActive={true} animationDuration={800} />
-                      <Bar dataKey="tidak" name="Belum Pelatihan (Tidak)" fill={COLOR_ROSE} stackId="a" radius={[0, 6, 6, 0]} barSize={16} isAnimationActive={true} animationDuration={800} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ================= TAB 3: STATUS IMPLEMENTASI ================= */}
-          {activeTab === 'implementasi' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Berdasarkan Posisi Responden */}
-              <div className="lg:col-span-6 rounded-2xl bg-surface p-6 shadow-card border border-border space-y-4">
-                <div className="border-b border-border pb-3">
-                  <h3 className="text-base font-bold text-text-primary font-display">
-                    Status Implementasi Berdasarkan Posisi Responden
-                  </h3>
-                  <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                    Grafik ini menunjukkan bahwa implementasi Modul BSAN di sebagian besar posisi masih didominasi responden yang belum menerima pelatihan atau baru menerapkannya sebagian.
-                  </p>
-                </div>
-
-                <div className="h-[420px] w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={data.statusImplementasiPosisi}
-                      layout="vertical"
-                      margin={{ top: 10, right: 20, left: 10, bottom: 25 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
-                      <XAxis type="number" domain={[0, 100]} unit="%" tick={{ fontSize: 11 }} />
-                      <YAxis
-                        dataKey="posisi"
-                        type="category"
-                        tick={{ fontSize: 11, fill: '#475569' }}
-                        width={140}
-                        tickFormatter={(val) => {
-                          if (typeof val === 'string' && val.length > 20) {
-                            return val.slice(0, 18) + '...';
-                          }
-                          return val;
-                        }}
-                      />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: 11, paddingBottom: 10 }} />
-                      <Bar dataKey="belumMenerima" name="Belum Menerima" fill={COLOR_ROSE} stackId="a" barSize={16} isAnimationActive={true} animationDuration={800} />
-                      <Bar dataKey="sebagian" name="Ya, Sebagian" fill={COLOR_AMBER} stackId="a" barSize={16} isAnimationActive={true} animationDuration={800} />
-                      <Bar dataKey="sudah" name="Ya, Sudah Seluruhnya" fill={COLOR_EMERALD} stackId="a" radius={[0, 6, 6, 0]} barSize={16} isAnimationActive={true} animationDuration={800} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* Status Implementasi per Kecamatan */}
-              <div className="lg:col-span-6 rounded-2xl bg-surface p-6 shadow-card border border-border space-y-4">
-                <div className="border-b border-border pb-3">
-                  <h3 className="text-base font-bold text-text-primary font-display">
-                    Status Implementasi per Kecamatan
-                  </h3>
-                  <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                    Implementasi Modul BSAN antar kecamatan belum merata, memperlihatkan perlunya pendampingan rutin di tingkat daerah.
-                  </p>
-                </div>
-
-                <div className="h-[420px] w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={data.statusImplementasiKecamatan}
-                      layout="vertical"
-                      margin={{ top: 10, right: 20, left: 10, bottom: 25 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
-                      <XAxis type="number" domain={[0, 100]} unit="%" tick={{ fontSize: 11 }} />
-                      <YAxis
-                        dataKey="kecamatan"
-                        type="category"
-                        tick={{ fontSize: 11, fill: '#475569' }}
-                        width={130}
-                        tickFormatter={(val) => {
-                          if (typeof val === 'string' && val.length > 18) {
-                            return val.slice(0, 16) + '...';
-                          }
-                          return val;
-                        }}
-                      />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: 11, paddingBottom: 10 }} />
-                      <Bar dataKey="belumMenerima" name="Belum Menerima" fill={COLOR_ROSE} stackId="a" barSize={16} isAnimationActive={true} animationDuration={800} />
-                      <Bar dataKey="sebagian" name="Ya, Sebagian" fill={COLOR_AMBER} stackId="a" barSize={16} isAnimationActive={true} animationDuration={800} />
-                      <Bar dataKey="sudah" name="Ya, Sudah Seluruhnya" fill={COLOR_EMERALD} stackId="a" radius={[0, 6, 6, 0]} barSize={16} isAnimationActive={true} animationDuration={800} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ================= TAB 4: KEMUDAHAN MODUL ================= */}
-          {activeTab === 'kemudahan' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Kelas Awal */}
-              <div className="lg:col-span-6 rounded-2xl bg-surface p-6 shadow-card border border-border space-y-4">
-                <div className="border-b border-border pb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-                    <h3 className="text-base font-bold text-text-primary font-display">
-                      Kemudahan Modul — Kelas Awal
-                    </h3>
-                  </div>
-                  <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                    Guru menilai materi dasar pada Alur 1 paling mudah dipahami, sementara materi kesadaran diri yang kompleks pada Alur 3 dirasa lebih sulit.
-                  </p>
-                </div>
-
-                <div className="h-[320px] w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={data.kemudahanModul.kelasAwal.mudah}
-                      layout="vertical"
-                      margin={{ top: 5, right: 30, left: 60, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
-                      <XAxis type="number" domain={[0, 100]} unit="%" tick={{ fontSize: 11 }} />
-                      <YAxis dataKey="modul" type="category" tick={{ fontSize: 10 }} width={150} />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Bar dataKey="persen" name="Tingkat Kemudahan (%)" fill={COLOR_EMERALD} radius={[0, 6, 6, 0]} barSize={16} isAnimationActive={true} animationDuration={800} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* Kelas Tinggi */}
-              <div className="lg:col-span-6 rounded-2xl bg-surface p-6 shadow-card border border-border space-y-4">
-                <div className="border-b border-border pb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-indigo-500" />
-                    <h3 className="text-base font-bold text-text-primary font-display">
-                      Kemudahan Modul — Kelas Tinggi
-                    </h3>
-                  </div>
-                  <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                    Materi pengenalan emosi Alur 1 dinilai paling mudah diajarkan. Sebaliknya, materi anatomi/konsep diri yang mendalam memerlukan penguatan strategi.
-                  </p>
-                </div>
-
-                <div className="h-[320px] w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={data.kemudahanModul.kelasTinggi.mudah}
-                      layout="vertical"
-                      margin={{ top: 5, right: 30, left: 60, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
-                      <XAxis type="number" domain={[0, 100]} unit="%" tick={{ fontSize: 11 }} />
-                      <YAxis dataKey="modul" type="category" tick={{ fontSize: 10 }} width={150} />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Bar dataKey="persen" name="Tingkat Kemudahan (%)" fill={COLOR_INDIGO} radius={[0, 6, 6, 0]} barSize={16} isAnimationActive={true} animationDuration={800} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ================= TAB 5: MEDIA & KETERLIBATAN ================= */}
-          {activeTab === 'keterlibatan' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Media Pembelajaran */}
-              <div className="lg:col-span-6 rounded-2xl bg-surface p-6 shadow-card border border-border space-y-4">
-                <div className="border-b border-border pb-3">
-                  <h3 className="text-base font-bold text-text-primary font-display">
-                    Penggunaan Media Pembelajaran
-                  </h3>
-                  <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                    Media gambar dan LKPD mendominasi pilihan guru kelas awal, sementara kelas tinggi bertumpu pada media audio-visual yang dinamis.
-                  </p>
-                </div>
-
-                <div className="h-[320px] w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={data.mediaPembelajaran.kelasAwal}
-                      layout="vertical"
-                      margin={{ top: 5, right: 30, left: 40, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
-                      <XAxis type="number" domain={[0, 100]} unit="%" tick={{ fontSize: 11 }} />
-                      <YAxis dataKey="media" type="category" tick={{ fontSize: 11 }} width={120} />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Bar dataKey="persen" name="Persentase Penggunaan (%)" fill={COLOR_VIOLET} radius={[0, 6, 6, 0]} barSize={18} isAnimationActive={true} animationDuration={800} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* Keterlibatan & Refleksi Guru */}
-              <div className="lg:col-span-6 rounded-2xl bg-surface p-6 shadow-card border border-border space-y-4 flex flex-col justify-between">
-                <div>
-                  <div className="border-b border-border pb-3 mb-4">
-                    <h3 className="text-base font-bold text-text-primary font-display">
-                      Tingkat Keaktifan Siswa & Refleksi Guru
-                    </h3>
-                    <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                      Implementasi Modul BSAN efektif mendorong partisipasi aktif siswa di mana mayoritas guru melaporkan lebih dari 70% siswa terlibat aktif.
-                    </p>
-                  </div>
-
-                  <div className="space-y-3">
-                    {data.keterlibatanSiswa.map((k, i) => (
-                      <div key={i} className="p-3.5 rounded-xl bg-bg border border-border/60 flex items-center justify-between">
-                        <div>
-                          <p className="text-xs font-bold text-text-primary">{k.kategori}</p>
-                          <p className="text-[11px] text-text-secondary">{k.jumlah} Responden Guru</p>
-                        </div>
-                        <span className="text-base font-extrabold font-display text-emerald-600">
-                          <AnimatedCounter value={k.persen} suffix="%" />
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-xl bg-primary/10 border border-primary/20 space-y-2 mt-4">
-                  <div className="flex items-center gap-2 text-xs font-bold text-primary">
-                    <CheckCircle2 className="h-4 w-4" />
-                    <span>Catatan Refleksi Pengajar</span>
-                  </div>
-                  <p className="text-xs text-text-secondary leading-relaxed">
-                    {data.refleksiGuru[0] || 'Refleksi rutin selesai aktivitas mempererat iklim belajar aman dan membangun kepercayaan diri murid.'}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ================= TAB 6: DUKUNGAN KEPSEK & PROGRAM ================= */}
-          {activeTab === 'dukungan' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Dukungan Kepsek */}
-              <div className="lg:col-span-6 rounded-2xl bg-surface p-6 shadow-card border border-border space-y-4">
-                <div className="border-b border-border pb-3">
-                  <h3 className="text-base font-bold text-text-primary font-display">
-                    Bentuk Dukungan Kepala Sekolah
-                  </h3>
-                  <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                    Kepala sekolah menunjukkan komitmen melalui sosialisasi, memimpin refleksi guru, serta mengintegrasikan program ke dalam kurikulum sekolah.
-                  </p>
-                </div>
-
-                <div className="h-[320px] w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={data.dukunganKepsek}
-                      layout="vertical"
-                      margin={{ top: 5, right: 30, left: 60, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
-                      <XAxis type="number" tick={{ fontSize: 11 }} />
-                      <YAxis dataKey="metode" type="category" tick={{ fontSize: 10 }} width={140} />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Bar dataKey="jumlah" name="Jumlah Kepsek" fill={COLOR_INDIGO} radius={[0, 6, 6, 0]} barSize={22} isAnimationActive={true} animationDuration={300} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* Program Sekolah */}
-              <div className="lg:col-span-6 rounded-2xl bg-surface p-6 shadow-card border border-border space-y-4">
-                <div className="border-b border-border pb-3">
-                  <h3 className="text-base font-bold text-text-primary font-display">
-                    Program Sekolah Pendukung BSAN
-                  </h3>
-                  <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                    Fokus kuat pada pembiasaan karakter, penganggaran via RKS/RKAS, serta penyusunan SOP dan tim antikekerasan.
-                  </p>
-                </div>
-
-                <div className="h-[320px] w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={data.rencanaAksi}
-                      layout="vertical"
-                      margin={{ top: 5, right: 30, left: 60, bottom: 5 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
-                      <XAxis type="number" tick={{ fontSize: 11 }} />
-                      <YAxis dataKey="program" type="category" tick={{ fontSize: 10 }} width={140} />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Bar dataKey="jumlah" name="Jumlah Sekolah" fill={COLOR_EMERALD} radius={[0, 6, 6, 0]} barSize={22} isAnimationActive={true} animationDuration={300} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ================= TAB 7: INFRASTRUKTUR & FASILITAS ================= */}
-          {activeTab === 'infrastruktur' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Kondisi Fasilitas */}
-              <div className="lg:col-span-6 rounded-2xl bg-surface p-6 shadow-card border border-border space-y-4">
-                <div className="border-b border-border pb-3">
-                  <h3 className="text-base font-bold text-text-primary font-display">
-                    Kondisi Fasilitas Ruangan per Kecamatan
-                  </h3>
-                  <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                    Tingkat kelayakan kondisi fasilitas ruangan sekolah di tiap kecamatan wilayah {kabupaten}.
-                  </p>
-                </div>
-
-                <div className="h-[500px] w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={data.kondisiFasilitas}
-                      layout="vertical"
-                      margin={{ top: 10, right: 25, left: 10, bottom: 25 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
-                      <XAxis type="number" domain={[0, 100]} unit="%" tick={{ fontSize: 12, fill: '#64748B' }} />
-                      <YAxis
-                        dataKey="kecamatan"
-                        type="category"
-                        tick={{ fontSize: 12, fill: '#334155', fontWeight: 500 }}
-                        width={150}
-                        tickFormatter={(val) => {
-                          if (typeof val === 'string' && val.length > 20) {
-                            return val.slice(0, 18) + '...';
-                          }
-                          return val;
-                        }}
-                      />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Legend verticalAlign="top" height={36} iconType="circle" wrapperStyle={{ fontSize: 12, paddingBottom: 12 }} />
-                      <Bar dataKey="baik" name="Kondisi Baik (%)" fill={COLOR_EMERALD} stackId="a" barSize={22} isAnimationActive={true} animationDuration={300} />
-                      <Bar dataKey="cukup" name="Kondisi Cukup (%)" fill={COLOR_AMBER} stackId="a" barSize={22} isAnimationActive={true} animationDuration={300} />
-                      <Bar dataKey="rusak" name="Kondisi Rusak (%)" fill={COLOR_ROSE} stackId="a" radius={[0, 6, 6, 0]} barSize={22} isAnimationActive={true} animationDuration={300} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* Kelayakan Ruang Kelas */}
-              <div className="lg:col-span-6 rounded-2xl bg-surface p-6 shadow-card border border-border space-y-4">
-                <div className="border-b border-border pb-3">
-                  <h3 className="text-base font-bold text-text-primary font-display">
-                    Persentase Ruang Kelas Layak per Kecamatan
-                  </h3>
-                  <p className="text-xs text-text-secondary mt-1 leading-relaxed">
-                    Rata-rata ketersediaan dan kelayakan ruang kelas penunjang kegiatan belajar mengajar.
-                  </p>
-                </div>
-
-                <div className="h-[500px] w-full pt-2">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart
-                      data={data.kelayakanRuangKelas}
-                      layout="vertical"
-                      margin={{ top: 10, right: 25, left: 10, bottom: 25 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#E2E8F0" />
-                      <XAxis type="number" domain={[0, 100]} unit="%" tick={{ fontSize: 12, fill: '#64748B' }} />
-                      <YAxis
-                        dataKey="kecamatan"
-                        type="category"
-                        tick={{ fontSize: 12, fill: '#334155', fontWeight: 500 }}
-                        width={150}
-                        tickFormatter={(val) => {
-                          if (typeof val === 'string' && val.length > 20) {
-                            return val.slice(0, 18) + '...';
-                          }
-                          return val;
-                        }}
-                      />
-                      <Tooltip content={<CustomTooltip />} />
-                      <Bar dataKey="persentase" name="Ruang Kelas Layak (%)" fill={COLOR_INDIGO} radius={[0, 6, 6, 0]} barSize={22} isAnimationActive={true} animationDuration={300} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+      {isLoading ? (
+        <div className="py-20 rounded-2xl bg-surface border border-border"><ThreeDotsLoader text="Mengolah data proporsi..." /></div>
+      ) : isError || !data ? (
+        <ConnectionErrorCard title="Gagal Memuat Proporsi Modul" message={(error as any)?.message || 'Gagal terhubung ke server.'} onRetry={() => refetch()} />
+      ) : data.totalResponden === 0 && activeTab !== 'profil' ? (
+        <Card><EmptyState title="Belum ada responden" message={`Belum ada survei terkirim untuk ${wilayahText(wilayah)}. Grafik akan muncul otomatis begitu sekolah mengirim survei.`} /></Card>
+      ) : (
+        <TabContent tab={activeTab} d={data} />
+      )}
     </div>
+  );
+}
+
+function TabContent({ tab, d }: { tab: TabId; d: ProporsiModulData }) {
+  if (tab === 'penerima') {
+    const p = d.proporsiPenerima;
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        <Card className="lg:col-span-5" title="Proporsi Penerima Materi Modul" subtitle={`Dari ${p.totalResponden} responden guru & kepala sekolah`}>
+          <div className="relative h-56">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={[{ name: 'Sudah menerima', value: p.jumlahYa }, { name: 'Belum menerima', value: p.jumlahTidak }]}
+                  innerRadius="62%" outerRadius="90%" paddingAngle={3} dataKey="value" stroke="none">
+                  <Cell fill={C.sudah} />
+                  <Cell fill={C.belum} />
+                </Pie>
+                <Tooltip formatter={(v: any, n: any) => [`${v} responden`, n]} />
+              </PieChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+              <span className="text-3xl font-extrabold font-display text-text-primary">{p.ya}%</span>
+              <span className="text-[11px] text-text-secondary">sudah menerima</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <StatCard label="Sudah" value={p.jumlahYa} sub={`${p.ya}% responden`} tone="sudah" />
+            <StatCard label="Belum" value={p.jumlahTidak} sub={`${p.tidak}% responden`} tone="belum" />
+          </div>
+        </Card>
+        <Card className="lg:col-span-7" title="Penerima Modul per Kecamatan" subtitle="Persentase responden yang sudah menerima materi modul BSAN">
+          <BarList color={C.indigo} items={d.distribusiPerKecamatan.map(r => ({ label: `${r.kecamatan} (${r.total} resp.)`, value: r.ya, count: r.jumlahYa }))} />
+        </Card>
+      </div>
+    );
+  }
+
+  if (tab === 'pelatihan') {
+    const items = d.penyelenggaraPelatihan.map(r => ({ label: r.nama, persen: r.persen, jumlah: r.jumlah }));
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Card title="Penyelenggara Pelatihan Modul BSAN" subtitle={`Pilihan ganda — dari ${d.penyelenggaraAnswered} responden yang menjawab`}>
+          <div className="space-y-4">
+            <Insight text={topInsight(items, 'Jalur pelatihan')} />
+            <BarList color={C.violet} items={d.penyelenggaraPelatihan.map(r => ({ label: r.nama, value: r.persen, count: r.jumlah }))} />
+          </div>
+        </Card>
+        <Card title="Cakupan Pelatihan per Kecamatan" subtitle="Responden yang sudah menerima materi (%)">
+          <div className="space-y-3">
+            <Legend items={[{ label: 'Sudah menerima', color: C.sudah }, { label: 'Belum', color: C.belum }]} />
+            {d.distribusiPerKecamatan.map(r => (
+              <StackedRow key={r.kecamatan} label={r.kecamatan} total={r.total}
+                segments={[{ key: 'ya', label: 'Sudah', value: r.ya, color: C.sudah }, { key: 'tidak', label: 'Belum', value: r.tidak, color: C.belum }]} />
+            ))}
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (tab === 'implementasi') {
+    const t = d.implementasiTotal;
+    const legend = IMPL_SEGMENTS(t).map(s => ({ label: s.label, color: s.color }));
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <StatCard label="Sudah seluruhnya" value={`${t.sudah}%`} tone="sudah" />
+          <StatCard label="Sebagian" value={`${t.sebagian}%`} tone="sebagian" />
+          <StatCard label="Belum menerapkan" value={`${t.tidakMenerapkan}%`} tone="netral" />
+          <StatCard label="Belum menerima" value={`${t.belumMenerima}%`} tone="belum" />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <Card title="Status Implementasi per Posisi" subtitle="Proporsi responden pada tiap posisi">
+            <div className="space-y-3.5">
+              <Legend items={legend} />
+              {d.statusImplementasiPosisi.map(r => <StackedRow key={r.posisi} label={r.posisi} total={r.total} segments={IMPL_SEGMENTS(r)} />)}
+            </div>
+          </Card>
+          <Card title="Status Implementasi per Kecamatan" subtitle="Diurutkan dari implementasi penuh tertinggi">
+            <div className="space-y-3.5">
+              <Legend items={legend} />
+              {d.statusImplementasiKecamatan.map(r => <StackedRow key={r.kecamatan} label={r.kecamatan} total={r.total} segments={IMPL_SEGMENTS(r)} />)}
+            </div>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  if (tab === 'kemudahan') {
+    const block = (title: string, k: ProporsiModulData['kemudahanModul']['kelasAwal']) => (
+      <Card title={title} subtitle={`Pilihan ganda — ${k.answered} responden menjawab`}>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="space-y-3">
+            <p className="text-xs font-bold text-status-sudah">Paling mudah diterapkan</p>
+            <BarList color={C.sudah} items={k.mudah.map(r => ({ label: r.modul, value: r.persen, count: r.jumlah }))} />
+          </div>
+          <div className="space-y-3">
+            <p className="text-xs font-bold text-status-belum">Paling sulit diterapkan</p>
+            <BarList color={C.belum} items={k.sulit.map(r => ({ label: r.modul, value: r.persen, count: r.jumlah }))} />
+          </div>
+        </div>
+      </Card>
+    );
+    return (
+      <div className="space-y-5">
+        {block('Kelas Awal (1–3)', d.kemudahanModul.kelasAwal)}
+        {block('Kelas Tinggi (4–6)', d.kemudahanModul.kelasTinggi)}
+      </div>
+    );
+  }
+
+  if (tab === 'keterlibatan') {
+    const ket = d.keterlibatanSiswa.map(r => ({ label: r.kategori, persen: r.persen, jumlah: r.jumlah }));
+    return (
+      <div className="space-y-5">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <Card title="Media Pembelajaran — Kelas Awal" subtitle={`${d.mediaPembelajaran.answeredAwal} responden menjawab`}>
+            <BarList color={C.violet} items={d.mediaPembelajaran.kelasAwal.map(r => ({ label: r.media, value: r.persen, count: r.jumlah }))} />
+          </Card>
+          <Card title="Media Pembelajaran — Kelas Tinggi" subtitle={`${d.mediaPembelajaran.answeredTinggi} responden menjawab`}>
+            <BarList color={C.indigo} items={d.mediaPembelajaran.kelasTinggi.map(r => ({ label: r.media, value: r.persen, count: r.jumlah }))} />
+          </Card>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          <Card title="Keaktifan Murid" subtitle={`${d.keterlibatanAnswered} jawaban (kelas awal + tinggi)`}>
+            <div className="space-y-3">
+              <Insight text={topInsight(ket, 'Tingkat keaktifan')} />
+              <BarList color={C.teal} items={d.keterlibatanSiswa.map(r => ({ label: r.kategori, value: r.persen, count: r.jumlah }))} />
+            </div>
+          </Card>
+          <Card title="Refleksi Guru dengan Murid">
+            <BarList color={C.sudah} items={d.refleksiMurid.map(r => ({ label: r.label, value: r.persen, count: r.jumlah }))} />
+          </Card>
+          <Card title="Kesepakatan Kelas">
+            <BarList color={C.indigo} items={d.kesepakatanKelas.map(r => ({ label: r.label, value: r.persen, count: r.jumlah }))} />
+          </Card>
+        </div>
+        <Card title="Temuan Refleksi Guru & Murid" subtitle="Kutipan jawaban terbaru dari responden">
+          {d.refleksiGuru.length === 0 ? <EmptyState message="Belum ada catatan temuan refleksi." /> : (
+            <ul className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {d.refleksiGuru.slice(0, 8).map((t, i) => (
+                <li key={i} className="flex gap-2 p-3 rounded-xl bg-bg border border-border/60 text-xs text-text-secondary leading-relaxed">
+                  <Quote className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
+                  <span>{t}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+    );
+  }
+
+  if (tab === 'dukungan') {
+    const duk = d.dukunganKepsek.map(r => ({ label: r.metode, persen: r.persen, jumlah: r.jumlah }));
+    const prog = d.rencanaAksi.map(r => ({ label: r.program, persen: r.persen, jumlah: r.jumlah }));
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Card title="Bentuk Dukungan Kepala Sekolah" subtitle={`Pilihan ganda — ${d.dukunganAnswered} responden menjawab`}>
+          <div className="space-y-3">
+            <Insight text={topInsight(duk, 'Dukungan')} />
+            <BarList color={C.indigo} items={d.dukunganKepsek.map(r => ({ label: r.metode, value: r.persen, count: r.jumlah }))} />
+          </div>
+        </Card>
+        <Card title="Program Sekolah Pendukung BSAN" subtitle={`Pilihan ganda — ${d.programAnswered} responden menjawab`}>
+          <div className="space-y-3">
+            <Insight text={topInsight(prog, 'Program')} />
+            <BarList color={C.sudah} items={d.rencanaAksi.map(r => ({ label: r.program, value: r.persen, count: r.jumlah }))} />
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  // profil — data master sekolah (bukan survei)
+  return (
+    <Card title="Profil Sekolah per Kecamatan" subtitle="Sumber: data master satuan pendidikan (jumlah guru & siswa) dan status survei realtime">
+      {d.profilSekolah.length === 0 ? <EmptyState /> : (
+        <div className="overflow-x-auto -mx-4 sm:mx-0">
+          <table className="w-full min-w-[560px] text-xs">
+            <thead>
+              <tr className="text-left text-text-secondary border-b border-border">
+                <th className="py-2.5 px-4 font-semibold">Kecamatan</th>
+                <th className="py-2.5 px-2 font-semibold text-right">Sekolah</th>
+                <th className="py-2.5 px-2 font-semibold text-right">Guru</th>
+                <th className="py-2.5 px-2 font-semibold text-right">Siswa</th>
+                <th className="py-2.5 px-2 font-semibold text-right">Siswa/Guru</th>
+                <th className="py-2.5 px-4 font-semibold">Selesai Survei</th>
+              </tr>
+            </thead>
+            <tbody>
+              {d.profilSekolah.map(r => (
+                <tr key={r.kecamatan} className="border-b border-border/50 last:border-0">
+                  <td className="py-2.5 px-4 font-semibold text-text-primary">{r.kecamatan}</td>
+                  <td className="py-2.5 px-2 text-right tabular-nums">{r.jumlahSekolah}</td>
+                  <td className="py-2.5 px-2 text-right tabular-nums">{r.totalGuru.toLocaleString('id-ID')}</td>
+                  <td className="py-2.5 px-2 text-right tabular-nums">{r.totalSiswa.toLocaleString('id-ID')}</td>
+                  <td className="py-2.5 px-2 text-right tabular-nums">{r.rasio || '-'}</td>
+                  <td className="py-2.5 px-4">
+                    <div className="flex items-center gap-2">
+                      <div className="h-1.5 flex-1 min-w-[60px] rounded-full bg-border/60 overflow-hidden">
+                        <div className="h-full bg-status-sudah rounded-full" style={{ width: `${r.cakupan}%` }} />
+                      </div>
+                      <span className="tabular-nums font-semibold w-10 text-right">{r.cakupan}%</span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
   );
 }

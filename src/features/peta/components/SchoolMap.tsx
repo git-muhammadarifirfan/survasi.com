@@ -25,7 +25,8 @@ import {
   X,
   CheckCircle2
 } from 'lucide-react';
-import schoolDataRaw from '../../../shared/data/sekolah-map-data.json';
+import { useQuery } from '@tanstack/react-query';
+import { apiClient } from '../../../shared/services/api-client';
 import CustomSelect from '../../../shared/components/CustomSelect';
 
 export interface SchoolMapItem {
@@ -45,7 +46,31 @@ export interface SchoolMapItem {
   statusSekolah: string;
 }
 
-const schoolData = schoolDataRaw as SchoolMapItem[];
+/** Data sekolah realtime dari database (koordinat & status pengisian terkini). */
+async function fetchMapSchools(): Promise<SchoolMapItem[]> {
+  const res: any = await apiClient.get<any[]>('/sekolah?limit=5000');
+  return (res?.data || []).map((s: any) => {
+    const lat = Number(s.latitude);
+    const lng = Number(s.longitude);
+    const has = Number.isFinite(lat) && Number.isFinite(lng) && lat !== 0 && lng !== 0;
+    return {
+      id: String(s.id),
+      npsn: s.npsn || '',
+      nama: s.nama || '',
+      kecamatan: s.kecamatan || '',
+      kabupaten: s.kabupaten || '',
+      alamat: s.alamat || '',
+      latitude: has ? lat : 0,
+      longitude: has ? lng : 0,
+      hasCoordinates: has,
+      status: (s.status || 'belum') as SchoolMapItem['status'],
+      respondenCount: 0,
+      totalGuru: Number(s.total_guru || 0),
+      totalSiswa: Number(s.total_siswa || 0),
+      statusSekolah: s.status_sekolah || '',
+    };
+  });
+}
 
 // Modern Sleek Pin Dot Marker (Clear & Distinct)
 const createCustomMarkerIcon = (status: 'sudah' | 'sebagian' | 'belum') => {
@@ -192,6 +217,7 @@ function MapController({
 }
 
 export default function SchoolMap() {
+  const { data: schoolData = [] } = useQuery({ queryKey: ['map-schools'], queryFn: fetchMapSchools, refetchInterval: 60_000 });
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedKabupaten, setSelectedKabupaten] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
@@ -220,7 +246,7 @@ export default function SchoolMap() {
       missingSchools: missing,
       kabupatenList: Array.from(kabSet)
     };
-  }, []);
+  }, [schoolData]);
 
   // Filtered Schools with coordinates
   const filteredValidSchools = useMemo(() => {
@@ -241,7 +267,7 @@ export default function SchoolMap() {
     const sebagian = schoolData.filter(s => s.status === 'sebagian').length;
     const belum = schoolData.filter(s => s.status === 'belum').length;
     return { sudah, sebagian, belum, total: schoolData.length };
-  }, []);
+  }, [schoolData]);
 
   return (
     <div className="space-y-4 animate-fade-in font-sans">
@@ -279,8 +305,8 @@ export default function SchoolMap() {
               onChange={(val) => setSelectedStatus(val)}
               options={[
                 { value: 'all', label: 'Semua Status' },
-                { value: 'sudah', label: 'Sudah (Lengkap)' },
-                { value: 'sebagian', label: 'Sebagian' },
+                { value: 'sudah', label: 'Selesai' },
+                { value: 'sebagian', label: 'Proses' },
                 { value: 'belum', label: 'Belum' }
               ]}
             />
@@ -310,13 +336,13 @@ export default function SchoolMap() {
 
           <div className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 shrink-0" />
-            <span className="text-text-secondary font-medium">Sudah:</span>
+            <span className="text-text-secondary font-medium">Selesai:</span>
             <span className="font-bold text-text-primary">{statusStats.sudah}</span>
           </div>
 
           <div className="flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-full bg-amber-500 shrink-0" />
-            <span className="text-text-secondary font-medium">Sebagian:</span>
+            <span className="text-text-secondary font-medium">Proses:</span>
             <span className="font-bold text-text-primary">{statusStats.sebagian}</span>
           </div>
 

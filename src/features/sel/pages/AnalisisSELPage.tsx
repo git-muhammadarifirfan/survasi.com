@@ -9,7 +9,7 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { database, KABUPATEN_LIST, KABUPATEN_NAME_TO_ID, schoolsData } from '../../../shared/data/data-source';
+import { database, KABUPATEN_LIST, KABUPATEN_NAME_TO_ID } from '../../../shared/data/data-source';
 import type { SELSchoolScore, SELHeatmapRow } from '../../../shared/data/data-source';
 import { SEL_DIMENSI_ORDER, SEL_DIMENSI_LABEL } from '../../../shared/data/sel-indicators';
 import type { SELDimensi } from '../../../shared/data/sel-indicators';
@@ -22,13 +22,15 @@ import {
   Brain, Users, GraduationCap, AlertTriangle, TrendingUp,
   ChevronDown, Filter, Eye, BookOpen, Star, Info, X,
   Award, Gem, ShieldAlert, CheckCircle2, ChevronLeft, ChevronRight,
-  MapPin, Download
+  MapPin
 } from 'lucide-react';
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
 import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
-import { buildBsanCsvHeader, buildCsvRow, triggerDownload, safeFilename, dateStamp } from '../../../shared/utils/exportCSV';
+import ExportMenu from '../../../shared/components/ExportMenu';
+import { exportTable } from '../../../shared/utils/tableExport';
+import { buildObservasiSel } from '../../../shared/utils/reportBuilders';
 
 // ─── Helpers ───────────────────────────────────────────────────
 
@@ -78,7 +80,10 @@ function HeatCell({ skor }: { skor: number }) {
 
 // ─── Cross Validasi Matriks ─────────────────────────────────────
 
-function CrossValidasiInfo({ kuisioner, sel }: { kuisioner: number; sel: number }) {
+function CrossValidasiInfo({ kuisioner, sel }: { kuisioner: number | null; sel: number }) {
+  if (kuisioner == null) {
+    return <span className="inline-flex items-center gap-1 text-[9px] font-bold text-text-secondary bg-bg border border-border px-2 py-0.5 rounded-full">Belum isi kuesioner</span>;
+  }
   const klaim = kuisioner >= 60;
   const realita = sel >= 2.5;
   if (klaim && realita)   return <span className="inline-flex items-center gap-1 text-[9px] font-bold text-status-sudah bg-status-sudah/10 border border-status-sudah/20 px-2 py-0.5 rounded-full"><Award className="h-3 w-3" /> Unggul</span>;
@@ -103,7 +108,7 @@ function DetailModal({ score, onClose }: { score: SELSchoolScore; onClose: () =>
         <div className="flex items-center justify-between p-5 border-b border-border sticky top-0 bg-surface z-10">
           <div>
             <h3 className="font-bold text-text-primary text-base font-display">{score.sekolahNama}</h3>
-            <p className="text-[11px] text-text-secondary">{score.kecamatan} · {score.kabupaten} · {score.tanggal}</p>
+            <p className="text-[11px] text-text-secondary">NPSN {score.npsn || '-'} · {score.kecamatan} · {score.kabupaten} · {score.jumlahSesi || 1} sesi · terakhir {score.tanggal}</p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg text-text-secondary hover:bg-border/40 transition-smooth">
             <X className="h-5 w-5" />
@@ -176,7 +181,7 @@ function DetailModal({ score, onClose }: { score: SELSchoolScore; onClose: () =>
             </h4>
             <div className="flex items-center justify-between">
               <div className="text-xs text-text-secondary">
-                Skor Kuesioner BSAN: <strong className="text-text-primary">{score.kuisionerScore}%</strong> ·
+                Skor Kuesioner BSAN: <strong className="text-text-primary">{score.kuisionerScore == null ? 'Belum mengisi' : `${score.kuisionerScore}%`}</strong> ·
                 Skor SEL: <strong className="text-text-primary">{score.totalRata.toFixed(1)}/4</strong>
               </div>
               <CrossValidasiInfo kuisioner={score.kuisionerScore} sel={score.totalRata} />
@@ -184,7 +189,9 @@ function DetailModal({ score, onClose }: { score: SELSchoolScore; onClose: () =>
             <div className="mt-2 text-[10px] text-text-secondary leading-relaxed flex items-start gap-1.5">
               <CheckCircle2 className="h-3.5 w-3.5 text-primary shrink-0 mt-0.5" />
               <span>
-                {score.kuisionerScore >= 60 && score.totalRata >= 2.5
+                {score.kuisionerScore == null
+                  ? 'Sekolah ini belum mengirim kuesioner BSAN sehingga belum bisa divalidasi silang. Dorong sekolah untuk mengisi kuesioner.'
+                  : score.kuisionerScore >= 60 && score.totalRata >= 2.5
                   ? 'Sekolah ini konsisten antara laporan sendiri dan hasil observasi lapangan. Bisa dijadikan referensi best practice.'
                   : score.kuisionerScore < 60 && score.totalRata >= 2.5
                   ? 'Sekolah ini memperlihatkan perilaku SEL yang baik namun belum penuh mengisi survei. Perlu didorong untuk melengkapi.'
@@ -219,7 +226,7 @@ export default function AnalisisSEL() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: scoresRes, isLoading, isError, error: fetchError, refetch } = useQuery({
+  const { data: scoresRes, isLoading, isError, error: fetchError, refetch, dataUpdatedAt, isFetching } = useQuery({
     queryKey: ['selScoresApi', selectedKab],
     queryFn: () => database.getSELScores({ kabupaten: selectedKab || undefined }),
   });
@@ -239,7 +246,7 @@ export default function AnalisisSEL() {
 
   const { data: statsRes } = useQuery({
     queryKey: ['selStatsApi', selectedKab],
-    queryFn: () => database.getSELSummaryStats(),
+    queryFn: () => database.getSELSummaryStats(selectedKab || undefined),
   });
   const stats = statsRes;
 
@@ -288,10 +295,12 @@ export default function AnalisisSEL() {
   const hasKonteksData = totalKelasScores.length > 0 || totalLingkunganScores.length > 0;
 
   // Cross validation quadrant counts
-  const q1 = matriksData.filter(p => p.kuisionerScore >= 60 && p.selScore >= 2.5).length;
-  const q2 = matriksData.filter(p => p.kuisionerScore < 60 && p.selScore >= 2.5).length;
-  const q3 = matriksData.filter(p => p.kuisionerScore >= 60 && p.selScore < 2.5).length;
-  const q4 = matriksData.filter(p => p.kuisionerScore < 60 && p.selScore < 2.5).length;
+  const matriksValid = matriksData.filter(p => p.kuisionerScore != null) as Array<typeof matriksData[number] & { kuisionerScore: number }>;
+  const belumKuesioner = matriksData.length - matriksValid.length;
+  const q1 = matriksValid.filter(p => p.kuisionerScore >= 60 && p.selScore >= 2.5).length;
+  const q2 = matriksValid.filter(p => p.kuisionerScore < 60 && p.selScore >= 2.5).length;
+  const q3 = matriksValid.filter(p => p.kuisionerScore >= 60 && p.selScore < 2.5).length;
+  const q4 = matriksValid.filter(p => p.kuisionerScore < 60 && p.selScore < 2.5).length;
 
   const tabs = [
     { id: 'overview',  label: 'Overview SEL',      icon: Brain },
@@ -382,68 +391,21 @@ export default function AnalisisSEL() {
               enableSearch={true}
             />
           </div>
-          <button
-            onClick={() => {
-              if (!scores.length) return;
-
-              const npsn = (sekolahNama: string): string => {
-                const found = schoolsData.find(
-                  s => s.nama.toLowerCase().trim() === sekolahNama.toLowerCase().trim()
-                );
-                return found?.npsn || '';
-              };
-
-              let csv = buildBsanCsvHeader({
-                title: 'DATA OBSERVASI SEL (SOCIAL-EMOTIONAL LEARNING) BSAN',
-                wilayah: selectedKab || 'Semua Kabupaten',
-                totalInfo: `Total Sekolah Diobservasi: ${scores.length}`,
-              });
-
-              const dimHeaders = SEL_DIMENSI_ORDER.map(d => SEL_DIMENSI_LABEL[d]);
-              csv += buildCsvRow([
-                'Timestamp', 'No.', 'NPSN', 'Nama Sekolah', 'Kecamatan', 'Kabupaten', 'Tanggal Observasi',
-                'Skor Guru (1-4)', 'Skor Murid (1-4)', 'Skor Total (1-4)',
-                ...dimHeaders,
-                'Skor Kuesioner BSAN (%)', 'Status Cross Validasi',
-              ]) + '\n';
-              scores.forEach((s, i) => {
-                const dimVals = SEL_DIMENSI_ORDER.map(d => {
-                  const ds = s.dimensi.find(dd => dd.dimensi === d);
-                  return ds?.rataRata?.toFixed(2) || '0.00';
-                });
-                const klaim = s.kuisionerScore >= 60;
-                const selOk = s.totalRata >= 2.5;
-                const status = klaim && selOk ? 'Unggul'
-                  : !klaim && selOk ? 'Hidden Gem'
-                  : klaim && !selOk ? 'Overclaimer'
-                  : 'Intervensi';
-                const ts = s.tanggal ? `${s.tanggal} 08:00:00` : new Date().toISOString().replace('T', ' ').substring(0, 19);
-                csv += buildCsvRow([
-                  ts,
-                  i + 1,
-                  npsn(s.sekolahNama),
-                  s.sekolahNama,
-                  s.kecamatan,
-                  s.kabupaten,
-                  s.tanggal,
-                  s.guruTotal.toFixed(2),
-                  s.muridTotal.toFixed(2),
-                  s.totalRata.toFixed(2),
-                  ...dimVals,
-                  s.kuisionerScore,
-                  status,
-                ]) + '\n';
-              });
-
-              const kab = safeFilename(selectedKab || 'SemuaKabupaten');
-              triggerDownload(csv, `AnalisisSEL_BSAN_${kab}_${dateStamp()}.csv`);
-            }}
+          <ExportMenu
             disabled={isLoading || scores.length === 0}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary hover:bg-primary-dark text-white text-xs font-bold shadow-md transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap"
-          >
-            <Download className="h-4 w-4" />
-            <span>Ekspor CSV</span>
-          </button>
+            onExport={async (format) => {
+              const payload = await buildObservasiSel({
+                kabupaten_id: selectedKab ? KABUPATEN_NAME_TO_ID[selectedKab] : undefined,
+                kabupaten_nama: selectedKab || undefined,
+              });
+              payload.sheets.push({
+                name: 'Heatmap Kecamatan',
+                columns: ['Kabupaten/Kota', 'Kecamatan', 'Jumlah Sesi', ...SEL_DIMENSI_ORDER.map(d => SEL_DIMENSI_LABEL[d]), 'Rata-rata'],
+                rows: heatmap.map(h => [h.kabupaten, h.kecamatan, h.jumlahSekolah, ...SEL_DIMENSI_ORDER.map(d => h.dimensiScores[d] || ''), h.rataRata]),
+              });
+              exportTable(payload, format);
+            }}
+          />
         </div>
       </div>
 
@@ -714,6 +676,7 @@ export default function AnalisisSEL() {
               <h3 className="text-sm font-bold text-text-primary font-display">Scatter Plot: Kuesioner vs Observasi SEL</h3>
               <p className="text-[11px] text-text-secondary mt-0.5">
                 Sumbu X = Skor kuesioner BSAN self-report (0–100%) · Sumbu Y = Skor SEL hasil observasi (1–4)
+                {belumKuesioner > 0 && ` · ${belumKuesioner} sekolah belum mengisi kuesioner (tidak diplot)`}
               </p>
             </div>
             {/* Quadrant Labels */}
@@ -767,10 +730,10 @@ export default function AnalisisSEL() {
                   />
                   <Scatter
                     name="Sekolah"
-                    data={matriksData}
+                    data={matriksValid}
                     isAnimationActive
                   >
-                    {matriksData.map((entry, i) => {
+                    {matriksValid.map((entry, i) => {
                       const color = entry.kuisionerScore >= 60 && entry.selScore >= 2.5 ? '#10B981'
                         : entry.kuisionerScore < 60 && entry.selScore >= 2.5 ? '#4A57C4'
                         : entry.kuisionerScore >= 60 && entry.selScore < 2.5 ? '#F59E0B'
@@ -800,7 +763,7 @@ export default function AnalisisSEL() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-bg/40 border-b border-border">
-                  <th className="py-3 px-4 text-left text-[10px] font-bold text-text-secondary uppercase tracking-wider">Timestamp</th>
+                  <th className="py-3 px-4 text-left text-[10px] font-bold text-text-secondary uppercase tracking-wider">Observasi Terakhir</th>
                   <th className="py-3 px-4 text-left text-[10px] font-bold text-text-secondary uppercase tracking-wider">Sekolah</th>
                   <th className="py-3 px-3 text-center text-[10px] font-bold text-text-secondary uppercase">Guru</th>
                   <th className="py-3 px-3 text-center text-[10px] font-bold text-text-secondary uppercase">Murid</th>
@@ -827,11 +790,11 @@ export default function AnalisisSEL() {
                       style={{ animationDelay: `${idx * 30}ms` }}
                     >
                       <td className="py-3 px-4 font-mono text-text-secondary text-[10px] whitespace-nowrap">
-                        {score.tanggal ? `${score.tanggal} 08:00:00` : '2026-10-03 08:00:00'}
+                        {score.tanggal || '-'}
                       </td>
                       <td className="py-3 px-4">
                         <p className="font-semibold text-text-primary">{score.sekolahNama}</p>
-                        <p className="text-[9px] text-text-secondary">{score.kecamatan} · {score.tanggal}</p>
+                        <p className="text-[9px] text-text-secondary">NPSN {score.npsn || '-'} · {score.kecamatan} · {score.jumlahSesi || 1} sesi</p>
                       </td>
                       <td className="py-3 px-3 text-center">
                         <span className="font-bold text-primary">{score.guruTotal.toFixed(1)}</span>

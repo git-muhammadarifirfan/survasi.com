@@ -9,21 +9,15 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  BookOpen, ChevronLeft, ChevronRight, Check, Save, Send, HelpCircle,
-  AlertCircle, PlayCircle, ShieldCheck, WifiOff, RefreshCw, Plus, Edit3,
-  Trash2, X, Eye, Layers, FileText, GripVertical, Building2, CheckCircle2
+  Save, ShieldCheck, Plus, Edit3, Trash2, X, Eye, Layers, FileText, GripVertical, Building2,
 } from 'lucide-react';
 import { apiClient } from '../../../shared/services/api-client';
-import { database } from '../../../shared/data/data-source';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
-import SkeletonLoader from '../../../shared/components/SkeletonLoader';
-import { saveDraft, getDraft, clearDraft } from '../../../shared/utils/draftStorage';
-import { throttle } from '../../../shared/utils/throttle';
 import { notifyToast } from '../../../shared/components/NotificationToast';
 import ConfirmationModal from '../../../shared/components/ConfirmationModal';
-import { LoadingIndicator } from '../../../shared/components/LoadingIndicator';
 import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
+import SurveyWizard from '../components/SurveyWizard';
 
 interface KuisionerProps {
   userRole: 'admin' | 'pengawas' | 'sekolah';
@@ -40,6 +34,8 @@ export interface ApiQuestionItem {
   is_required: boolean;
   section: string;
   target_kelas: string;
+  /** Peran semantik dari backend (nama, sekolah, kabupaten, kecamatan, penerima_modul, …) */
+  role?: string | null;
 }
 
 const SECTION_METADATA: Record<string, { title: string; desc: string }> = {
@@ -55,24 +51,7 @@ const SECTION_METADATA: Record<string, { title: string; desc: string }> = {
 export default function Kuisioner({ userRole }: KuisionerProps) {
   const [questions, setQuestions] = useState<ApiQuestionItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Database Queries for Dynamic Auto-Fetch Dropdowns
-  const { data: dbSchoolsList = [] } = useQuery({
-    queryKey: ['db-schools-kuisioner'],
-    queryFn: () => database.getSchools(),
-  });
-
-  const { data: dbKabupatenList = [] } = useQuery({
-    queryKey: ['db-kabupaten-kuisioner'],
-    queryFn: () => apiClient.sekolah.getKabupaten().then(res => res.data || []),
-  });
-
-  const { data: dbKecamatanList = [] } = useQuery({
-    queryKey: ['db-kecamatan-kuisioner'],
-    queryFn: () => apiClient.sekolah.getKecamatan().then(res => res.data || []),
-  });
 
   // Modal Admin CRUD State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -106,72 +85,21 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
   const [sectionFormTitle, setSectionFormTitle] = useState('');
   const [sectionFormDesc, setSectionFormDesc] = useState('');
 
-  // Form state
+  // Mode simulasi pengisian (admin) — form pengisian ditangani SurveyWizard
   const [hasStarted, setHasStarted] = useState(false);
-  const [activeSecIdx, setActiveSecIdx] = useState(0);
-  const [answers, setAnswers] = useState<Record<number, any>>({});
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState(false);
-  const [isOffline, setIsOffline] = useState(!navigator.onLine);
-  const [draftFound, setDraftFound] = useState(false);
 
-  // Detect offline status
-  useEffect(() => {
-    const handleOnline = () => setIsOffline(false);
-    const handleOffline = () => setIsOffline(true);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  // User profile state for auto-fill
-  const [userProfile, setUserProfile] = useState<any>(() => {
-    try {
-      const saved = localStorage.getItem('bsan_user_profile');
-      return saved ? JSON.parse(saved) : null;
-    } catch {
-      return null;
-    }
-  });
-
-  // Fetch live profile from /api/auth/me if logged in
-  useEffect(() => {
-    apiClient.auth.getProfile()
-      .then(res => {
-        if (res.success && res.data) {
-          setUserProfile(res.data);
-          localStorage.setItem('bsan_user_profile', JSON.stringify(res.data));
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  // Fetch Questions from API
+  // Fetch Questions from API (sudah berisi `role` semantik dari backend)
   useEffect(() => {
     async function loadQuestions() {
       try {
         setLoading(true);
         const res = await apiClient.get<ApiQuestionItem[]>('/survey/questions');
         if (res.success && res.data) {
-          const mapped = res.data.map((q, idx) => ({
-            ...q,
-            kode_pertanyaan: `Q${idx + 1}`,
-          }));
-          setQuestions(mapped);
-
-          // Check draft
-          const draft = getDraft<Record<number, any>>('kuisioner');
-          if (draft && Object.keys(draft.data).length > 0) {
-            setDraftFound(true);
-            setAnswers(draft.data);
-          }
+          setQuestions(res.data.map((q, idx) => ({ ...q, kode_pertanyaan: `Q${idx + 1}` })));
         } else {
           setError(res.message || 'Gagal memuat pertanyaan survei.');
         }
-      } catch (err: any) {
+      } catch {
         setError('Gagal terhubung ke server.');
       } finally {
         setLoading(false);
@@ -179,40 +107,6 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     }
     loadQuestions();
   }, []);
-
-  // Auto pre-fill initial answers from user account profile whenever userProfile or questions change
-  useEffect(() => {
-    if (!userProfile || questions.length === 0) return;
-    setAnswers(prev => {
-      const updated = { ...prev };
-      let changed = false;
-
-      // Find user school detail if available
-      const matchedSchool = dbSchoolsList.find(s => s.nama === userProfile.sekolah_nama || s.id === userProfile.sekolah_id);
-      const userKab = userProfile.kabupaten_nama || matchedSchool?.kabupaten || '';
-      const userKec = userProfile.kecamatan_nama || matchedSchool?.kecamatan || '';
-
-      questions.forEach(q => {
-        if (q.kode_pertanyaan === 'Q1' && userProfile.nama && !updated[q.id]) {
-          updated[q.id] = userProfile.nama;
-          changed = true;
-        }
-        if ((q.kode_pertanyaan === 'Q4' || q.tipe === 'school_select' || q.teks_pertanyaan.toLowerCase().includes('sekolah')) && userProfile.sekolah_nama && !updated[q.id]) {
-          updated[q.id] = userProfile.sekolah_nama;
-          changed = true;
-        }
-        if ((q.kode_pertanyaan === 'Q5' || q.tipe === 'kabupaten_select') && userKab && !updated[q.id]) {
-          updated[q.id] = userKab;
-          changed = true;
-        }
-        if ((q.kode_pertanyaan === 'Q6' || q.tipe === 'kecamatan_select') && userKec && !updated[q.id]) {
-          updated[q.id] = userKec;
-          changed = true;
-        }
-      });
-      return changed ? updated : prev;
-    });
-  }, [userProfile, questions, dbSchoolsList]);
 
   // Admin CRUD Actions
   const handleOpenAddQuestion = (secName?: string) => {
@@ -242,67 +136,6 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     setFormOpsiList(existingArr);
     setFormIsRequired(q.is_required);
     setIsModalOpen(true);
-  };
-
-  // Submit Confirmation Modal State
-  const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
-
-  const confirmSubmitSurvey = async () => {
-    setIsSubmitModalOpen(false);
-    setSubmitting(true);
-    try {
-      const payloadAnswers = Object.entries(answers).map(([qIdStr, val]) => {
-        const qId = parseInt(qIdStr);
-        const qObj = questions.find(q => q.id === qId);
-        return {
-          pertanyaan_id: qId,
-          tipe: qObj?.tipe || 'text',
-          value: val,
-        };
-      });
-
-      const getAnsByCode = (code: string) => {
-        const q = questions.find(item => item.kode_pertanyaan === code);
-        return q ? answers[q.id] : null;
-      };
-
-      const q4Val = getAnsByCode('Q4');
-      const matchedSchool = dbSchoolsList.find(s => s.nama === q4Val || s.npsn === q4Val || String(s.id) === String(q4Val))
-        || (userProfile?.sekolah_id ? dbSchoolsList.find(s => String(s.id) === String(userProfile.sekolah_id)) : null);
-
-      const payload = {
-        nama: getAnsByCode('Q1') || userProfile?.nama || 'Responden Survei',
-        jenis_kelamin: getAnsByCode('Q2') === 'Perempuan' ? 'P' : 'L',
-        posisi: getAnsByCode('Q3') || userProfile?.jabatan || 'Guru Kelas',
-        sekolah_id: matchedSchool ? Number(matchedSchool.id) : (userProfile?.sekolah_id || null),
-        npsn: matchedSchool?.npsn || (typeof q4Val === 'string' && q4Val.length <= 20 ? q4Val : null),
-        kabupaten_id: userProfile?.kabupaten_id || 1,
-        kecamatan_id: userProfile?.kecamatan_id || 1,
-        penerima_modul: getAnsByCode('Q7') || 'Ya',
-        penyelenggara_pelatihan: getAnsByCode('Q8'),
-        status_implementasi: getAnsByCode('Q9') || 'sudah',
-        kelas_mengajar: getAnsByCode('Q10'),
-        no_wa: getAnsByCode('Q37'),
-        jawaban: payloadAnswers,
-      };
-
-      const res = await apiClient.post('/survey/submit', payload);
-      if (res.success) {
-        clearDraft('kuisioner');
-        setSubmitted(true);
-        notifyToast({
-          type: 'success',
-          title: 'Survei Berhasil Dikirim!',
-          message: 'Jawaban survei Anda telah resmi tersimpan.',
-        });
-      } else {
-        notifyToast({ type: 'error', title: 'Gagal Mengirim', message: res.message || 'Gagal mengirim survei.' });
-      }
-    } catch {
-      notifyToast({ type: 'error', title: 'Kendala Sistem', message: 'Gagal terhubung ke sistem. Silakan coba lagi.' });
-    } finally {
-      setSubmitting(false);
-    }
   };
 
   // Confirmation Modal State
@@ -584,27 +417,6 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     }
   };
 
-  // Handle Restore Draft
-  const handleRestoreDraft = () => {
-    const draft = getDraft<Record<number, any>>('kuisioner');
-    if (draft) {
-      setAnswers(draft.data);
-      setActiveSecIdx(draft.step || 0);
-      setHasStarted(true);
-      setDraftFound(false);
-      triggerToast('Draft berhasil dipulihkan!');
-    }
-  };
-
-  const handleIgnoreDraft = () => {
-    clearDraft('kuisioner');
-    setDraftFound(false);
-  };
-
-  const triggerToast = (msg: string, type: 'info' | 'success' | 'error' | 'warning' = 'info') => {
-    notifyToast({ type, title: 'Kuesioner BSAN', message: msg });
-  };
-
   // Combined metadata (DB Sections primary, SECTION_METADATA as fallback)
   const allSectionMeta: Record<string, { title: string; desc: string }> = {};
   if (dbSectionsData && dbSectionsData.length > 0) {
@@ -676,167 +488,6 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
   const sectionsList = dbSectionsData && dbSectionsData.length > 0
     ? Array.from(new Set([...dbSectionsData.map(s => s.section_key), ...activeQuestionsSectionKeys]))
     : Array.from(new Set([...Object.keys(SECTION_METADATA), ...activeQuestionsSectionKeys]));
-  const currentSectionKey = sectionsList[activeSecIdx] || 'identitas';
-  const currentQuestions = questions.filter(q => q.section === currentSectionKey);
-  const currentMeta = allSectionMeta[currentSectionKey] || {
-    title: currentSectionKey.toUpperCase(),
-    desc: 'Pertanyaan survei BSAN',
-  };
-
-  // Handle answer change & Auto Save Draft
-  const handleAnswerChange = (qId: number, value: any) => {
-    if (highlightedQuestionId === qId) setHighlightedQuestionId(null);
-    const updated = { ...answers, [qId]: value };
-    setAnswers(updated);
-    saveDraft('kuisioner', updated, activeSecIdx);
-
-    // Update status pengisian sekolah menjadi 'sebagian' jika draft terisi
-    const targetSchId = userProfile?.sekolah_id || answers[4] || 1;
-    apiClient.post('/survey/draft', { sekolah_id: targetSchId }).catch(() => {});
-  };
-
-  const [highlightedQuestionId, setHighlightedQuestionId] = useState<number | null>(null);
-
-  const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    const mainEl = document.querySelector('main');
-    if (mainEl) mainEl.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const scrollToQuestion = (qId: number) => {
-    setHighlightedQuestionId(qId);
-    setTimeout(() => {
-      const el = document.getElementById(`question-card-${qId}`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }, 100);
-    setTimeout(() => {
-      setHighlightedQuestionId((curr) => (curr === qId ? null : curr));
-    }, 4000);
-  };
-
-  // Step Validation: Check required fields in current section
-  const validateCurrentSection = (): boolean => {
-    for (const q of currentQuestions) {
-      if (q.is_required) {
-        const ans = answers[q.id];
-        if (ans === undefined || ans === null || ans === '' || (Array.isArray(ans) && ans.length === 0)) {
-          setValidationError(`Pertanyaan wajib: "${q.kode_pertanyaan}. ${q.teks_pertanyaan}" belum diisi.`);
-          notifyToast({
-            type: 'warning',
-            title: 'Pertanyaan Belum Lengkap',
-            message: `Pertanyaan "${q.kode_pertanyaan}. ${q.teks_pertanyaan}" wajib diisi.`,
-          });
-          scrollToQuestion(q.id);
-          return false;
-        }
-      }
-    }
-    setValidationError(null);
-    return true;
-  };
-
-  const goToSection = (targetIdx: number) => {
-    if (targetIdx < 0 || targetIdx >= sectionsList.length) return;
-
-    if (targetIdx <= activeSecIdx) {
-      setActiveSecIdx(targetIdx);
-      setValidationError(null);
-      scrollToTop();
-      return;
-    }
-
-    if (!validateCurrentSection()) {
-      scrollToTop();
-      return;
-    }
-
-    setActiveSecIdx(targetIdx);
-    setValidationError(null);
-    saveDraft('kuisioner', answers, targetIdx);
-    scrollToTop();
-  };
-
-  const handleNextStep = () => {
-    if (!validateCurrentSection()) {
-      scrollToTop();
-      return;
-    }
-    if (activeSecIdx < sectionsList.length - 1) {
-      const nextIdx = activeSecIdx + 1;
-      setActiveSecIdx(nextIdx);
-      saveDraft('kuisioner', answers, nextIdx);
-      scrollToTop();
-    }
-  };
-
-  const handlePrevStep = () => {
-    if (activeSecIdx > 0) {
-      const prevIdx = activeSecIdx - 1;
-      setActiveSecIdx(prevIdx);
-      saveDraft('kuisioner', answers, prevIdx);
-      scrollToTop();
-    }
-  };
-
-  // Submit Survey (Throttled max 1 click per 2.5s)
-  const handleSubmitSurvey = throttle(async () => {
-    if (!validateCurrentSection()) return;
-
-    try {
-      setSubmitting(true);
-      // Map answers for API payload
-      const payloadAnswers = Object.entries(answers).map(([qIdStr, val]) => {
-        const qId = parseInt(qIdStr);
-        const qObj = questions.find(q => q.id === qId);
-        return {
-          pertanyaan_id: qId,
-          tipe: qObj?.tipe || 'text',
-          value: val,
-        };
-      });
-
-      // Find respondent identity fields (Q1: Nama, Q2: JK, Q3: Posisi, Q4: Asal Sekolah, Q5: Kabupaten)
-      const getAnsByCode = (code: string) => {
-        const q = questions.find(item => item.kode_pertanyaan === code);
-        return q ? answers[q.id] : null;
-      };
-
-      const payload = {
-        nama: getAnsByCode('Q1') || 'Tanpa Nama',
-        jenis_kelamin: getAnsByCode('Q2') === 'Perempuan' ? 'P' : 'L',
-        posisi: getAnsByCode('Q3') || 'Guru',
-        sekolah_id: 1, // Default to first school if not selected
-        npsn: getAnsByCode('Q4') || '20512345',
-        kabupaten_id: 1,
-        kecamatan_id: 1,
-        penerima_modul: getAnsByCode('Q9') || 'Ya',
-        penyelenggara_pelatihan: getAnsByCode('Q10'),
-        status_implementasi: getAnsByCode('Q11'),
-        kelas_mengajar: getAnsByCode('Q12'),
-        no_wa: getAnsByCode('Q37'),
-        jawaban: payloadAnswers,
-      };
-
-      const res = await apiClient.post<{ meesage: string }>('/survey/submit', payload);
-      if (res.success) {
-        clearDraft('kuisioner');
-        setSubmitted(true);
-      } else {
-        triggerToast(res.message || 'Gagal mengirim survei.');
-      }
-    } catch (err: any) {
-      if (!navigator.onLine) {
-        saveDraft('kuisioner', answers, activeSecIdx);
-        triggerToast('Koneksi terputus! Draft tersimpan secara lokal.');
-      } else {
-        triggerToast('Terjadi kesalahan saat mengirim jawaban.');
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  }, 2500);
 
   if (loading) {
     return (
@@ -856,125 +507,14 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
     );
   }
 
-  // Submitted Screen
-  if (submitted) {
+  if (userRole !== 'admin') {
     return (
-      <div className="max-w-2xl mx-auto my-12 bg-white rounded-3xl p-8 lg:p-12 border border-slate-100 shadow-xl text-center space-y-6 animate-tab-content">
-        <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto shadow-inner">
-          <Check className="w-10 h-10" />
-        </div>
-        <div className="space-y-2">
-          <h2 className="text-2xl font-bold text-slate-800">Terima Kasih!</h2>
-          <p className="text-slate-600">
-            Jawaban kuesioner BSAN Anda telah berhasil disimpan. Data ini akan digunakan untuk analisis efektivitas program di Jawa Timur.
-          </p>
-        </div>
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-          <button
-            onClick={() => {
-              setSubmitted(false);
-              setHasStarted(true);
-            }}
-            className="inline-flex items-center space-x-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-xl transition shadow-md cursor-pointer"
-          >
-            <Edit3 className="w-4 h-4" />
-            <span>Isi Ulang / Edit Jawaban</span>
-          </button>
-          <button
-            onClick={() => {
-              setSubmitted(false);
-              setHasStarted(false);
-              setAnswers({});
-              setActiveSecIdx(0);
-            }}
-            className="inline-flex items-center space-x-2 px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium rounded-xl transition cursor-pointer"
-          >
-            <RefreshCw className="w-4 h-4" />
-            <span>Form Baru</span>
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // Welcome / Start Screen (Only for Pengawas)
-  if (!hasStarted && userRole !== 'admin') {
-    return (
-      <div className="space-y-6">
-        {/* Offline Banner */}
-        {isOffline && (
-          <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl flex items-center space-x-3 text-sm">
-            <WifiOff className="w-5 h-5 text-amber-600 shrink-0" />
-            <span>Anda sedang offline. Semua pengisian akan otomatis tersimpan sebagai <strong>Draft Lokal</strong> dan tidak akan hilang.</span>
-          </div>
-        )}
-
-        {/* Draft Found Modal Banner */}
-        {draftFound && (
-          <div className="bg-indigo-50 border border-indigo-200 text-indigo-900 p-5 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm">
-            <div className="flex items-center space-x-3">
-              <Save className="w-6 h-6 text-indigo-600 shrink-0" />
-              <div>
-                <h4 className="font-semibold">Ditemukan Draft Pengisian Sebelumnya</h4>
-                <p className="text-xs text-indigo-700">Anda dapat melanjutkan pengisian terakhir tanpa harus memulai dari awal.</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2 shrink-0">
-              <button
-                onClick={handleRestoreDraft}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs rounded-xl shadow-xs transition"
-              >
-                Lanjutkan Draft
-              </button>
-              <button
-                onClick={handleIgnoreDraft}
-                className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 font-medium text-xs rounded-xl border border-slate-200 transition"
-              >
-                Mulai Baru
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className="bg-surface text-text-primary rounded-2xl p-6 lg:p-8 shadow-card border border-border">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-            <div className="space-y-3 max-w-2xl">
-              <div className="inline-flex items-center space-x-2 px-3 py-1 bg-primary/10 rounded-full text-[11px] font-semibold text-primary border border-primary/20">
-                <ShieldCheck className="w-3.5 h-3.5 text-primary" />
-                <span>Instrumen Resmi Evaluasi Mutu BSAN Jawa Timur</span>
-              </div>
-              <h1 className="text-2xl lg:text-3xl font-bold tracking-tight text-text-primary font-display">
-                Kuesioner Monitoring BSAN
-              </h1>
-              <p className="text-text-secondary text-xs lg:text-sm leading-relaxed">
-                Ukur efektivitas, hambatan, serta adopsi modul Budaya Sekolah Aman dan Nyaman secara langsung.
-              </p>
-              
-              <div className="flex flex-wrap items-center gap-4 pt-1 text-xs text-text-secondary">
-                <span className="flex items-center gap-1.5 font-medium bg-bg px-3 py-1.5 rounded-xl border border-border">
-                  <FileText className="w-3.5 h-3.5 text-primary" /> {questions.length} Instrumen Soal
-                </span>
-                <span className="flex items-center gap-1.5 font-medium bg-white/5 px-3 py-1.5 rounded-xl border border-white/10">
-                  <Save className="w-3.5 h-3.5 text-emerald-400" /> Draft Otomatis
-                </span>
-                <span className="flex items-center gap-1.5 font-medium bg-white/5 px-3 py-1.5 rounded-xl border border-white/10">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" /> Estimasi ~10 Mnt
-                </span>
-              </div>
-            </div>
-
-            <div className="shrink-0 flex items-center">
-              <button
-                onClick={() => setHasStarted(true)}
-                className="w-full sm:w-auto inline-flex items-center justify-center space-x-2.5 px-7 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm rounded-2xl shadow-lg shadow-indigo-600/30 transition transform hover:-translate-y-0.5 cursor-pointer"
-              >
-                <PlayCircle className="w-5 h-5" />
-                <span>Mulai Pengisian</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <SurveyWizard
+        questions={questions}
+        sectionOrder={sectionsList}
+        sectionMeta={allSectionMeta}
+        userRole={userRole}
+      />
     );
   }
 
@@ -1040,19 +580,23 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
           </div>
         </div>
 
-        {/* If Has Started Mode = Render Full User View Form Wizard for Admin */}
+        {/* Mode simulasi: admin mencoba alur pengisian persis seperti akun sekolah */}
         {hasStarted && (
-          <div className="bg-slate-50 p-4 rounded-3xl border border-indigo-100 shadow-xs">
-            <div className="mb-4 px-2 flex items-center justify-between">
-              <span className="text-xs font-bold text-indigo-700 flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-emerald-500" />
-                <span>Simulasi Pengisian Kuesioner (Mode Pengawas / Sekolah Real-time)</span>
-              </span>
-            </div>
-            {/* Render Wizard View */}
+          <div className="rounded-3xl border border-primary/20 bg-primary/5 p-3 sm:p-5">
+            <p className="mb-3 px-1 text-xs font-bold text-primary flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4" /> Simulasi pengisian — pilih sekolah, jawaban yang dikirim tersimpan atas nama sekolah tersebut.
+            </p>
+            <SurveyWizard
+              questions={questions}
+              sectionOrder={sectionsList}
+              sectionMeta={allSectionMeta}
+              userRole="admin"
+              simulation
+            />
           </div>
         )}
 
+        {!hasStarted && (<>
         {/* Bulk Sticky Bar for Questions */}
         {isBulkMode && (
           <div className="p-4 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-between gap-4 animate-in fade-in duration-200">
@@ -1249,6 +793,8 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
             );
           })}
         </div>
+
+        </>)}
 
         {/* Modal Admin Add/Edit Question */}
         {isModalOpen && createPortal(
@@ -1587,439 +1133,4 @@ export default function Kuisioner({ userRole }: KuisionerProps) {
       </div>
     );
   }
-
-  // PENGAWAS USER VIEW (WIZARD PENGISIAN)
-  // Active Wizard Screen
-  return (
-    <div className="space-y-6 pb-16">
-      {/* Offline Alert Header */}
-      {isOffline && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl flex items-center justify-between text-xs font-medium">
-          <div className="flex items-center space-x-2">
-            <WifiOff className="w-4 h-4 text-amber-600" />
-            <span>Koneksi terputus. Mode offline aktif — Jawaban tersimpan di local draft.</span>
-          </div>
-          <span className="bg-amber-200/60 text-amber-900 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide">
-            Draft Offline
-          </span>
-        </div>
-      )}
-
-      {/* Wizard Header Progress */}
-      <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-xs space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <span className="text-xs font-bold text-indigo-600 uppercase tracking-wider">
-              Bagian {activeSecIdx + 1} dari {sectionsList.length}
-            </span>
-            <h2 className="text-xl font-bold text-slate-800 mt-0.5">{currentMeta.title}</h2>
-            <p className="text-xs text-slate-500 mt-0.5">{currentMeta.desc}</p>
-          </div>
-          <div className="flex items-center space-x-2 text-xs text-slate-500 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100">
-            <Save className="w-4 h-4 text-emerald-500 animate-pulse" />
-            <span>Draft Otomatis Tersimpan</span>
-          </div>
-        </div>
-
-        {/* Section Steps Bar */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2 pt-2">
-          {sectionsList.map((secKey, idx) => {
-            const isActive = idx === activeSecIdx;
-            const isCompleted = idx < activeSecIdx;
-            const meta = allSectionMeta[secKey] || { title: secKey };
-            return (
-              <button
-                key={secKey}
-                type="button"
-                onClick={() => goToSection(idx)}
-                title={`Langkah ${idx + 1}: ${meta.title}`}
-                className={`h-2.5 rounded-full transition-all duration-300 cursor-pointer ${
-                  isActive ? 'bg-indigo-600 shadow-sm ring-2 ring-indigo-300' : isCompleted ? 'bg-emerald-500 hover:opacity-80' : 'bg-slate-200 hover:bg-slate-300'
-                }`}
-              />
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Validation Error Banner */}
-      {validationError && (
-        <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-2xl flex items-center space-x-3 text-sm animate-shake">
-          <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
-          <span className="font-medium">{validationError}</span>
-        </div>
-      )}
-
-      {/* Questions Form */}
-      <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-100 shadow-xs space-y-4">
-        {currentQuestions.map((q, idx) => {
-          const currentVal = answers[q.id] || '';
-          return (
-            <div
-              key={q.id}
-              id={`question-card-${q.id}`}
-              onClick={() => {
-                if (highlightedQuestionId === q.id) setHighlightedQuestionId(null);
-              }}
-              className={`p-4 rounded-xl border transition-all duration-200 space-y-2.5 ${
-                highlightedQuestionId === q.id
-                  ? 'border-2 border-rose-500 bg-rose-50/20 shadow-xs'
-                  : 'bg-slate-50/40 border-slate-200/70 hover:bg-slate-50/80'
-              }`}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <label className="text-sm font-semibold text-slate-800 leading-snug">
-                  <span className="text-indigo-600 font-bold mr-1.5">{idx + 1}.</span>
-                  {q.teks_pertanyaan}
-                  {q.is_required && <span className="text-red-500 ml-1">*</span>}
-                </label>
-              </div>
-
-              {/* Input rendering based on type */}
-              {q.tipe === 'school_select' && (
-                <div className="max-w-md space-y-1">
-                  <CustomSelect
-                    label=""
-                    options={[
-                      { value: '', label: '-- Pilih / Cari Nama Sekolah Sasaran --' },
-                      ...dbSchoolsList.map(s => ({
-                        value: s.nama,
-                        label: `${s.nama} (${s.npsn || 'NPSN'}) • Kec. ${s.kecamatan}, ${s.kabupaten}`,
-                      }))
-                    ]}
-                    value={currentVal}
-                    onChange={(val) => handleAnswerChange(q.id, val)}
-                    placeholder="Pilih atau cari nama sekolah..."
-                    enableSearch={true}
-                  />
-                  {userProfile?.sekolah_nama && currentVal === userProfile.sekolah_nama ? (
-                    <p className="text-[11px] text-emerald-600 font-medium italic mt-1 flex items-center gap-1.5 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/60 w-fit">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span>Asal Sekolah terisi otomatis dari akun terintegrasi: <strong>{userProfile.sekolah_nama}</strong></span>
-                    </p>
-                  ) : (
-                    <p className="text-[11px] text-slate-500 italic mt-1 flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                      <span>Daftar sekolah terintegrasi secara otomatis dari data resmi.</span>
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {q.tipe === 'kabupaten_select' && (
-                <div className="max-w-md space-y-1">
-                  <CustomSelect
-                    label=""
-                    options={[
-                      { value: '', label: '-- Pilih Kabupaten / Kota --' },
-                      ...dbKabupatenList.map(k => ({
-                        value: k.nama,
-                        label: k.nama,
-                      }))
-                    ]}
-                    value={currentVal}
-                    onChange={(val) => handleAnswerChange(q.id, val)}
-                    placeholder="Pilih Kabupaten / Kota..."
-                    enableSearch={true}
-                  />
-                  {userProfile?.kabupaten_nama && currentVal === userProfile.kabupaten_nama && (
-                    <p className="text-[11px] text-emerald-600 font-medium italic mt-1 flex items-center gap-1.5 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/60 w-fit">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span>Kabupaten terisi otomatis dari akun terintegrasi: <strong>{userProfile.kabupaten_nama}</strong></span>
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {q.tipe === 'kecamatan_select' && (
-                <div className="max-w-md space-y-1">
-                  <CustomSelect
-                    label=""
-                    options={[
-                      { value: '', label: '-- Pilih Kecamatan --' },
-                      ...dbKecamatanList.map(k => ({
-                        value: k.nama,
-                        label: `${k.nama} • ${k.kabupaten_nama || ''}`,
-                      }))
-                    ]}
-                    value={currentVal}
-                    onChange={(val) => handleAnswerChange(q.id, val)}
-                    placeholder="Pilih Kecamatan..."
-                    enableSearch={true}
-                  />
-                  {currentVal && (userProfile?.kecamatan_nama === currentVal || dbSchoolsList.some(s => s.nama === userProfile?.sekolah_nama && s.kecamatan === currentVal)) && (
-                    <p className="text-[11px] text-emerald-600 font-medium italic mt-1 flex items-center gap-1.5 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/60 w-fit">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span>Kecamatan terisi otomatis dari akun terintegrasi: <strong>{currentVal}</strong></span>
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {q.tipe === 'dropdown' && q.opsi_jawaban && (
-                <div className="max-w-md">
-                  <CustomSelect
-                    placeholder="-- Pilih Jawaban --"
-                    options={q.opsi_jawaban.map((opt) => ({ value: opt, label: opt }))}
-                    value={currentVal}
-                    onChange={(val) => handleAnswerChange(q.id, val)}
-                    size="md"
-                  />
-                </div>
-              )}
-
-              {q.tipe === 'radio' && q.opsi_jawaban && (
-                <div className={`grid gap-2.5 ${
-                  q.opsi_jawaban.some(opt => opt.length > 40)
-                    ? 'grid-cols-1'
-                    : 'grid-cols-1 md:grid-cols-2'
-                }`}>
-                  {q.opsi_jawaban.map((opt, i) => {
-                    const isSelected = currentVal === opt;
-                    return (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => handleAnswerChange(q.id, opt)}
-                        className={`flex items-start justify-between p-3.5 rounded-xl text-left border text-xs font-medium transition-all duration-200 cursor-pointer ${isSelected
-                          ? 'bg-indigo-50/80 border-indigo-500 text-indigo-950 shadow-xs ring-1 ring-indigo-500/20'
-                          : 'bg-white border-slate-200/80 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
-                          }`}
-                      >
-                        <span className="leading-relaxed flex-1 pr-3">{opt}</span>
-                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 mt-0.5 ${isSelected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300'
-                          }`}>
-                          {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {q.tipe === 'checkbox' && q.opsi_jawaban && (
-                <div className={`grid gap-2.5 ${
-                  q.opsi_jawaban.some(opt => opt.length > 40)
-                    ? 'grid-cols-1'
-                    : 'grid-cols-1 md:grid-cols-2'
-                }`}>
-                  {q.opsi_jawaban.map((opt, i) => {
-                    const selectedArr: string[] = Array.isArray(currentVal) ? currentVal : [];
-                    const isChecked = selectedArr.includes(opt);
-                    const toggleCheck = () => {
-                      if (isChecked) {
-                        handleAnswerChange(q.id, selectedArr.filter(item => item !== opt));
-                      } else {
-                        handleAnswerChange(q.id, [...selectedArr, opt]);
-                      }
-                    };
-                    return (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={toggleCheck}
-                        className={`flex items-start justify-between p-3.5 rounded-xl text-left border text-xs font-medium transition-all duration-200 cursor-pointer ${isChecked
-                          ? 'bg-indigo-50/80 border-indigo-500 text-indigo-950 shadow-xs ring-1 ring-indigo-500/20'
-                          : 'bg-white border-slate-200/80 text-slate-700 hover:bg-slate-50 hover:border-slate-300'
-                          }`}
-                      >
-                        <span className="leading-relaxed flex-1 pr-3">{opt}</span>
-                        <div className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 mt-0.5 ${isChecked ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300'
-                          }`}>
-                          {isChecked && <Check className="w-2.5 h-2.5 stroke-[3]" />}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {q.tipe === 'text' && (
-                <div className="space-y-1">
-                  <textarea
-                    rows={q.kode_pertanyaan === 'Q1' ? 1 : 2}
-                    value={currentVal}
-                    onChange={e => handleAnswerChange(q.id, e.target.value)}
-                    placeholder="Tuliskan jawaban Anda secara rinci..."
-                    className="w-full p-3 bg-white border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
-                  />
-                  {q.kode_pertanyaan === 'Q1' && userProfile?.nama && currentVal === userProfile.nama && (
-                    <p className="text-[11px] text-emerald-600 font-medium italic flex items-center gap-1.5 bg-emerald-50 px-2.5 py-0.5 rounded-lg border border-emerald-200/60 w-fit">
-                      <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
-                      <span>Nama Responden terisi otomatis dari akun terintegrasi: <strong>{userProfile.nama}</strong></span>
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-        {/* Action Buttons */}
-        <div className="flex items-center justify-between pt-6 border-t border-slate-100">
-          <button
-            type="button"
-            disabled={activeSecIdx === 0}
-            onClick={handlePrevStep}
-            className={`inline-flex items-center space-x-2 px-6 py-3 rounded-xl font-medium text-sm transition ${activeSecIdx === 0
-              ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400'
-              : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-              }`}
-          >
-            <ChevronLeft className="w-4 h-4" />
-            <span>Sebelumnya</span>
-          </button>
-
-          {activeSecIdx < sectionsList.length - 1 ? (
-            <button
-              type="button"
-              onClick={handleNextStep}
-              className="inline-flex items-center space-x-2 px-8 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-sm rounded-xl shadow-md shadow-indigo-600/30 transition transform hover:-translate-y-0.5"
-            >
-              <span>Lanjut Slide</span>
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={() => {
-                if (!validateCurrentSection()) return;
-                setIsSubmitModalOpen(true);
-              }}
-              className="inline-flex items-center space-x-2 px-8 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-sm rounded-xl shadow-md shadow-emerald-600/30 transition transform hover:-translate-y-0.5 cursor-pointer"
-            >
-              {submitting ? (
-                <ThreeDotsLoader size="sm" text="" className="p-0 flex-row" />
-              ) : (
-                <>
-                  <Send className="w-4 h-4" />
-                  <span>Kirim Jawaban Survei</span>
-                </>
-              )}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Confirmation Modal for Submitting Survey */}
-      <ConfirmationModal
-        isOpen={isSubmitModalOpen}
-        onClose={() => setIsSubmitModalOpen(false)}
-        onConfirm={confirmSubmitSurvey}
-        title="Kirim Jawaban Survei"
-        description="Apakah Anda yakin ingin mengirimkan seluruh jawaban survei ini? Jawaban yang telah dikirim tidak dapat diubah."
-        confirmLabel="Ya, Kirim Sekarang"
-        cancelLabel="Batal"
-        variant="purple"
-        icon={Send}
-        isLoading={submitting}
-      />
-
-      {/* Confirmation Modal for Single Question Delete */}
-      <ConfirmationModal
-        isOpen={deleteConfirmId !== null}
-        onClose={() => setDeleteConfirmId(null)}
-        onConfirm={confirmDeleteQuestion}
-        title="Hapus Pertanyaan Survei"
-        description="Apakah Anda yakin ingin menghapus pertanyaan instrumen ini? Tindakan ini tidak dapat dibatalkan."
-        confirmLabel="Hapus Pertanyaan"
-        cancelLabel="Batal"
-        variant="danger"
-        isLoading={isDeleting}
-      />
-
-      {/* Confirmation Modal for Bulk Delete */}
-      <ConfirmationModal
-        isOpen={isBulkDeleteModalOpen}
-        onClose={() => setIsBulkDeleteModalOpen(false)}
-        onConfirm={handleBulkDelete}
-        title={`Hapus ${selectedQuestionIds.length} Pertanyaan`}
-        description={`Apakah Anda yakin ingin menghapus ${selectedQuestionIds.length} pertanyaan terpilih? Seluruh instrumen tersebut akan dihapus permanen.`}
-        confirmLabel="Hapus Semua"
-        cancelLabel="Batal"
-        variant="danger"
-        isLoading={isDeleting}
-      />
-
-      {/* Confirmation Modal for Delete Section */}
-      <ConfirmationModal
-        isOpen={deleteSectionConfirmKey !== null}
-        onClose={() => setDeleteSectionConfirmKey(null)}
-        onConfirm={confirmDeleteSection}
-        title={`Hapus Section "${deleteSectionConfirmKey ? (allSectionMeta[deleteSectionConfirmKey]?.title || deleteSectionConfirmKey) : ''}"?`}
-        description={`Apakah Anda yakin ingin menghapus bagian ini beserta seluruh (${deleteSectionConfirmKey ? questions.filter(q => q.section === deleteSectionConfirmKey).length : 0}) butir pertanyaannya? Pertanyaan pada bagian ini akan dinonaktifkan.`}
-        confirmLabel="Hapus Section"
-        cancelLabel="Batal"
-        variant="danger"
-        isLoading={isDeleting}
-      />
-
-      {/* Add / Edit Section Modal */}
-      {isSectionModalOpen && createPortal(
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/60 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-md w-full p-6 relative animate-in zoom-in-95 duration-200 space-y-5">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-lg font-bold text-slate-900 font-display">
-                {editingSectionKey ? 'Edit Informasi Section' : 'Tambah Section Baru'}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIsSectionModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-700 rounded-full transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveSection} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Judul Section / Bagian <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Contoh: Evaluasi Media Pembelajaran"
-                  value={sectionFormTitle}
-                  onChange={(e) => setSectionFormTitle(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Deskripsi / Penjelasan Singkat
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder="Penjelasan singkat mengenai bagian kuesioner ini..."
-                  value={sectionFormDesc}
-                  onChange={(e) => setSectionFormDesc(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-xs font-medium focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition resize-none"
-                />
-              </div>
-
-              <div className="flex items-center justify-end space-x-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsSectionModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-600/20 transition cursor-pointer"
-                >
-                  {editingSectionKey ? 'Simpan Perubahan' : 'Tambah Section'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>,
-        document.body
-      )}
-    </div>
-  );
 }

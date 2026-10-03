@@ -29,11 +29,16 @@ router.get('/profile', async (req, res) => {
   try {
     const [rows] = await pool.execute(`
       SELECT u.id, u.nama, u.email, u.phone, u.role, u.jabatan, u.instansi,
-        u.last_login, u.created_at,
-        sp.nama AS sekolah_nama, sp.npsn, kb.nama AS kabupaten_nama
+        u.last_login, u.created_at, u.sekolah_id,
+        sp.nama AS sekolah_nama, sp.npsn, sp.status_pengisian AS sekolah_status_pengisian,
+        COALESCE(ksp.nama, ku.nama) AS kecamatan_nama,
+        COALESCE(kbsp.nama, kbu.nama) AS kabupaten_nama
       FROM users u
       LEFT JOIN satuan_pendidikan sp ON u.sekolah_id = sp.id
-      LEFT JOIN kabupaten kb ON u.kabupaten_id = kb.id
+      LEFT JOIN kecamatan ksp ON sp.kecamatan_id = ksp.id
+      LEFT JOIN kabupaten kbsp ON ksp.kabupaten_id = kbsp.id
+      LEFT JOIN kecamatan ku ON u.kecamatan_id = ku.id
+      LEFT JOIN kabupaten kbu ON u.kabupaten_id = kbu.id
       WHERE u.id = ?
     `, [req.user.id]);
     return res.json({ success: true, data: rows[0] });
@@ -46,9 +51,17 @@ router.get('/profile', async (req, res) => {
 router.put('/profile', async (req, res) => {
   try {
     const { nama, phone, jabatan, instansi } = req.body;
+    const cleanNama = String(nama || '').trim();
+    if (!cleanNama) return res.status(400).json({ success: false, message: 'Nama wajib diisi.' });
+    // Instansi akun sekolah selalu nama sekolahnya (tidak bisa diubah dari profil)
     await pool.execute(
-      `UPDATE users SET nama=?, phone=?, jabatan=?, instansi=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-      [nama, phone, jabatan, instansi, req.user.id]
+      `UPDATE users u
+       LEFT JOIN satuan_pendidikan sp ON u.sekolah_id = sp.id
+       SET u.nama = ?, u.phone = ?, u.jabatan = ?,
+           u.instansi = CASE WHEN u.role = 'sekolah' AND sp.id IS NOT NULL THEN sp.nama ELSE ? END,
+           u.updated_at = CURRENT_TIMESTAMP
+       WHERE u.id = ?`,
+      [cleanNama.substring(0, 150), phone || null, jabatan || null, instansi || null, req.user.id]
     );
     return res.json({ success: true, message: 'Profil berhasil diperbarui.' });
   } catch (err) {

@@ -18,6 +18,7 @@
 const router = require('express').Router();
 const pool = require('../db/pool');
 const { authMiddleware, adminOnly } = require('../middleware/auth');
+const { computeSchoolScores } = require('../utils/analytics');
 const { submitLimiter } = require('../middleware/rateLimiter');
 
 router.use(authMiddleware);
@@ -313,13 +314,13 @@ router.post('/sesi', submitLimiter, async (req, res) => {
 
       if (schRows.length > 0) {
         sekolahId = schRows[0].id;
-      } else {
-        const [firstSch] = await conn.execute(`SELECT id FROM satuan_pendidikan ORDER BY id ASC LIMIT 1`);
-        sekolahId = firstSch.length > 0 ? firstSch[0].id : 1;
       }
     }
 
-    if (!sekolahId) sekolahId = 1;
+    if (!sekolahId) {
+      await conn.rollback();
+      return res.status(400).json({ success: false, message: 'Sekolah yang diobservasi tidak ditemukan. Pilih sekolah dari daftar.' });
+    }
 
     const tanggalVal = tanggal || tanggal_observasi || new Date().toISOString().slice(0, 10);
     const guruInisialVal = guru_inisial || nama_guru_inisial || 'GR';
@@ -537,26 +538,28 @@ router.get('/export-full', async (req, res) => {
         ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id JOIN sel_dimensi sd ON si.dimensi_id = sd.id WHERE sjo.sesi_id = sso.id AND sd.kode = 'kesadaran_sosial'), 2) AS kesadaran_sosial,
         ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id JOIN sel_dimensi sd ON si.dimensi_id = sd.id WHERE sjo.sesi_id = sso.id AND sd.kode = 'keterampilan_relasi'), 2) AS keterampilan_relasi,
         ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id JOIN sel_dimensi sd ON si.dimensi_id = sd.id WHERE sjo.sesi_id = sso.id AND sd.kode = 'tanggung_jawab'), 2) AS tanggung_jawab,
-        COALESCE((
-          SELECT ROUND(COUNT(CASE WHEN js.jawaban_terstruktur LIKE 'Ya%' OR js.jawaban_terstruktur LIKE 'Sudah%' OR js.jawaban_terstruktur LIKE 'Lebih%' OR js.jawaban_terstruktur LIKE 'Sangat%' OR js.jawaban_terstruktur LIKE 'Lengkap%' OR js.jawaban_terstruktur LIKE 'Rutin%' THEN 1 END) / COUNT(*) * 100, 0)
-          FROM jawaban_survey js JOIN responden_survey rs ON js.responden_id = rs.id WHERE rs.sekolah_id = sso.sekolah_id
-        ), CASE WHEN sp.status_pengisian = 'sudah' THEN 85 WHEN sp.status_pengisian = 'sebagian' THEN 55 ELSE 25 END) AS kuisioner_score
-        
+        sso.observer_user_id, sso.submitted_at,
+        u.email AS observer_email
       FROM sel_sesi_observasi sso
       JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
       JOIN kecamatan k ON sp.kecamatan_id = k.id
       JOIN kabupaten kb ON k.kabupaten_id = kb.id
+      LEFT JOIN users u ON sso.observer_user_id = u.id
       WHERE sso.deleted_at IS NULL
         AND (? IS NULL OR kb.id = ?)
       ORDER BY sso.tanggal DESC, sso.id DESC
     `, [kabupatenId, kabupatenId]);
+
+    const schoolScores = await computeSchoolScores({ kabupatenId });
+    rows.forEach(r => { r.kuisioner_score = schoolScores.has(r.sekolah_id) ? schoolScores.get(r.sekolah_id) : null; });
 
     // 2. Ambil semua pertanyaan (indikator)
     const [questions] = await pool.execute(`
       SELECT si.id, si.kode, si.teks, si.subjek, sd.nama AS dimensi_nama 
       FROM sel_indikator si 
       JOIN sel_dimensi sd ON si.dimensi_id = sd.id 
-      ORDER BY sd.urutan, si.urutan
+      WHERE si.deleted_at IS NULL
+      ORDER BY sd.urutan, si.subjek, si.urutan
     `);
 
     // 3. Ambil jawaban
@@ -634,7 +637,7 @@ router.get('/analisis/heatmap', async (req, res) => {
       JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
       JOIN kecamatan k ON sp.kecamatan_id = k.id
       JOIN kabupaten kb ON k.kabupaten_id = kb.id
-      WHERE sjo.skor IS NOT NULL
+      WHERE sjo.skor IS NOT NULL AND sso.deleted_at IS NULL
         AND (? IS NULL OR kb.id = ?)
       GROUP BY k.id, k.nama, kb.nama
       ORDER BY rata_rata DESC
@@ -662,7 +665,7 @@ router.get('/analisis/radar/:sekolahId', async (req, res) => {
       JOIN sel_indikator si ON sjo.indikator_id = si.id
       JOIN sel_dimensi sd ON si.dimensi_id = sd.id
       JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
-      WHERE sjo.skor IS NOT NULL
+      WHERE sjo.skor IS NOT NULL AND sso.deleted_at IS NULL
         AND sp.kecamatan_id = (SELECT kecamatan_id FROM satuan_pendidikan WHERE id = ?)
       GROUP BY sd.id, sd.nama
       ORDER BY sd.urutan
@@ -691,7 +694,7 @@ router.get('/analisis/summary', async (req, res) => {
           JOIN sel_jawaban_observasi sub_sjo ON sub_sjo.sesi_id = sub_sso.id
           JOIN satuan_pendidikan sub_sp ON sub_sso.sekolah_id = sub_sp.id
           JOIN kecamatan sub_k ON sub_sp.kecamatan_id = sub_k.id
-          WHERE sub_sjo.skor IS NOT NULL
+          WHERE sub_sjo.skor IS NOT NULL AND sub_sso.deleted_at IS NULL
             AND (? IS NULL OR sub_k.kabupaten_id = ?)
           GROUP BY sub_sso.sekolah_id
           HAVING AVG(sub_sjo.skor) < 2.5
@@ -701,7 +704,7 @@ router.get('/analisis/summary', async (req, res) => {
       JOIN sel_indikator si ON sjo.indikator_id = si.id
       JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
       JOIN kecamatan k ON sp.kecamatan_id = k.id
-      WHERE sjo.skor IS NOT NULL
+      WHERE sjo.skor IS NOT NULL AND sso.deleted_at IS NULL
         AND (? IS NULL OR k.kabupaten_id = ?)
     `, [kabupatenId, kabupatenId, kabupatenId, kabupatenId]);
 
@@ -737,29 +740,25 @@ router.get('/analisis/matriks', async (req, res) => {
         ROUND(AVG(sjo.skor), 2) AS sel_score,
         ROUND(AVG(CASE WHEN si.subjek = 'guru'  THEN sjo.skor END), 2) AS guru_score,
         ROUND(AVG(CASE WHEN si.subjek = 'murid' THEN sjo.skor END), 2) AS murid_score,
-        COALESCE(
-          (SELECT ROUND(
-            COUNT(CASE WHEN js.jawaban_terstruktur LIKE 'Ya%' OR js.jawaban_terstruktur LIKE 'Sudah%' OR js.jawaban_terstruktur LIKE 'Lebih%' OR js.jawaban_terstruktur LIKE 'Sangat%' OR js.jawaban_terstruktur LIKE 'Lengkap%' OR js.jawaban_terstruktur LIKE 'Rutin%' THEN 1 END) / COUNT(*) * 100
-           , 0)
-           FROM jawaban_survey js
-           JOIN responden_survey rs ON js.responden_id = rs.id
-           WHERE rs.sekolah_id = sp.id
-          ),
-          CASE WHEN sp.status_pengisian = 'sudah' THEN 85 WHEN sp.status_pengisian = 'sebagian' THEN 55 ELSE 25 END
-        ) AS kuisioner_score
+        sp.npsn
       FROM sel_sesi_observasi sso
       JOIN sel_jawaban_observasi sjo ON sjo.sesi_id = sso.id
       JOIN sel_indikator si ON sjo.indikator_id = si.id
       JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
       JOIN kecamatan k ON sp.kecamatan_id = k.id
       JOIN kabupaten kb ON k.kabupaten_id = kb.id
-      WHERE sjo.skor IS NOT NULL
+      WHERE sjo.skor IS NOT NULL AND sso.deleted_at IS NULL
         AND (? IS NULL OR kb.id = ?)
-      GROUP BY sp.id, sp.nama, k.nama, kb.nama, sp.status_pengisian
+      GROUP BY sp.id, sp.nama, sp.npsn, k.nama, kb.nama, sp.status_pengisian
       ORDER BY sel_score DESC
     `, [kabupatenId, kabupatenId]);
 
-    return res.json({ success: true, data: rows });
+    // Skor kuesioner real per sekolah (null = sekolah belum punya jawaban evaluatif)
+    const schoolScores = await computeSchoolScores({ kabupatenId });
+    return res.json({
+      success: true,
+      data: rows.map(r => ({ ...r, kuisioner_score: schoolScores.has(r.sekolah_id) ? schoolScores.get(r.sekolah_id) : null })),
+    });
   } catch (err) {
     console.error('[SEL] matriks error:', err);
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -816,18 +815,8 @@ router.get('/analisis/scores', async (req, res) => {
         ROUND(AVG(CASE WHEN sd.kode = 'tanggung_jawab' AND si.konteks = 'kelas' THEN sjo.skor END), 2) AS tj_kelas,
         ROUND(AVG(CASE WHEN sd.kode = 'tanggung_jawab' AND si.konteks = 'lingkungan' THEN sjo.skor END), 2) AS tj_lingkungan,
         ROUND(AVG(CASE WHEN sd.kode = 'tanggung_jawab' THEN sjo.skor END), 2) AS tj_rata,
-
-        -- Kuisioner Score calculation
-        COALESCE(
-          (SELECT ROUND(
-            COUNT(CASE WHEN js.jawaban_terstruktur LIKE 'Ya%' OR js.jawaban_terstruktur LIKE 'Sudah%' OR js.jawaban_terstruktur LIKE 'Lebih%' OR js.jawaban_terstruktur LIKE 'Sangat%' OR js.jawaban_terstruktur LIKE 'Lengkap%' OR js.jawaban_terstruktur LIKE 'Rutin%' THEN 1 END) / COUNT(*) * 100
-           , 0)
-           FROM jawaban_survey js
-           JOIN responden_survey rs ON js.responden_id = rs.id
-           WHERE rs.sekolah_id = sp.id
-          ),
-          CASE WHEN sp.status_pengisian = 'sudah' THEN 85 WHEN sp.status_pengisian = 'sebagian' THEN 55 ELSE 25 END
-        ) AS kuisioner_score
+        sp.npsn,
+        COUNT(DISTINCT sso.id) AS jumlah_sesi
 
       FROM sel_sesi_observasi sso
       JOIN sel_jawaban_observasi sjo ON sjo.sesi_id = sso.id
@@ -836,11 +825,13 @@ router.get('/analisis/scores', async (req, res) => {
       JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
       JOIN kecamatan k ON sp.kecamatan_id = k.id
       JOIN kabupaten kb ON k.kabupaten_id = kb.id
-      WHERE sjo.skor IS NOT NULL
+      WHERE sjo.skor IS NOT NULL AND sso.deleted_at IS NULL
         AND (? IS NULL OR kb.id = ?)
-      GROUP BY sp.id, sp.nama, k.nama, kb.nama, sp.status_pengisian
+      GROUP BY sp.id, sp.nama, sp.npsn, k.nama, kb.nama, sp.status_pengisian
       ORDER BY total_rata DESC
     `, [kabupatenId, kabupatenId]);
+
+    const schoolScores = await computeSchoolScores({ kabupatenId });
 
     const formatted = rows.map(r => ({
       sekolahId: String(r.sekolah_id),
@@ -851,7 +842,9 @@ router.get('/analisis/scores', async (req, res) => {
       guruTotal: parseFloat(r.guru_total || '0'),
       muridTotal: parseFloat(r.murid_total || '0'),
       totalRata: parseFloat(r.total_rata || '0'),
-      kuisionerScore: parseInt(r.kuisioner_score || '0'),
+      npsn: r.npsn || '',
+      jumlahSesi: Number(r.jumlah_sesi || 0),
+      kuisionerScore: schoolScores.has(r.sekolah_id) ? schoolScores.get(r.sekolah_id) : null,
       dimensi: [
         {
           dimensi: 'kesadaran_diri',

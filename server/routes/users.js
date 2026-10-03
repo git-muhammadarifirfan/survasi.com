@@ -17,6 +17,16 @@ const { authMiddleware, adminOnly } = require('../middleware/auth');
 router.use(authMiddleware);
 router.use(adminOnly);
 
+/** Akun (belum dihapus) yang sudah memakai sekolah ini, kecuali user `excludeUserId`. */
+async function findSekolahOwner(sekolahId, excludeUserId = null) {
+  if (!sekolahId) return null;
+  const [rows] = await pool.execute(
+    `SELECT id, email FROM users WHERE sekolah_id = ? AND deleted_at IS NULL AND (? IS NULL OR id != ?) LIMIT 1`,
+    [sekolahId, excludeUserId, excludeUserId]
+  );
+  return rows[0] || null;
+}
+
 // ─── GET /api/users ──────────────────────────────────────────────────────────
 router.get('/', async (req, res) => {
   try {
@@ -94,6 +104,13 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Email sudah digunakan oleh user lain.' });
     }
 
+    if (role === 'sekolah' && sekolah_id) {
+      const taken = await findSekolahOwner(parseInt(sekolah_id, 10));
+      if (taken) {
+        return res.status(409).json({ success: false, message: `Sekolah ini sudah dipakai oleh akun lain (${taken.email}). Satu sekolah hanya boleh satu akun.` });
+      }
+    }
+
     const passwordHash = await bcrypt.hash(password, 10);
 
     const [result] = await pool.execute(`
@@ -149,6 +166,10 @@ router.put('/:id', async (req, res) => {
 
     if (role === 'sekolah' && sekolah_id) {
       sekolahId = parseInt(sekolah_id, 10);
+      const taken = await findSekolahOwner(sekolahId, userId);
+      if (taken) {
+        return res.status(409).json({ success: false, message: `Sekolah ini sudah dipakai oleh akun lain (${taken.email}). Satu sekolah hanya boleh satu akun.` });
+      }
       const [sekolahRows] = await pool.execute(
         `SELECT sp.id, sp.kecamatan_id, k.kabupaten_id
          FROM satuan_pendidikan sp

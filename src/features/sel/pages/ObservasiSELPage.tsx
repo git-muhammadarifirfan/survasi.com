@@ -60,7 +60,7 @@ function SkorBadge({ skor }: { skor: number }) {
 // ══════════════════════════════════════════════════════════════
 
 function IndikatorCard({
-  indikator, jawaban, onSkorChange, onCatatanChange, isHighlighted, onClearHighlight,
+  indikator, jawaban, onSkorChange, onCatatanChange, isHighlighted, onClearHighlight, tidakTeramati, onToggleTidakTeramati,
 }: {
   indikator: (typeof SEL_INDIKATORS)[0];
   jawaban: SELJawaban | undefined;
@@ -68,8 +68,10 @@ function IndikatorCard({
   onCatatanChange: (id: string, catatan: string) => void;
   isHighlighted?: boolean;
   onClearHighlight?: () => void;
+  tidakTeramati?: boolean;
+  onToggleTidakTeramati?: (id: string) => void;
 }) {
-  const [showCatatan, setShowCatatan] = useState(false);
+  const [showCatatan, setShowCatatan] = useState(Boolean(jawaban?.catatan));
   const skor = jawaban?.skor ?? null;
   const currentOpt = SKOR_OPTIONS.find(s => s.value === skor);
   const CurrentIcon = currentOpt?.icon;
@@ -83,7 +85,7 @@ function IndikatorCard({
       className={`rounded-xl border-2 transition-all duration-200 p-4 space-y-3 ${
         isHighlighted
           ? 'border-rose-500 bg-rose-50/20 shadow-xs'
-          : skor ? 'border-primary/25 bg-primary/3' : 'border-border bg-bg/30'
+          : skor ? 'border-primary/25 bg-primary/3' : tidakTeramati ? 'border-border bg-bg/60 opacity-80' : 'border-border bg-bg/30'
       }`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -125,7 +127,7 @@ function IndikatorCard({
                 if (isHighlighted) onClearHighlight?.();
                 onSkorChange(indikator.id, isSelected ? null : opt.value);
               }}
-              className={`flex flex-col items-center gap-1 px-2 py-2.5 rounded-xl border-2 text-[10px] font-semibold transition-all duration-200 cursor-pointer ${isSelected
+              className={`flex flex-col items-center justify-center gap-1 min-h-[56px] px-2 py-2.5 rounded-xl border-2 text-[11px] font-semibold transition-all duration-200 cursor-pointer ${isSelected
                 ? `${opt.selColor} ${opt.color} shadow-sm scale-[1.02]`
                 : 'border-border/60 text-text-secondary hover:text-text-primary hover:border-border bg-bg/50'
                 }`}
@@ -140,10 +142,12 @@ function IndikatorCard({
       <div className="flex items-center justify-between">
         <button type="button" onClick={() => {
           if (isHighlighted) onClearHighlight?.();
-          onSkorChange(indikator.id, null);
+          onToggleTidakTeramati?.(indikator.id);
         }}
-          className="text-[10px] font-medium text-text-secondary hover:text-text-primary flex items-center gap-1 transition-colors">
-          <X className="h-3 w-3" /> Tidak bisa diamati
+          className={`text-[11px] font-semibold flex items-center gap-1 px-2 py-1 rounded-lg border transition-colors cursor-pointer ${
+            tidakTeramati ? 'bg-text-secondary text-white border-text-secondary' : 'border-transparent text-text-secondary hover:text-text-primary'
+          }`}>
+          <X className="h-3 w-3" /> {tidakTeramati ? 'Ditandai tidak teramati' : 'Tidak bisa diamati'}
         </button>
         <button type="button" onClick={() => {
           if (isHighlighted) onClearHighlight?.();
@@ -209,7 +213,42 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
   const [allowDuplicateSession, setAllowDuplicateSession] = useState(false);
   const [selectedExistingSession, setSelectedExistingSession] = useState<SELObservasiSession | null>(null);
 
-  const DRAFT_KEY = 'sel_observasi_form_draft';
+  const { data: profile } = useQuery({
+    queryKey: ['auth-me'],
+    queryFn: async () => (await apiClient.auth.getProfile()).data,
+    staleTime: 60_000,
+    refetchInterval: false,
+  });
+  const DRAFT_KEY = `sel_observasi_form_draft_u${profile?.id ?? 'anon'}`;
+  const [tidakTeramati, setTidakTeramati] = useState<string[]>([]);
+
+  // Indikator observasi diambil dari database (Kelola Form SEL) agar perubahan admin langsung berlaku.
+  const { data: dbIndikator = [] } = useQuery({
+    queryKey: ['sel-indikator-form'],
+    queryFn: async () => (await apiClient.get<any[]>('/sel/indikator')).data || [],
+    staleTime: 5 * 60_000,
+    refetchInterval: false,
+  });
+  const indikators = useMemo(() => (dbIndikator.length
+    ? dbIndikator.map((r: any) => ({
+        id: String(r.kode || r.id),
+        dimensi: r.dimensi_kode as SELDimensi,
+        subjek: r.subjek,
+        konteks: r.konteks,
+        teks: r.teks,
+        catatan: r.catatan || undefined,
+      }))
+    : SEL_INDIKATORS) as typeof SEL_INDIKATORS, [dbIndikator]);
+  const indsByDimensi = (d: SELDimensi) => indikators.filter(i => i.dimensi === d);
+
+  // Pastikan setiap indikator aktif punya slot jawaban
+  useEffect(() => {
+    setJawaban(prev => {
+      const ids = new Set(prev.map(j => j.indikatorId));
+      const missing = indikators.filter(i => !ids.has(i.id));
+      return missing.length ? [...prev, ...missing.map(i => ({ indikatorId: i.id, skor: null, catatan: '' }))] : prev;
+    });
+  }, [indikators]);
 
   const showToast = (msg: string, type: 'success' | 'error' | 'warning' | 'info' = 'info', title = 'Form Observasi SEL') => {
     notifyToast({ type, title, message: msg });
@@ -221,18 +260,14 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
     if (mainEl) mainEl.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Restore User Profile & Draft on Mount
+  // Nama observer selalu diambil dari akun yang login
   useEffect(() => {
-    try {
-      const profileStr = localStorage.getItem('bsan_user_profile');
-      if (profileStr) {
-        const profile = JSON.parse(profileStr);
-        if (profile.nama && !observerNama) {
-          setObserverNama(profile.nama);
-        }
-      }
-    } catch { }
+    if (profile?.nama) setObserverNama(profile.nama);
+  }, [profile?.nama]);
 
+  // Pulihkan draft milik akun ini
+  useEffect(() => {
+    if (!profile?.id) return;
     const savedDraft = localStorage.getItem(DRAFT_KEY);
     if (savedDraft) {
       try {
@@ -242,7 +277,6 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
           if (parsed.kecamatan) setKecamatan(parsed.kecamatan);
           if (parsed.sekolahNama) setSekolahNama(parsed.sekolahNama);
           if (parsed.selectedSekolahId) setSelectedSekolahId(parsed.selectedSekolahId);
-          if (parsed.observerNama) setObserverNama(parsed.observerNama);
           if (parsed.tanggal) setTanggal(parsed.tanggal);
           if (parsed.lokasiDiamati) setLokasiDiamati(parsed.lokasiDiamati);
           if (parsed.waktuPengamatan) setWaktuPengamatan(parsed.waktuPengamatan);
@@ -258,28 +292,29 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
           if (parsed.mapel) setMapel(parsed.mapel);
           if (parsed.jawaban && Array.isArray(parsed.jawaban)) setJawaban(parsed.jawaban);
           if (parsed.stepIdx !== undefined) setStepIdx(parsed.stepIdx);
+          if (Array.isArray(parsed.tidakTeramati)) setTidakTeramati(parsed.tidakTeramati);
           setDraftRestoredAt(parsed.savedAt || new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }));
         }
       } catch { }
     }
-  }, []);
+  }, [profile?.id, DRAFT_KEY]);
 
   // Auto-Save Draft on Form Field Changes
   useEffect(() => {
-    const isTouched = sekolahNama || observerNama || kelas || guruInisial || mapel || jawaban.some(j => j.skor !== null);
-    if (!isTouched) return;
+    const isTouched = sekolahNama || kelas || guruInisial || mapel || jawaban.some(j => j.skor !== null);
+    if (!isTouched || !profile?.id) return;
 
     const draftData = {
       kabupaten, kecamatan, sekolahNama, selectedSekolahId, observerNama, tanggal,
       lokasiDiamati, waktuPengamatan, jangkauanSiswa, jumlahSiswaSebagianKecil, jumlahSiswaL, jumlahSiswaP,
-      disabilitasL, disabilitasP, kelas, guruInisial, guruJK, mapel, jawaban, stepIdx,
+      disabilitasL, disabilitasP, kelas, guruInisial, guruJK, mapel, jawaban, stepIdx, tidakTeramati,
       savedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
     };
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draftData));
   }, [
     kabupaten, kecamatan, sekolahNama, selectedSekolahId, observerNama, tanggal,
     lokasiDiamati, waktuPengamatan, jangkauanSiswa, jumlahSiswaSebagianKecil, jumlahSiswaL, jumlahSiswaP,
-    disabilitasL, disabilitasP, kelas, guruInisial, guruJK, mapel, jawaban, stepIdx
+    disabilitasL, disabilitasP, kelas, guruInisial, guruJK, mapel, jawaban, stepIdx, tidakTeramati, DRAFT_KEY, profile?.id
   ]);
 
   const handleResetDraft = () => {
@@ -288,7 +323,6 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
     setKecamatan('');
     setSekolahNama('');
     setSelectedSekolahId(null);
-    setObserverNama('');
     setTanggal(new Date().toISOString().split('T')[0]);
     setLokasiDiamati([]);
     setWaktuPengamatan([]);
@@ -301,7 +335,8 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
     setGuruInisial('');
     setGuruJK('P');
     setMapel('');
-    setJawaban(buildInitialJawaban());
+    setJawaban(indikators.map(i => ({ indikatorId: i.id, skor: null, catatan: '' })));
+    setTidakTeramati([]);
     setStepIdx(0);
     setDraftRestoredAt(null);
     showToast('Draf formulir telah dibersihkan.', 'info', 'Draf Dihapus');
@@ -329,7 +364,9 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
       if (!kabupaten) return { valid: false, reason: 'Kabupaten/Kota belum dipilih.', fieldId: 'field-kabupaten' };
       if (!kecamatan) return { valid: false, reason: 'Kecamatan belum dipilih.', fieldId: 'field-kecamatan' };
       if (!sekolahNama.trim()) return { valid: false, reason: 'Nama Sekolah Sasaran belum dipilih/diisi.', fieldId: 'field-sekolah' };
-      if (!observerNama.trim()) return { valid: false, reason: 'Nama Observer belum diisi.', fieldId: 'field-observer' };
+      if (!observerNama.trim()) return { valid: false, reason: 'Nama observer belum termuat dari akun.', fieldId: 'field-observer' };
+      if (lokasiDiamati.length === 0) return { valid: false, reason: 'Pilih minimal satu lingkungan yang diamati.', fieldId: 'field-lokasi' };
+      if (waktuPengamatan.length === 0) return { valid: false, reason: 'Pilih minimal satu waktu pengamatan.', fieldId: 'field-waktu' };
       if (!kelas.trim()) return { valid: false, reason: 'Kelas yang diamati belum diisi.', fieldId: 'field-kelas' };
       if (!guruInisial.trim()) return { valid: false, reason: 'Inisial Guru belum diisi.', fieldId: 'field-guruInisial' };
       if (!mapel.trim()) return { valid: false, reason: 'Mata Pelajaran belum diisi.', fieldId: 'field-mapel' };
@@ -338,15 +375,15 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
 
     if (idx >= 1 && idx <= 5) { // Dimensions
       const stepKey = STEPS[idx].id;
-      const inds = getIndikatorsByFilter({ dimensi: stepKey as SELDimensi });
+      const inds = indsByDimensi(stepKey as SELDimensi);
       const missing = inds.find(ind => {
         const j = jawaban.find(jj => jj.indikatorId === ind.id);
-        return j?.skor === null || j?.skor === undefined;
+        return (j?.skor === null || j?.skor === undefined) && !tidakTeramati.includes(ind.id);
       });
       if (missing) {
         return {
           valid: false,
-          reason: `Indikator "${missing.teks}" belum diberi skor.`,
+          reason: `Indikator "${missing.teks}" belum diberi skor (atau tandai "Tidak bisa diamati").`,
           fieldId: `indicator-card-${missing.id}`,
         };
       }
@@ -434,17 +471,10 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
       if (matched.kabupaten) setKabupaten(matched.kabupaten);
       if (matched.id) setSelectedSekolahId(Number(matched.id) || null);
 
-      // Auto-fill Jumlah Siswa from school data (referensi dari Data Sekolah)
-      const totalSiswa = Number(matched.totalSiswa || (matched as any).total_siswa) || 0;
-      if (totalSiswa > 0) {
-        // Approximate L/P split (roughly 50/50 if no breakdown available)
-        const approxL = Math.round(totalSiswa * 0.51);
-        const approxP = totalSiswa - approxL;
-        setJumlahSiswaL(approxL);
-        setJumlahSiswaP(approxP);
-      }
-
-      // Try to fetch more accurate data from Kemendikdasmen API via NPSN
+      // Jumlah siswa L/P hanya diisi dari data resmi Kemendikdasmen (bila tersedia),
+      // tidak ada angka perkiraan. Observer tetap bisa mengoreksi manual.
+      setJumlahSiswaL(0);
+      setJumlahSiswaP(0);
       if (matched.npsn) {
         (async () => {
           try {
@@ -469,7 +499,7 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
               }
             }
           } catch {
-            // Silently ignore — fallback to approximation above
+            // Data resmi tidak tersedia — observer mengisi manual
           }
         })();
       }
@@ -524,8 +554,14 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
     }
   });
 
-  const handleSkorChange = (id: string, skor: SELSkor | null) =>
+  const handleSkorChange = (id: string, skor: SELSkor | null) => {
     setJawaban(prev => prev.map(j => j.indikatorId === id ? { ...j, skor } : j));
+    if (skor !== null) setTidakTeramati(prev => prev.filter(x => x !== id));
+  };
+  const toggleTidakTeramati = (id: string) => {
+    setTidakTeramati(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    setJawaban(prev => prev.map(j => j.indikatorId === id ? { ...j, skor: null } : j));
+  };
   const handleCatatanChange = (id: string, catatan: string) =>
     setJawaban(prev => prev.map(j => j.indikatorId === id ? { ...j, catatan } : j));
   const toggleLokasi = (v: string) => setLokasiDiamati(p => p.includes(v) ? p.filter(x => x !== v) : [...p, v]);
@@ -535,12 +571,12 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
   const isKonteks = currentStep.id === 'konteks';
   const isReview = currentStep.id === 'review';
   const isDimensi = !isKonteks && !isReview;
-  const currentDimensiInds = isDimensi ? getIndikatorsByFilter({ dimensi: currentStep.id as SELDimensi }) : [];
-  const filledInStep = currentDimensiInds.filter(ind => {
-    const j = jawaban.find(jj => jj.indikatorId === ind.id);
-    return j?.skor !== null && j?.skor !== undefined;
-  }).length;
-  const totalFilled = jawaban.filter(j => j.skor !== null).length;
+  const currentDimensiInds = isDimensi ? indsByDimensi(currentStep.id as SELDimensi) : [];
+  const isDone = (id: string) => tidakTeramati.includes(id) || jawaban.find(jj => jj.indikatorId === id)?.skor != null;
+  const filledInStep = currentDimensiInds.filter(ind => isDone(ind.id)).length;
+  const indikatorIds = new Set(indikators.map(i => i.id));
+  const totalFilled = jawaban.filter(j => indikatorIds.has(j.indikatorId) && j.skor !== null).length;
+  const totalNA = tidakTeramati.filter(id => indikatorIds.has(id)).length;
 
   const handleOpenConfirm = () => {
     const check = checkStepValid(0);
@@ -566,7 +602,7 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
     setShowConfirmModal(false);
 
     const formattedJawaban = jawaban
-      .filter(j => j.skor !== null)
+      .filter(j => j.skor !== null && indikatorIds.has(j.indikatorId))
       .map(j => ({
         indikator_id: isNaN(Number(j.indikatorId)) ? undefined : Number(j.indikatorId),
         indikator_kode: j.indikatorId,
@@ -580,25 +616,25 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
       kecamatan: kecamatan,
       kabupaten: kabupaten,
       tanggal: tanggal,
-      observer_nama: observerNama || 'Observer Pengawas',
-      lokasi_diamati: lokasiDiamati.length > 0 ? lokasiDiamati : ['Ruang Kelas'],
-      waktu_pengamatan: waktuPengamatan.length > 0 ? waktuPengamatan : ['Jam Pelajaran'],
+      observer_nama: observerNama,
+      lokasi_diamati: lokasiDiamati,
+      waktu_pengamatan: waktuPengamatan,
       jumlah_siswa_l: jumlahSiswaL,
       jumlah_siswa_p: jumlahSiswaP,
       siswa_disabilitas_l: disabilitasL,
       siswa_disabilitas_p: disabilitasP,
       jangkauan_siswa: jangkauanSiswa,
       jumlah_siswa_sebagian_kecil: jangkauanSiswa === 4 && jumlahSiswaSebagianKecil !== '' ? Number(jumlahSiswaSebagianKecil) : null,
-      kelas_diamati: kelas || '4A',
-      guru_inisial: guruInisial || 'GR',
+      kelas_diamati: kelas.trim(),
+      guru_inisial: guruInisial.trim(),
       guru_jk: guruJK,
-      mata_pelajaran: mapel || 'Tematik',
+      mata_pelajaran: mapel.trim(),
       jawaban: formattedJawaban,
     });
   };
 
   return (
-    <div className="space-y-5 max-w-3xl mx-auto">
+    <div className="space-y-4 max-w-3xl mx-auto pb-28 lg:pb-6">
       {selectedExistingSession && (
         <SessionDetailModal
           session={selectedExistingSession}
@@ -624,13 +660,19 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
         </div>
       )}
 
-      {/* Header Stepper */}
-      <div className="rounded-2xl bg-gradient-to-r from-primary to-accent p-6 text-white shadow-lg">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-2.5 bg-white/20 rounded-xl"><ClipboardList className="h-5 w-5" /></div>
-          <div>
-            <h2 className="text-lg font-bold font-display">Form Observasi Lapangan SEL</h2>
-            <p className="text-white/70 text-[11px]">Isi data sesuai pengamatan langsung di lapangan</p>
+      {/* Header Stepper (sticky saat menggulir) */}
+      <div className="sticky top-0 z-20 -mx-4 sm:mx-0 rounded-none sm:rounded-2xl bg-gradient-to-r from-primary to-accent px-4 py-4 sm:p-5 text-white shadow-lg">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2 bg-white/20 rounded-xl shrink-0"><ClipboardList className="h-5 w-5" /></div>
+            <div className="min-w-0">
+              <h2 className="text-base sm:text-lg font-bold font-display truncate">Form Observasi SEL</h2>
+              <p className="text-white/80 text-[11px] truncate">{sekolahNama || 'Pilih sekolah pada langkah Konteks'}</p>
+            </div>
+          </div>
+          <div className="text-right shrink-0">
+            <p className="text-lg font-black leading-none">{totalFilled + totalNA}/{indikators.length}</p>
+            <p className="text-[10px] text-white/80">indikator</p>
           </div>
         </div>
         <div className="flex items-center gap-1 overflow-x-auto pb-1">
@@ -653,12 +695,12 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
           <div className="bg-white rounded-full h-1.5 transition-all duration-500"
             style={{ width: `${(stepIdx / (STEPS.length - 1)) * 100}%` }} />
         </div>
-        <p className="text-white/60 text-[10px] mt-1">Langkah {stepIdx + 1} dari {STEPS.length}</p>
+        <p className="text-white/70 text-[10px] mt-1">Langkah {stepIdx + 1} dari {STEPS.length} • {currentStep.label}</p>
       </div>
 
       {/* ─── KONTEKS ─── */}
       {isKonteks && (
-        <div className="rounded-2xl bg-surface border border-border shadow-card p-6 space-y-5">
+        <div className="rounded-2xl bg-surface border border-border shadow-card p-4 sm:p-6 space-y-5">
           <h3 className="text-sm font-bold text-text-primary font-display flex items-center gap-2 border-b border-border pb-4">
             <MapPin className="h-4 w-4 text-primary" /> Informasi Konteks Observasi
           </h3>
@@ -677,6 +719,7 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
                 value={kabupaten}
                 onChange={(val) => {
                   if (highlightedFieldId === 'field-kabupaten') setHighlightedFieldId(null);
+                  if (val !== kabupaten) { setKecamatan(''); setSekolahNama(''); setSelectedSekolahId(null); }
                   setKabupaten(val);
                 }}
                 enableSearch={true}
@@ -696,6 +739,7 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
                 value={kecamatan}
                 onChange={(val) => {
                   if (highlightedFieldId === 'field-kecamatan') setHighlightedFieldId(null);
+                  if (val !== kecamatan) { setSekolahNama(''); setSelectedSekolahId(null); }
                   setKecamatan(val);
                 }}
                 enableSearch={true}
@@ -760,11 +804,11 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
               onClick={() => { if (highlightedFieldId === 'field-observer') setHighlightedFieldId(null); }}
               className={`space-y-1 transition-all duration-200 rounded-xl ${highlightedFieldId === 'field-observer' ? 'border-2 border-rose-500 p-1 bg-rose-50/20' : ''}`}
             >
-              <label className="font-bold text-text-secondary uppercase text-[10px]">Nama Observer *</label>
-              <input type="text" value={observerNama}
-                onFocus={() => { if (highlightedFieldId === 'field-observer') setHighlightedFieldId(null); }}
-                onChange={e => setObserverNama(e.target.value)} placeholder="Nama / Inisial"
-                className="w-full rounded-xl border border-border bg-bg px-3 py-2.5 text-text-primary focus:border-primary focus:outline-none" />
+              <label className="font-bold text-text-secondary uppercase text-[10px]">Nama Observer (dari akun)</label>
+              <div className="w-full rounded-xl border border-border bg-bg px-3 py-2.5 text-text-primary font-semibold flex items-center justify-between gap-2">
+                <span className="truncate">{observerNama || 'Memuat…'}</span>
+                <span className="text-[9px] font-bold text-status-sudah bg-status-sudah/10 px-1.5 py-0.5 rounded shrink-0">Otomatis</span>
+              </div>
             </div>
             <div className="space-y-1">
               <label className="font-bold text-text-secondary uppercase text-[10px]">Tanggal Observasi</label>
@@ -773,6 +817,12 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
             </div>
             <div className="space-y-1">
               <label className="font-bold text-text-secondary uppercase text-[10px]">Jumlah Siswa (L / P)</label>
+              {(() => {
+                const sch = dbSchoolsList.find(sc => String(sc.id) === String(selectedSekolahId));
+                return sch && sch.totalSiswa > 0
+                  ? <p className="text-[10px] text-text-secondary">Data sekolah: total {sch.totalSiswa} siswa terdaftar</p>
+                  : null;
+              })()}
               <div className="flex gap-2">
                 <input type="number" min={0} value={jumlahSiswaL} onChange={e => setJumlahSiswaL(+e.target.value)} placeholder="L"
                   className="w-full rounded-xl border border-border bg-bg px-3 py-2.5 text-text-primary focus:border-primary focus:outline-none" />
@@ -791,22 +841,22 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
             </div>
           </div>
 
-          <div className="space-y-2">
-            <label className="font-bold text-text-secondary uppercase text-[10px]">Lingkungan yang Diamati</label>
+          <div id="field-lokasi" className={`space-y-2 rounded-xl ${highlightedFieldId === 'field-lokasi' ? 'ring-2 ring-rose-500 p-2' : ''}`}>
+            <label className="font-bold text-text-secondary uppercase text-[10px]">Lingkungan yang Diamati *</label>
             <div className="flex flex-wrap gap-2">
               {lokasiOptionsList.map(loc => (
-                <button key={loc} type="button" onClick={() => toggleLokasi(loc)}
-                  className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold border-2 transition-smooth cursor-pointer ${lokasiDiamati.includes(loc) ? 'bg-primary border-primary text-white shadow-sm' : 'bg-bg border-border text-text-secondary hover:border-primary/40'
+                <button key={loc} type="button" onClick={() => { toggleLokasi(loc); if (highlightedFieldId === 'field-lokasi') setHighlightedFieldId(null); }}
+                  className={`px-3 py-2 rounded-xl text-xs font-semibold border-2 transition-smooth cursor-pointer ${lokasiDiamati.includes(loc) ? 'bg-primary border-primary text-white shadow-sm' : 'bg-bg border-border text-text-secondary hover:border-primary/40'
                     }`}>{loc}</button>
               ))}
             </div>
           </div>
-          <div className="space-y-2">
-            <label className="font-bold text-text-secondary uppercase text-[10px]">Waktu Pengamatan</label>
+          <div id="field-waktu" className={`space-y-2 rounded-xl ${highlightedFieldId === 'field-waktu' ? 'ring-2 ring-rose-500 p-2' : ''}`}>
+            <label className="font-bold text-text-secondary uppercase text-[10px]">Waktu Pengamatan *</label>
             <div className="flex flex-wrap gap-2">
               {waktuOptionsList.map(w => (
-                <button key={w} type="button" onClick={() => toggleWaktu(w)}
-                  className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold border-2 transition-smooth cursor-pointer ${waktuPengamatan.includes(w) ? 'bg-accent border-accent text-white shadow-sm' : 'bg-bg border-border text-text-secondary hover:border-accent/40'
+                <button key={w} type="button" onClick={() => { toggleWaktu(w); if (highlightedFieldId === 'field-waktu') setHighlightedFieldId(null); }}
+                  className={`px-3 py-2 rounded-xl text-xs font-semibold border-2 transition-smooth cursor-pointer ${waktuPengamatan.includes(w) ? 'bg-accent border-accent text-white shadow-sm' : 'bg-bg border-border text-text-secondary hover:border-accent/40'
                     }`}>{w}</button>
               ))}
             </div>
@@ -935,7 +985,7 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
       {/* ─── DIMENSI SEL ─── */}
       {isDimensi && (
         <div className="rounded-2xl bg-surface border border-border shadow-card overflow-hidden">
-          <div className="p-5 border-b border-border bg-bg/30">
+          <div className="p-4 sm:p-5 border-b border-border bg-bg/30">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-text-primary font-display">
@@ -953,7 +1003,7 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
                 style={{ width: `${currentDimensiInds.length > 0 ? (filledInStep / currentDimensiInds.length) * 100 : 0}%` }} />
             </div>
           </div>
-          <div className="p-5 space-y-4">
+          <div className="p-3 sm:p-5 space-y-4">
             {(['guru', 'murid'] as const).map(subjek => {
               const inds = currentDimensiInds.filter(i => i.subjek === subjek);
               if (!inds.length) return null;
@@ -988,6 +1038,8 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
                         onCatatanChange={handleCatatanChange}
                         isHighlighted={highlightedFieldId === `indicator-card-${ind.id}`}
                         onClearHighlight={() => setHighlightedFieldId(null)}
+                        tidakTeramati={tidakTeramati.includes(ind.id)}
+                        onToggleTidakTeramati={toggleTidakTeramati}
                       />
                     ))}
                   </div>
@@ -1015,8 +1067,8 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
           <div className="space-y-2">
             <h4 className="text-xs font-bold text-text-primary">Progres per Dimensi</h4>
             {SEL_DIMENSI_ORDER.map(d => {
-              const inds = getIndikatorsByFilter({ dimensi: d });
-              const filled = inds.filter(ind => jawaban.find(j => j.indikatorId === ind.id)?.skor != null).length;
+              const inds = indsByDimensi(d);
+              const filled = inds.filter(ind => isDone(ind.id)).length;
               return (
                 <div key={d} className="space-y-1">
                   <div className="flex justify-between text-[11px]">
@@ -1032,8 +1084,8 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
             })}
           </div>
           <div className="bg-primary/5 border border-primary/20 rounded-xl p-4 text-center">
-            <div className="text-3xl font-bold text-primary font-display">{totalFilled}<span className="text-base text-text-secondary font-normal">/{SEL_INDIKATORS.length}</span></div>
-            <div className="text-xs text-text-secondary mt-1">total indikator terisi</div>
+            <div className="text-3xl font-bold text-primary font-display">{totalFilled}<span className="text-base text-text-secondary font-normal">/{indikators.length}</span></div>
+            <div className="text-xs text-text-secondary mt-1">indikator diberi skor{totalNA > 0 ? ` • ${totalNA} ditandai tidak teramati` : ''}</div>
           </div>
           {!sekolahNama.trim() && (
             <div className="flex items-center gap-2 p-3 rounded-xl bg-status-belum/10 border border-status-belum/20 text-xs font-semibold text-status-belum">
@@ -1043,28 +1095,29 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
         </div>
       )}
 
-      {/* Navigation */}
-      <div className="flex items-center justify-between rounded-xl bg-surface border border-border shadow-card p-4">
+      {/* Navigation (menempel di bawah layar pada mobile) */}
+      <div className="fixed lg:static inset-x-0 bottom-0 z-30 lg:z-auto flex items-center justify-between gap-2 bg-surface/95 lg:bg-surface backdrop-blur border-t lg:border border-border lg:rounded-xl lg:shadow-card px-4 pt-3 lg:p-4"
+        style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
         <button type="button" disabled={stepIdx === 0} onClick={() => goToStep(stepIdx - 1)}
-          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border text-xs font-semibold text-text-secondary hover:bg-bg disabled:opacity-30 transition-smooth cursor-pointer">
-          <ChevronLeft className="h-4 w-4" /> Sebelumnya
+          className="flex items-center gap-1.5 h-11 px-4 rounded-xl border border-border text-xs font-semibold text-text-secondary hover:bg-bg disabled:opacity-30 transition-smooth cursor-pointer">
+          <ChevronLeft className="h-4 w-4" /> <span className="hidden sm:inline">Sebelumnya</span>
         </button>
         <button type="button" onClick={() => {
           showToast('📌 Draf formulir berhasil disimpan.');
           scrollToTop();
         }}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border text-xs font-semibold text-text-secondary hover:bg-bg transition-smooth cursor-pointer">
-          <Save className="h-3.5 w-3.5" /> Draft
+          className="hidden sm:flex items-center gap-1.5 h-11 px-3 rounded-xl border border-border text-xs font-semibold text-text-secondary hover:bg-bg transition-smooth cursor-pointer">
+          <Save className="h-3.5 w-3.5" /> Draft tersimpan
         </button>
         {!isReview ? (
           <button type="button" onClick={() => goToStep(stepIdx + 1)}
-            className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-dark text-white text-xs font-bold shadow-sm transition-smooth cursor-pointer">
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 h-11 px-5 rounded-xl bg-primary hover:bg-primary-dark text-white text-sm font-bold shadow-sm transition-smooth cursor-pointer">
             Selanjutnya <ChevronRight className="h-4 w-4" />
           </button>
         ) : (
           <button type="button" onClick={handleOpenConfirm}
             disabled={submitMutation.isPending || !sekolahNama.trim()}
-            className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-status-sudah hover:bg-status-sudah/90 text-white text-xs font-bold shadow-md transition-smooth disabled:opacity-50 cursor-pointer">
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 h-11 px-5 rounded-xl bg-status-sudah hover:bg-status-sudah/90 text-white text-sm font-bold shadow-md transition-smooth disabled:opacity-50 cursor-pointer">
             {submitMutation.isPending
               ? <><div className="h-3.5 w-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin" /> Menyimpan...</>
               : <><Send className="h-3.5 w-3.5" /> Kirim Observasi</>}
@@ -1107,15 +1160,15 @@ export function ObservasiFormWizard({ onSubmitDone }: { onSubmitDone?: () => voi
               </div>
               <div className="flex justify-between border-b border-border/40 pb-1.5">
                 <span className="text-text-secondary font-medium">Observer & Tanggal:</span>
-                <span className="text-text-primary font-semibold">{observerNama || 'Observer Pengawas'} ({tanggal})</span>
+                <span className="text-text-primary font-semibold">{observerNama} ({tanggal})</span>
               </div>
               <div className="flex justify-between border-b border-border/40 pb-1.5">
                 <span className="text-text-secondary font-medium">Kelas & Guru:</span>
-                <span className="text-text-primary font-semibold">Kelas {kelas || '4A'} • Guru {guruInisial || 'GR'} ({guruJK === 'P' ? 'Perempuan' : 'Laki-laki'})</span>
+                <span className="text-text-primary font-semibold">Kelas {kelas} • Guru {guruInisial} ({guruJK === 'P' ? 'Perempuan' : 'Laki-laki'})</span>
               </div>
               <div className="flex justify-between pt-0.5">
                 <span className="text-text-secondary font-medium">Indikator Terisi:</span>
-                <span className="text-emerald-700 font-bold">{totalFilled} dari {SEL_INDIKATORS.length} Indikator</span>
+                <span className="text-emerald-700 font-bold">{totalFilled} berskor • {totalNA} tidak teramati • {indikators.length} total</span>
               </div>
             </div>
 
@@ -1509,7 +1562,7 @@ function AdminObservasiPanel() {
 
   const { data: selStats } = useQuery({
     queryKey: ['selStats'],
-    queryFn: database.getSELSummaryStats,
+    queryFn: () => database.getSELSummaryStats(),
   });
 
   const sessions = rawSessions;

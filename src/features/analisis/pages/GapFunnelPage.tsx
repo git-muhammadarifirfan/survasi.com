@@ -1,213 +1,172 @@
 /**
  * @module features/analisis/pages
- * @description Visualisasi funnel 5 tahap dari sasaran sampai implementasi penuh
- * @tables satuan_pendidikan, responden_survey, kecamatan, kabupaten
- * @queries database/queries/gap_funnel.sql → Funnel utama (5 tahap)
- * @api GET /api/analisis/funnel?kabupaten_id=
+ * @description Gap Funnel implementasi BSAN — 6 tahap dari total sekolah sasaran sampai
+ *   implementasi penuh. Semua angka dihitung realtime per sekolah dari database; rekomendasi
+ *   tindak lanjut dibentuk dari tahap dengan penyusutan terbesar.
+ * @api GET /api/analisis/funnel?kabupaten_id=&kecamatan=
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { database, KABUPATEN_LIST } from '../../../shared/data/data-source';
-import { Layers, HelpCircle, ArrowDownRight, CheckCircle, AlertCircle, Info, Filter, Download } from 'lucide-react';
-import AnimatedCounter from '../../../shared/components/AnimatedCounter';
-import { buildBsanCsvHeader, buildCsvRow, triggerDownload, safeFilename, dateStamp } from '../../../shared/utils/exportCSV';
-
-import CustomSelect from '../../../shared/components/CustomSelect';
+import { Layers, ArrowDownRight, Lightbulb, MapPin } from 'lucide-react';
+import { apiClient, withQuery } from '../../../shared/services/api-client';
 import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
 import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
+import ExportMenu from '../../../shared/components/ExportMenu';
+import { exportTable } from '../../../shared/utils/tableExport';
+import {
+  PageHeader, Card, EmptyState, WilayahFilter, wilayahQuery, wilayahText, type WilayahValue,
+} from '../../../shared/components/analytics/AnalyticsUI';
 
 interface GapFunnelProps {
   activeKecamatan: string | null;
 }
 
-export default function GapFunnel({ activeKecamatan }: GapFunnelProps) {
-  const [selectedKab, setSelectedKab] = useState<string>('');
-  const [selectedKec, setSelectedKec] = useState<string>('');
+interface Stage { key: string; name: string; schools: number; percentage: number; dropOff: number }
+interface KecRow { kecamatan: string; kabupaten: string; total: number; mulai: number; selesai: number; menerima: number; implementasi: number; penuh: number; konversi: number }
 
-  const { data: funnelSteps = [], isLoading, isError, error: fetchError, refetch } = useQuery({
-    queryKey: ['funnelData', selectedKab, selectedKec, activeKecamatan],
-    queryFn: () => database.getGapFunnelData({ kabupaten: selectedKab || undefined, kecamatan: selectedKec || activeKecamatan || undefined })
+const STAGE_COLORS = ['#312E81', '#4F46E5', '#0D9488', '#7C3AED', '#F59E0B', '#10B981'];
+
+const ADVICE: Record<string, string> = {
+  mulai: 'Banyak sekolah belum mulai mengisi. Kirim pengingat dari Dashboard → Prioritas Follow-Up dan pastikan akun sekolah sudah terdaftar.',
+  selesai: 'Sekolah sudah mulai mengisi tetapi belum mengirim. Hubungi operator sekolah berstatus "Proses" agar menyelesaikan kuesioner.',
+  menerima: 'Responden yang mengisi banyak yang belum menerima materi modul. Prioritaskan diseminasi/pelatihan modul BSAN di wilayah ini.',
+  implementasi: 'Modul sudah diterima tetapi belum diterapkan di kelas. Perlu pendampingan praktik (KKG, supervisi kepala sekolah).',
+  penuh: 'Implementasi masih sebagian. Dorong penerapan seluruh alur/tema dan refleksi rutin agar implementasi menjadi penuh.',
+};
+
+export default function GapFunnel({ activeKecamatan }: GapFunnelProps) {
+  const [wilayah, setWilayah] = useState<WilayahValue>({ kecamatan: activeKecamatan || undefined });
+
+  useEffect(() => {
+    if (activeKecamatan) setWilayah(w => ({ ...w, kecamatan: activeKecamatan }));
+  }, [activeKecamatan]);
+
+  const { data, isLoading, isError, error, refetch, dataUpdatedAt, isFetching } = useQuery({
+    queryKey: ['funnel', wilayah.kabupatenId, wilayah.kecamatan],
+    queryFn: async () => {
+      const res: any = await apiClient.get<Stage[]>(withQuery('/analisis/funnel', wilayahQuery(wilayah)));
+      return { stages: (res.data || []) as Stage[], perKecamatan: (res.perKecamatan || []) as KecRow[], total: Number(res.totalSasaran || 0) };
+    },
   });
 
-  const kabOptions = [
-    { value: '', label: 'Semua Wilayah Kabupaten' },
-    ...KABUPATEN_LIST.map(k => ({ value: k.name, label: k.name }))
-  ];
+  const stages = data?.stages || [];
+  const perKec = data?.perKecamatan || [];
+  const worst = stages.slice(1).filter(s => s.dropOff > 0).sort((a, b) => b.dropOff - a.dropOff).slice(0, 3);
+
+  const handleExport = (format: 'xlsx' | 'csv') => exportTable({
+    title: 'Analisis Gap Funnel Implementasi BSAN',
+    wilayah: wilayahText(wilayah),
+    filename: `Gap_Funnel_${wilayahText(wilayah)}`,
+    sheets: [
+      { name: 'Funnel', columns: ['Tahap', 'Jumlah Sekolah', 'Dari Total (%)', 'Penyusutan dari Tahap Sebelumnya (%)'],
+        rows: stages.map(s => [s.name, s.schools, s.percentage, s.dropOff]) },
+      { name: 'Per Kecamatan', columns: ['Kabupaten/Kota', 'Kecamatan', 'Total Sekolah', 'Mulai Mengisi', 'Selesai Survei', 'Menerima Modul', 'Implementasi', 'Implementasi Penuh', 'Konversi Selesai (%)'],
+        rows: perKec.map(r => [r.kabupaten, r.kecamatan, r.total, r.mulai, r.selesai, r.menerima, r.implementasi, r.penuh, r.konversi]) },
+    ],
+  }, format);
 
   if (isError) {
-    return (
-      <ConnectionErrorCard
-        title="Gagal Memuat Gap Funnel"
-        message={(fetchError as any)?.message || 'Gagal terhubung ke server.'}
-        onRetry={() => refetch()}
-      />
-    );
+    return <ConnectionErrorCard title="Gagal Memuat Gap Funnel" message={(error as any)?.message || 'Gagal terhubung ke server.'} onRetry={() => refetch()} />;
   }
 
   return (
-    <div className="space-y-6 animate-tab-content">
-      {/* Header Banner */}
-      <div className="card-premium p-6">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div>
-            <div className="flex items-center gap-2.5 mb-1">
-              <div className="p-2 rounded-xl bg-indigo-600 text-white shadow-md shadow-indigo-600/30">
-                <Layers className="h-5 w-5" />
-              </div>
-              <h2 className="text-xl font-extrabold font-display text-slate-900 tracking-tight">
-                Analisis Gap Funnel Implementasi BSAN
-              </h2>
-            </div>
-            <p className="text-xs text-slate-500 font-medium">
-              Memonitor konversi & rasio penyusutan (drop-off) dari total sasaran sekolah hingga kriteria mutu utama.
-            </p>
-          </div>
+    <div className="space-y-5 animate-fade-in pb-10">
+      <PageHeader
+        icon={<Layers className="h-5 w-5" />}
+        title="Analisis Gap Funnel Implementasi BSAN"
+        subtitle={`Konversi & penyusutan dari total sekolah sasaran hingga implementasi penuh — ${wilayahText(wilayah)}`}
+        actions={<><WilayahFilter value={wilayah} onChange={setWilayah} /><ExportMenu disabled={!stages.length} onExport={handleExport} /></>}
+      />
 
-          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-            <CustomSelect
-              options={kabOptions}
-              value={selectedKab}
-              onChange={(val) => { setSelectedKab(val); setSelectedKec(''); }}
-              placeholder="Pilih Wilayah"
-              size="md"
-            />
-            <button
-              onClick={() => {
-                if (!funnelSteps.length) return;
-                let csv = buildBsanCsvHeader({
-                  title: 'ANALISIS GAP FUNNEL IMPLEMENTASI BSAN',
-                  wilayah: selectedKab || 'Semua Wilayah',
-                  totalInfo: `Total Tahap Funnel: ${funnelSteps.length}`,
-                });
-
-                csv += buildCsvRow(['Timestamp', 'No.', 'Tahap Funnel', 'Jumlah Sekolah', 'Persentase (%)']) + '\n';
-                funnelSteps.forEach((step, i) => {
-                  const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
-                  csv += buildCsvRow([ts, i + 1, step.name, step.schools, step.percentage]) + '\n';
-                });
-
-                const kab = safeFilename(selectedKab || 'SemuaWilayah');
-                triggerDownload(csv, `GapFunnel_BSAN_${kab}_${dateStamp()}.csv`);
-              }}
-              disabled={isLoading || funnelSteps.length === 0}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap"
-            >
-              <Download className="h-4 w-4" />
-              <span>Ekspor CSV</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Funnel Chart Card */}
-        <div className="lg:col-span-2 card-premium p-6 space-y-6">
-          <div className="flex items-center justify-between border-b border-slate-200 pb-4">
-            <h3 className="text-base font-extrabold text-slate-900 font-display flex items-center gap-2">
-              <Layers className="h-5 w-5 text-indigo-600" />
-              <span>Diagram Corong Konversi (Gap Funnel)</span>
-            </h3>
-            <span className="text-xs font-extrabold text-indigo-600 px-3 py-1 bg-indigo-50 rounded-full border border-indigo-100 font-display">
-              Target: 1.238 SD
-            </span>
-          </div>
-
-          {isLoading ? (
-            <div className="py-20 text-center">
-              <ThreeDotsLoader text="Memuat data corong..." />
-            </div>
-          ) : (
-            <div key={`funnel-${selectedKab}-${selectedKec}`} className="space-y-5 pt-2">
-              {funnelSteps.map((step, idx) => {
-                const widthPercent = Math.max(38, 100 - idx * 14);
-                const prevStep = idx > 0 ? funnelSteps[idx - 1] : null;
-                const dropOff = prevStep ? Math.round(((prevStep.schools - step.schools) / prevStep.schools) * 100) : 0;
-
-                return (
-                  <div key={idx} className="space-y-1.5">
-                    <div className="flex items-center gap-4">
-                      <div className="w-48 text-right text-xs font-bold text-slate-800 leading-tight">
-                        {step.name}
-                      </div>
-
-                      <div className="flex-1">
-                        <div
-                          className="relative flex h-12 items-center justify-between px-4 rounded-2xl text-white font-extrabold text-xs shadow-md transition-all duration-500 hover:scale-101 progress-bar-fill"
-                          style={{
-                            width: `${widthPercent}%`,
-                            background:
-                              idx === 0 ? 'linear-gradient(135deg, #1E1B4B 0%, #312E81 100%)' :
-                                idx === 1 ? 'linear-gradient(135deg, #4F46E5 0%, #4338CA 100%)' :
-                                  idx === 2 ? 'linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%)' :
-                                    idx === 3 ? 'linear-gradient(135deg, #F59E0B 0%, #D97706 100%)' :
-                                      'linear-gradient(135deg, #10B981 0%, #059669 100%)'
-                          }}
-                        >
-                          <span className="truncate">
-                            <AnimatedCounter key={`f-sch-${idx}`} value={step.schools} suffix=" Sekolah" />
-                          </span>
-                          <span className="font-display font-black text-sm">
-                            <AnimatedCounter key={`f-pct-${idx}`} value={step.percentage} suffix="%" />
-                          </span>
-                        </div>
-                      </div>
+      {isLoading ? (
+        <div className="py-20 rounded-2xl bg-surface border border-border"><ThreeDotsLoader text="Menghitung funnel..." /></div>
+      ) : !data?.total ? (
+        <Card><EmptyState title="Tidak ada sekolah sasaran" message="Tidak ada sekolah pada filter wilayah ini." /></Card>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <Card className="lg:col-span-2" title="Diagram Corong Konversi" right={
+              <span className="text-[11px] font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">Sasaran: {data.total.toLocaleString('id-ID')} sekolah</span>
+            }>
+              <div className="space-y-3">
+                {stages.map((s, idx) => (
+                  <div key={s.key}>
+                    <div className="flex items-center justify-between gap-3 text-xs mb-1">
+                      <span className="font-semibold text-text-primary">{idx + 1}. {s.name}</span>
+                      <span className="font-bold tabular-nums text-text-primary shrink-0">{s.schools.toLocaleString('id-ID')} <span className="text-text-secondary font-medium">({s.percentage}%)</span></span>
                     </div>
-
-                    {/* Drop-off rate indicator */}
-                    {idx > 0 && (
-                      <div className="flex items-center pl-52 text-[10px] text-rose-600 font-extrabold gap-1">
-                        <ArrowDownRight className="h-3.5 w-3.5" />
-                        <span>Penyusutan (Drop-off): {dropOff}% dari tahap sebelumnya</span>
-                      </div>
+                    <div className="h-9 rounded-xl bg-border/40 overflow-hidden">
+                      <div className="h-full rounded-xl transition-all duration-700 flex items-center px-3"
+                        style={{ width: `${Math.max(s.percentage, s.schools > 0 ? 2 : 0)}%`, backgroundColor: STAGE_COLORS[idx % STAGE_COLORS.length] }} />
+                    </div>
+                    {idx > 0 && s.dropOff > 0 && (
+                      <p className="mt-1 text-[11px] font-semibold text-status-belum flex items-center gap-1">
+                        <ArrowDownRight className="h-3.5 w-3.5" /> Penyusutan {s.dropOff}% dari tahap sebelumnya
+                      </p>
                     )}
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+                ))}
+              </div>
+            </Card>
 
-        {/* Actionable Recommendations */}
-        <div className="card-premium p-6 space-y-5">
-          <h3 className="text-base font-extrabold text-slate-900 font-display flex items-center gap-2 border-b border-slate-200 pb-4">
-            <HelpCircle className="h-5 w-5 text-indigo-600" />
-            <span>Rekomendasi Tindak Lanjut</span>
-          </h3>
-
-          <div className="space-y-3.5 text-xs font-medium">
-            <div className="p-4 rounded-2xl bg-indigo-50/80 border border-indigo-100 space-y-1">
-              <p className="font-extrabold text-indigo-700 flex items-center gap-1.5 font-display text-xs">
-                <Info className="h-4 w-4 text-indigo-600" />
-                <span>Intervensi Tahap 1 & 2:</span>
-              </p>
-              <p className="text-slate-600 leading-relaxed">
-                Prioritaskan reminder ke sekolah yang belum mengisi kuesioner di wilayah Sidoarjo, Batu, & Tuban.
-              </p>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-100 space-y-1">
-              <p className="font-extrabold text-amber-700 flex items-center gap-1.5 font-display text-xs">
-                <AlertCircle className="h-4 w-4 text-amber-600" />
-                <span>Pendampingan Modul 3:</span>
-              </p>
-              <p className="text-slate-600 leading-relaxed">
-                Adakan sosialisasi KKG khusus mengenai supervisi klinis kepala sekolah.
-              </p>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-emerald-50/80 border border-emerald-100 space-y-1">
-              <p className="font-extrabold text-emerald-700 flex items-center gap-1.5 font-display text-xs">
-                <CheckCircle className="h-4 w-4 text-emerald-600" />
-                <span>Apresiasi Kategori Utama:</span>
-              </p>
-              <p className="text-slate-600 leading-relaxed">
-                Sekolah yang lulus kategori utama diberikan piagam penghargaan BSAN dari Dinas Pendidikan.
-              </p>
-            </div>
+            <Card title="Rekomendasi Tindak Lanjut" subtitle="Dihitung dari tahap dengan penyusutan terbesar">
+              {worst.length === 0 ? (
+                <EmptyState title="Tidak ada penyusutan" message="Seluruh sekolah sasaran berhasil melewati semua tahap." />
+              ) : (
+                <ul className="space-y-3">
+                  {worst.map(s => (
+                    <li key={s.key} className="p-3.5 rounded-xl bg-bg border border-border/60">
+                      <p className="text-xs font-bold text-text-primary flex items-center gap-1.5">
+                        <Lightbulb className="h-4 w-4 text-status-sebagian" />
+                        {s.name} <span className="text-status-belum">(-{s.dropOff}%)</span>
+                      </p>
+                      <p className="text-[11px] text-text-secondary mt-1.5 leading-relaxed">{ADVICE[s.key]}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
           </div>
-        </div>
-      </div>
+
+          <Card title="Rincian per Kecamatan" subtitle="Diurutkan dari konversi selesai survei terendah (prioritas pendampingan)">
+            <div className="overflow-x-auto -mx-4 sm:mx-0">
+              <table className="w-full min-w-[720px] text-xs">
+                <thead>
+                  <tr className="text-left text-text-secondary border-b border-border">
+                    <th className="py-2.5 px-4 font-semibold">Kecamatan</th>
+                    {['Sasaran', 'Mulai', 'Selesai', 'Terima Modul', 'Implementasi', 'Penuh'].map(h => (
+                      <th key={h} className="py-2.5 px-2 font-semibold text-right">{h}</th>
+                    ))}
+                    <th className="py-2.5 px-4 font-semibold">Konversi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {perKec.map(r => (
+                    <tr key={`${r.kabupaten}-${r.kecamatan}`} className="border-b border-border/50 last:border-0 hover:bg-bg/60">
+                      <td className="py-2.5 px-4">
+                        <span className="font-semibold text-text-primary flex items-center gap-1"><MapPin className="h-3 w-3 text-text-secondary" />{r.kecamatan}</span>
+                        <span className="text-[10px] text-text-secondary">{r.kabupaten}</span>
+                      </td>
+                      {[r.total, r.mulai, r.selesai, r.menerima, r.implementasi, r.penuh].map((v, i) => (
+                        <td key={i} className="py-2.5 px-2 text-right tabular-nums">{v}</td>
+                      ))}
+                      <td className="py-2.5 px-4">
+                        <div className="flex items-center gap-2">
+                          <div className="h-1.5 flex-1 min-w-[60px] rounded-full bg-border/60 overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${r.konversi}%`, backgroundColor: r.konversi >= 50 ? 'var(--status-sudah)' : r.konversi > 0 ? 'var(--status-sebagian)' : 'var(--status-belum)' }} />
+                          </div>
+                          <span className="tabular-nums font-semibold w-9 text-right">{r.konversi}%</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </>
+      )}
     </div>
   );
 }

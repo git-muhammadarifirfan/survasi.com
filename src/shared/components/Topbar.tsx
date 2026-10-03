@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  Menu, Bell, Search, User, X, Mail,
-  LogOut, Settings
+  Menu, Bell, Search, User, X,
+  LogOut, Settings, CheckCheck,
 } from 'lucide-react';
 import { apiClient } from '../services/api-client';
 
@@ -18,6 +18,8 @@ interface TopbarProps {
   onLogout: () => void;
 }
 
+const NOTIF_LIMIT = 5;
+
 export default function Topbar({
   onMenuClick,
   activeKecamatan,
@@ -29,13 +31,11 @@ export default function Topbar({
 }: TopbarProps) {
   const navigate = useNavigate();
   const [showNotif, setShowNotif] = useState(false);
-  const [showMessages, setShowMessages] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [userName, setUserName] = useState('');
 
-  // Load user name from stored profile
   useEffect(() => {
     try {
       const stored = localStorage.getItem('bsan_user_profile');
@@ -46,8 +46,7 @@ export default function Topbar({
     } catch {}
   }, []);
 
-  // Fetch real notifications from API
-  useEffect(() => {
+  const fetchNotifications = useCallback(() => {
     apiClient.notifikasi.getAll()
       .then((res) => {
         if (res.success && Array.isArray(res.data)) {
@@ -55,17 +54,30 @@ export default function Topbar({
           setUnreadCount(res.unread_count || 0);
         }
       })
-      .catch(() => {
-        setNotifications([
-          { id: 1, judul: 'Selamat Datang di Survasi BSAN', pesan: 'Sistem monitoring & evaluasi mutu pendidikan Jatim', tipe: 'system', is_read: false, created_at: new Date().toISOString() }
-        ]);
-      });
-  }, [showNotif]);
+      .catch(() => {});
+  }, []);
 
-  const messages = [
-    { id: 1, sender: 'Dinas Pendidikan Jatim', text: 'Batas akhir pengisian survei BSAN tahap ini adalah tanggal 30 September 2026.', time: '09:00 WIB' },
-    { id: 2, sender: 'Tim Evaluasi BSAN', text: 'Instruksi modul SEL & instrumen observasi sekolah sudah terdistribusi.', time: 'Kemarin' },
-  ];
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
+  const markRead = async (id: number) => {
+    const notif = notifications.find(n => n.id === id);
+    if (!notif || notif.is_read) return;
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+    setUnreadCount(prev => Math.max(0, prev - 1));
+    try { await apiClient.notifikasi.markRead(id); } catch {}
+  };
+
+  const markAllRead = async () => {
+    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    setUnreadCount(0);
+    try {
+      await apiClient.setting.markAllRead();
+    } catch {}
+  };
 
   const getRoleBadge = () => {
     switch (userRole) {
@@ -77,14 +89,14 @@ export default function Topbar({
   };
 
   const badge = getRoleBadge();
+  const visibleNotifs = notifications.slice(0, NOTIF_LIMIT);
+  const hasMore = notifications.length > NOTIF_LIMIT;
 
-  // Close dropdowns when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (!target.closest('[data-topbar-dropdown]')) {
         setShowNotif(false);
-        setShowMessages(false);
         setShowProfile(false);
       }
     };
@@ -127,7 +139,7 @@ export default function Topbar({
         </div>
       </div>
 
-      {/* Right: Search, Notifications, Messages, Profile */}
+      {/* Right: Search, Notifications, Profile */}
       <div className="flex items-center space-x-3 relative">
         {/* Search */}
         <div className="relative hidden md:block">
@@ -151,108 +163,84 @@ export default function Topbar({
           )}
         </div>
 
-        {/* Message Icon */}
-        <div className="relative" data-topbar-dropdown>
-          <button
-            onClick={() => {
-              setShowMessages(!showMessages);
-              setShowNotif(false);
-              setShowProfile(false);
-            }}
-            className="relative rounded-xl p-2.5 text-text-secondary hover:bg-bg hover:text-text-primary transition-smooth cursor-pointer"
-            title="Pesan & Pengumuman"
-          >
-            <Mail className="h-[18px] w-[18px]" />
-            <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-status-belum animate-ping" />
-            <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-status-belum" />
-          </button>
-
-          {showMessages && (
-            <div className="absolute right-0 top-12 z-50 w-80 rounded-2xl bg-surface p-4 shadow-2xl border border-border space-y-3 text-xs">
-              <div className="flex items-center justify-between border-b border-border pb-2">
-                <span className="font-bold text-text-primary text-sm flex items-center space-x-1.5">
-                  <Mail className="h-4 w-4 text-primary" />
-                  <span>Pengumuman & Pesan</span>
-                </span>
-                <button onClick={() => setShowMessages(false)} className="text-text-secondary hover:text-text-primary">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="space-y-2.5 max-h-64 overflow-y-auto custom-scrollbar">
-                {messages.map(m => (
-                  <div key={m.id} className="p-2.5 rounded-xl bg-bg/60 border border-border/40 space-y-1">
-                    <div className="flex justify-between font-bold text-text-primary">
-                      <span>{m.sender}</span>
-                      <span className="text-[10px] text-text-secondary">{m.time}</span>
-                    </div>
-                    <p className="text-text-secondary leading-relaxed">{m.text}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* Notification Icon */}
         <div className="relative" data-topbar-dropdown>
           <button
             onClick={() => {
               setShowNotif(!showNotif);
-              setShowMessages(false);
               setShowProfile(false);
             }}
             className="relative rounded-xl p-2.5 text-text-secondary hover:bg-bg hover:text-text-primary transition-smooth cursor-pointer"
-            title="Notifikasi Aktivitas"
+            title="Notifikasi"
           >
             <Bell className="h-[18px] w-[18px]" />
             {unreadCount > 0 && (
-              <span className="absolute top-1.5 right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[9px] font-bold text-white">
-                {unreadCount}
+              <span className="absolute top-1.5 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent text-[9px] font-bold text-white px-1">
+                {unreadCount > 99 ? '99+' : unreadCount}
               </span>
             )}
           </button>
 
           {showNotif && (
-            <div className="absolute right-0 top-12 z-50 w-80 rounded-2xl bg-surface p-4 shadow-2xl border border-border space-y-3 text-xs">
+            <div className="absolute right-0 top-12 z-50 w-80 sm:w-96 rounded-2xl bg-surface p-4 shadow-2xl border border-border space-y-3 text-xs">
               <div className="flex items-center justify-between border-b border-border pb-2">
                 <span className="font-bold text-text-primary text-sm flex items-center space-x-1.5">
                   <Bell className="h-4 w-4 text-accent" />
-                  <span>Notifikasi System</span>
+                  <span>Notifikasi</span>
+                  {unreadCount > 0 && <span className="ml-1 text-[10px] font-bold text-accent">({unreadCount})</span>}
                 </span>
-                <button onClick={() => setShowNotif(false)} className="text-text-secondary hover:text-text-primary">
-                  <X className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-2">
+                  {unreadCount > 0 && (
+                    <button onClick={markAllRead} className="text-[10px] text-primary hover:underline font-bold flex items-center gap-1 cursor-pointer">
+                      <CheckCheck className="h-3 w-3" /> Tandai semua dibaca
+                    </button>
+                  )}
+                  <button onClick={() => setShowNotif(false)} className="text-text-secondary hover:text-text-primary cursor-pointer">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
-              <div className="space-y-2.5 max-h-64 overflow-y-auto custom-scrollbar">
-                {notifications.length === 0 ? (
-                  <p className="text-center text-text-secondary py-4">Belum ada notifikasi baru.</p>
+              <div className="space-y-2 max-h-72 overflow-y-auto custom-scrollbar">
+                {visibleNotifs.length === 0 ? (
+                  <p className="text-center text-text-secondary py-6">Belum ada notifikasi.</p>
                 ) : (
-                  notifications.map(n => (
-                    <div key={n.id} className={`p-2.5 rounded-xl border space-y-1 ${!n.is_read ? 'bg-primary/5 border-primary/20' : 'bg-bg/60 border-border/40'}`}>
-                      <div className="flex justify-between font-bold text-text-primary">
-                        <span>{n.judul}</span>
-                        <span className="text-[9px] text-text-secondary">
-                          {n.created_at ? new Date(n.created_at).toLocaleDateString('id-ID') : 'Baru'}
-                        </span>
+                  visibleNotifs.map(n => (
+                    <button key={n.id} type="button" onClick={() => markRead(n.id)}
+                      className={`w-full text-left p-2.5 rounded-xl border space-y-1 transition cursor-pointer ${!n.is_read ? 'bg-primary/5 border-primary/20 hover:bg-primary/10' : 'bg-bg/60 border-border/40 hover:bg-bg'}`}>
+                      <div className="flex justify-between items-start gap-2">
+                        <span className="font-bold text-text-primary text-xs leading-snug">{n.judul}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {!n.is_read && <span className="h-2 w-2 rounded-full bg-accent" />}
+                          <span className="text-[9px] text-text-secondary whitespace-nowrap">
+                            {n.created_at ? new Date(n.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : ''}
+                          </span>
+                        </div>
                       </div>
-                      <p className="text-text-secondary text-[11px] leading-snug">{n.pesan}</p>
-                    </div>
+                      <p className="text-text-secondary text-[11px] leading-snug line-clamp-2">{n.pesan}</p>
+                    </button>
                   ))
                 )}
               </div>
+              {(hasMore || notifications.length > 0) && (
+                <button
+                  onClick={() => { setShowNotif(false); navigate('/setting'); }}
+                  className="w-full text-center text-xs font-bold text-primary hover:underline py-1.5 cursor-pointer"
+                >
+                  Lihat Semua Notifikasi
+                </button>
+              )}
             </div>
           )}
         </div>
 
         <div className="h-8 w-px bg-border mx-1" />
 
-        {/* Profile Card — No Role Switcher */}
+        {/* Profile Card */}
         <div className="relative" data-topbar-dropdown>
           <button
             onClick={() => {
               setShowProfile(!showProfile);
               setShowNotif(false);
-              setShowMessages(false);
             }}
             className="flex items-center space-x-3 cursor-pointer rounded-xl px-2 py-1.5 hover:bg-bg transition-smooth"
           >
@@ -271,7 +259,6 @@ export default function Topbar({
 
           {showProfile && (
             <div className="absolute right-0 top-12 z-50 w-72 rounded-2xl bg-surface p-4 shadow-2xl border border-border space-y-3 text-xs">
-              {/* User Info Header */}
               <div className="border-b border-border pb-3 space-y-1">
                 <div className="flex items-center space-x-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-primary to-accent text-white text-sm font-bold shadow-sm shrink-0">
@@ -288,7 +275,6 @@ export default function Topbar({
                 </div>
               </div>
 
-              {/* Profile Actions */}
               <button
                 onClick={() => {
                   setShowProfile(false);

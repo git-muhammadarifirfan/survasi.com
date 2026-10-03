@@ -21,7 +21,11 @@ router.get('/options', async (req, res) => {
     const [rows] = await pool.execute(`
       SELECT
         sp.id, sp.npsn, sp.nama, sp.jenjang,
-        k.nama AS kecamatan, kb.nama AS kabupaten
+        k.nama AS kecamatan, kb.nama AS kabupaten,
+        -- Sekolah yang sudah dipakai akun lain tidak boleh dipilih saat registrasi
+        EXISTS (
+          SELECT 1 FROM users u WHERE u.sekolah_id = sp.id AND u.deleted_at IS NULL
+        ) AS is_registered
       FROM satuan_pendidikan sp
       LEFT JOIN kecamatan k ON sp.kecamatan_id = k.id
       LEFT JOIN kabupaten kb ON k.kabupaten_id = kb.id
@@ -151,7 +155,7 @@ router.get('/', async (req, res) => {
       FROM satuan_pendidikan sp
       JOIN kecamatan k ON sp.kecamatan_id = k.id
       JOIN kabupaten kb ON k.kabupaten_id = kb.id
-      LEFT JOIN users u ON (u.sekolah_id = sp.id OR (sp.email IS NOT NULL AND u.email = sp.email) OR u.email = CONCAT(sp.npsn, '@survasi.com')) AND u.is_active = TRUE
+      LEFT JOIN users u ON u.sekolah_id = sp.id AND u.deleted_at IS NULL
       WHERE ${whereSql}
       GROUP BY sp.id, sp.npsn, sp.nama, sp.jenjang, sp.status_sekolah, sp.akreditasi, sp.alamat, sp.email, sp.telepon, sp.total_guru, sp.total_siswa, sp.latitude, sp.longitude, sp.status_pengisian, sp.last_updated, sp.target_observasi, k.nama, kb.id, kb.nama
       ORDER BY 
@@ -262,8 +266,9 @@ router.post('/:id/reminder', adminOnly, async (req, res) => {
     const [rows] = await pool.execute(`
       SELECT sp.id, sp.nama AS sekolah_nama, sp.email AS sekolah_email, u.id AS user_id, u.email AS user_email
       FROM satuan_pendidikan sp
-      LEFT JOIN users u ON (u.sekolah_id = sp.id OR (sp.email IS NOT NULL AND u.email = sp.email) OR u.email = CONCAT(sp.npsn, '@survasi.com')) AND u.is_active = TRUE
+      LEFT JOIN users u ON u.sekolah_id = sp.id AND u.is_active = TRUE AND u.deleted_at IS NULL
       WHERE sp.id = ?
+      LIMIT 1
     `, [sekolahId]);
 
     if (rows.length === 0) {
@@ -279,9 +284,22 @@ router.post('/:id/reminder', adminOnly, async (req, res) => {
       });
     }
 
+    // Rate limit: 1 reminder per day per school (any admin)
+    const [recent] = await pool.execute(`
+      SELECT id FROM notifikasi
+      WHERE user_id = ? AND tipe = 'reminder' AND created_at >= CURDATE()
+      LIMIT 1
+    `, [school.user_id]);
+    if (recent.length > 0) {
+      return res.status(429).json({
+        success: false,
+        message: `Sekolah ${school.sekolah_nama} sudah menerima pengingat hari ini. Coba lagi besok.`
+      });
+    }
+
     await pool.execute(`
       INSERT INTO notifikasi (user_id, judul, pesan, tipe)
-      VALUES (?, ?, ?, 'survey_reminder')
+      VALUES (?, ?, ?, 'reminder')
     `, [
       school.user_id,
       'Pengingat Pengisian Kuesioner BSAN',

@@ -158,7 +158,7 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-700 border border-emerald-200">
           <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-          <span>Sudah Mengisi</span>
+          <span>Selesai</span>
         </span>
       );
     }
@@ -166,7 +166,7 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold bg-amber-100 text-amber-700 border border-amber-200">
           <Clock className="w-3 h-3 text-amber-600" />
-          <span>Sebagian</span>
+          <span>Proses Mengisi</span>
         </span>
       );
     }
@@ -327,7 +327,7 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
               options={[
                 { value: '', label: 'Semua Status Pengisian' },
                 { value: 'sudah', label: 'Sudah Mengisi' },
-                { value: 'sebagian', label: 'Sebagian Mengisi' },
+                { value: 'sebagian', label: 'Proses Mengisi' },
                 { value: 'belum', label: 'Belum Mengisi' },
               ]}
               value={statusFilter}

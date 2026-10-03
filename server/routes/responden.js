@@ -12,6 +12,8 @@
 const router = require('express').Router();
 const pool   = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth');
+const { loadRoleMap, answerToText } = require('../utils/surveyRoles');
+const { parseFilter, wilayahWhere } = require('../utils/analytics');
 
 router.use(authMiddleware);
 
@@ -62,83 +64,76 @@ router.get('/distribusi', async (req, res) => {
 });
 
 // ─── GET /api/responden/export-full ──────────────────────────────────────────
+// Data mentah lengkap: identitas responden + sekolah + NPSN + akun pengisi +
+// SELURUH jawaban per pertanyaan (pertanyaan aktif + pertanyaan lama yang punya jawaban).
 router.get('/export-full', async (req, res) => {
   try {
-    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
+    const f = parseFilter(req.query);
+    const w = wilayahWhere(f);
 
     const [rows] = await pool.execute(`
       SELECT
         rs.id AS responden_id, rs.nama, rs.jenis_kelamin, rs.posisi,
-        sp.nama AS sekolah, COALESCE(rs.npsn, sp.npsn, '') AS npsn,
+        sp.id AS sekolah_id, sp.nama AS sekolah, COALESCE(sp.npsn, rs.npsn, '') AS npsn,
+        sp.jenjang, sp.status_sekolah,
         kb.nama AS kabupaten, k.nama AS kecamatan,
         rs.penerima_modul, rs.penyelenggara_pelatihan,
         rs.status_implementasi, rs.kelas_mengajar,
-        rs.no_wa, rs.submitted_at
+        rs.no_wa, rs.submitted_at,
+        (SELECT u.nama  FROM users u WHERE u.sekolah_id = sp.id AND u.deleted_at IS NULL ORDER BY u.id LIMIT 1) AS akun_nama,
+        (SELECT u.email FROM users u WHERE u.sekolah_id = sp.id AND u.deleted_at IS NULL ORDER BY u.id LIMIT 1) AS akun_email
       FROM responden_survey rs
       JOIN satuan_pendidikan sp ON rs.sekolah_id = sp.id
-      JOIN kecamatan k ON rs.kecamatan_id = k.id
-      JOIN kabupaten kb ON rs.kabupaten_id = kb.id
-      WHERE (? IS NULL OR kb.id = ?) AND rs.deleted_at IS NULL
-      ORDER BY kb.nama, k.nama, sp.nama, rs.nama
-    `, [kabupatenId, kabupatenId]);
+      JOIN kecamatan k ON sp.kecamatan_id = k.id
+      JOIN kabupaten kb ON k.kabupaten_id = kb.id
+      WHERE rs.deleted_at IS NULL ${w.sql}
+      ORDER BY rs.submitted_at ASC, rs.id ASC
+    `, w.params);
 
-    const [questions] = await pool.execute(`
-      SELECT id, kode_pertanyaan, TRIM(teks_pertanyaan) AS teks_pertanyaan 
-      FROM pertanyaan_survey 
-      WHERE is_active = 1 AND deleted_at IS NULL 
-        AND id NOT IN (1, 2, 3, 4, 5, 6, 7, 8, 45)
-      ORDER BY urutan ASC, id ASC
-    `);
-    
-    // Using IN clause for answers if rows exist
+    const { questions: allQuestions, roleById } = await loadRoleMap();
+    const [sections] = await pool.execute(`SELECT section_key, title, urutan FROM survey_sections`);
+    const secMeta = new Map(sections.map(s => [s.section_key, s]));
+
     const ansMap = {};
+    const answeredQ = new Set();
     if (rows.length > 0) {
-      const respIds = rows.map(r => r.responden_id);
-      const placeholders = respIds.map(() => '?').join(',');
-      const [answers] = await pool.execute(
-        `SELECT responden_id, pertanyaan_id, jawaban_terstruktur, jawaban_bebas, jawaban_multi FROM jawaban_survey WHERE responden_id IN (${placeholders})`,
-        respIds
-      );
-      
-      answers.forEach(a => {
-        if (!ansMap[a.responden_id]) ansMap[a.responden_id] = {};
-        
-        let textAns = a.jawaban_bebas ? a.jawaban_bebas.trim() : '';
-        let structAns = a.jawaban_terstruktur ? a.jawaban_terstruktur.trim() : '';
-        if (structAns.toLowerCase() === 'jawaban esai') {
-          structAns = '';
-        }
-
-        let finalAnswer = structAns || textAns || '';
-        if (a.jawaban_multi) {
-          try {
-            const arr = typeof a.jawaban_multi === 'string' ? JSON.parse(a.jawaban_multi) : a.jawaban_multi;
-            if (Array.isArray(arr) && arr.length > 0) {
-              finalAnswer = arr.join('; ');
-            } else if (typeof a.jawaban_multi === 'string' && a.jawaban_multi !== 'null') {
-              finalAnswer = a.jawaban_multi;
-            }
-          } catch (e) {
-            finalAnswer = a.jawaban_multi;
-          }
-        }
-
-        if (typeof finalAnswer === 'string' && finalAnswer.trim().toLowerCase() === 'jawaban esai') {
-          finalAnswer = '';
-        }
-
-        ansMap[a.responden_id][a.pertanyaan_id] = finalAnswer;
-      });
+      const ids = rows.map(r => r.responden_id);
+      for (let i = 0; i < ids.length; i += 1000) {
+        const [answers] = await pool.query(
+          `SELECT responden_id, pertanyaan_id, jawaban_terstruktur, jawaban_bebas, jawaban_multi
+           FROM jawaban_survey WHERE responden_id IN (?)`,
+          [ids.slice(i, i + 1000)]
+        );
+        answers.forEach(a => {
+          const text = answerToText(a);
+          if (!text) return;
+          if (!ansMap[a.responden_id]) ansMap[a.responden_id] = {};
+          ansMap[a.responden_id][a.pertanyaan_id] = text;
+          answeredQ.add(a.pertanyaan_id);
+        });
+      }
     }
 
-    return res.json({ 
-      success: true, 
-      data: {
-        respondents: rows,
-        questions: questions,
-        answers: ansMap
-      } 
-    });
+    // Kolom pertanyaan: semua yang aktif + yang nonaktif tapi punya jawaban, urut section → urutan.
+    const questions = allQuestions
+      .filter(q => q.is_active || answeredQ.has(q.id))
+      .sort((a, b) =>
+        ((secMeta.get(a.section)?.urutan ?? 99) - (secMeta.get(b.section)?.urutan ?? 99)) ||
+        (a.urutan - b.urutan) || (a.id - b.id))
+      .map(q => ({
+        id: q.id,
+        kode_pertanyaan: q.kode_pertanyaan,
+        teks_pertanyaan: String(q.teks_pertanyaan || '').replace(/\s+/g, ' ').trim(),
+        tipe: q.tipe,
+        opsi_jawaban: q.opsi_jawaban,
+        modul_id: q.modul_id,
+        section: q.section,
+        section_title: secMeta.get(q.section)?.title || q.section,
+        role: roleById[q.id] || null,
+        is_active: Boolean(q.is_active),
+      }));
+
+    return res.json({ success: true, data: { respondents: rows, questions, answers: ansMap } });
   } catch (err) {
     console.error('[Responden] export-full error:', err);
     return res.status(500).json({ success: false, message: 'Server error.' });

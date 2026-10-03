@@ -202,16 +202,20 @@ router.post('/register-sekolah', registerLimiter, async (req, res) => {
       });
     }
 
-    // Check if selected school is already registered by another active user
+    // Satu sekolah hanya boleh dipakai oleh SATU akun (aktif maupun nonaktif).
+    // Hanya akun yang sudah dihapus (soft delete) yang melepaskan sekolahnya.
     const [existingSekolahUser] = await pool.execute(
-      'SELECT id, nama, email FROM users WHERE sekolah_id = ? AND is_active = TRUE AND LOWER(email) != ? LIMIT 1',
+      `SELECT id, email FROM users
+       WHERE sekolah_id = ? AND deleted_at IS NULL AND LOWER(email) != ?
+       LIMIT 1`,
       [sekolah.id, cleanEmail]
     );
 
     if (existingSekolahUser.length > 0) {
+      const masked = String(existingSekolahUser[0].email).replace(/^(.{2}).*(@.*)$/, '$1***$2');
       return res.status(409).json({
         success: false,
-        message: `Sekolah "${sekolah.nama}" sudah terdaftar oleh perwakilan akun (${existingSekolahUser[0].email}). Silakan hubungi admin atau login ke akun terdaftar.`
+        message: `Sekolah "${sekolah.nama}" sudah terdaftar oleh akun lain (${masked}). Satu sekolah hanya bisa memiliki satu akun. Silakan login dengan akun tersebut atau hubungi admin.`
       });
     }
 
@@ -592,12 +596,22 @@ router.get('/me', authMiddleware, async (req, res) => {
         up.bahasa, up.tema, up.auto_save_interval,
         up.notif_weekly_report, up.notif_instant_alert,
         up.notif_reminder_email, up.notif_system_update,
-        sp.nama AS sekolah_nama, sp.npsn,
-        kb.nama AS kabupaten_nama
+        u.sekolah_id,
+        sp.nama AS sekolah_nama, sp.npsn, sp.npsn AS sekolah_npsn,
+        sp.jenjang AS sekolah_jenjang, sp.status_sekolah, sp.akreditasi AS sekolah_akreditasi,
+        sp.status_pengisian AS sekolah_status_pengisian,
+        -- Wilayah akun sekolah selalu mengikuti lokasi sekolahnya
+        COALESCE(ksp.id, u.kecamatan_id) AS kecamatan_id,
+        COALESCE(ksp.nama, ku.nama) AS kecamatan_nama,
+        COALESCE(kbsp.id, u.kabupaten_id) AS kabupaten_id,
+        COALESCE(kbsp.nama, kbu.nama) AS kabupaten_nama
       FROM users u
       LEFT JOIN user_preferences up ON u.id = up.user_id
       LEFT JOIN satuan_pendidikan sp ON u.sekolah_id = sp.id
-      LEFT JOIN kabupaten kb ON u.kabupaten_id = kb.id
+      LEFT JOIN kecamatan ksp ON sp.kecamatan_id = ksp.id
+      LEFT JOIN kabupaten kbsp ON ksp.kabupaten_id = kbsp.id
+      LEFT JOIN kecamatan ku ON u.kecamatan_id = ku.id
+      LEFT JOIN kabupaten kbu ON u.kabupaten_id = kbu.id
       WHERE u.id = ?
     `, [req.user.id]);
 

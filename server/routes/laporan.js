@@ -25,15 +25,19 @@ router.get('/rekap', async (req, res) => {
         SUM(CASE WHEN sp.status_pengisian = 'sebagian' THEN 1 ELSE 0 END) AS sebagian,
         SUM(CASE WHEN sp.status_pengisian = 'belum'    THEN 1 ELSE 0 END) AS belum,
         ROUND(SUM(CASE WHEN sp.status_pengisian = 'sudah' THEN 1 ELSE 0 END) / NULLIF(COUNT(*), 0) * 100, 1) AS rate,
-        (SELECT COUNT(*) FROM responden_survey rs WHERE rs.kabupaten_id = kb.id) AS total_responden,
+        (SELECT COUNT(*) FROM responden_survey rs
+          JOIN satuan_pendidikan sp3 ON rs.sekolah_id = sp3.id
+          JOIN kecamatan k3 ON sp3.kecamatan_id = k3.id
+          WHERE k3.kabupaten_id = kb.id AND rs.deleted_at IS NULL
+        ) AS total_responden,
         (SELECT COUNT(*) FROM sel_sesi_observasi sso
           JOIN satuan_pendidikan sp2 ON sso.sekolah_id = sp2.id
           JOIN kecamatan k2 ON sp2.kecamatan_id = k2.id
-          WHERE k2.kabupaten_id = kb.id AND sso.status = 'submitted'
+          WHERE k2.kabupaten_id = kb.id AND sso.deleted_at IS NULL AND sso.status IN ('submitted','reviewed')
         ) AS sesi_observasi
       FROM kabupaten kb
       LEFT JOIN kecamatan k ON k.kabupaten_id = kb.id
-      LEFT JOIN satuan_pendidikan sp ON sp.kecamatan_id = k.id
+      LEFT JOIN satuan_pendidikan sp ON sp.kecamatan_id = k.id AND sp.deleted_at IS NULL
       GROUP BY kb.id, kb.nama
     `);
     return res.json({ success: true, data: rows });
@@ -66,10 +70,16 @@ router.get('/history', async (req, res) => {
 // ─── POST /api/laporan/generate ──────────────────────────────────────────────
 router.post('/generate', async (req, res) => {
   try {
-    const { tipe, filter } = req.body;
-    if (!tipe) return res.status(400).json({ success: false, message: 'Tipe export wajib diisi.' });
+    const { filter, nama_file } = req.body;
+    // Kolom tipe_export hanya menerima pdf/excel/docx — CSV dicatat sebagai 'excel' (format asli disimpan di filter_params)
+    const tipe = req.body.tipe === 'csv' ? 'excel' : req.body.tipe;
+    if (!['pdf', 'excel', 'docx'].includes(tipe)) {
+      return res.status(400).json({ success: false, message: 'Tipe export tidak valid.' });
+    }
 
-    const namaFile = `laporan_bsan_${tipe}_${Date.now()}.${tipe === 'excel' ? 'xlsx' : tipe}`;
+    const namaFile = nama_file
+      ? String(nama_file).replace(/[^\w.\-() ]+/g, '_').slice(0, 250)
+      : `laporan_bsan_${tipe}_${Date.now()}.${tipe === 'excel' ? 'xlsx' : tipe}`;
     const [result] = await pool.execute(
       `INSERT INTO laporan_export (user_id, tipe_export, nama_file, filter_params, status) VALUES (?, ?, ?, ?, 'generating')`,
       [req.user.id, tipe, namaFile, JSON.stringify(filter || {})]

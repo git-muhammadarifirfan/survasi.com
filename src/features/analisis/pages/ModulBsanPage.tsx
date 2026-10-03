@@ -7,7 +7,6 @@
 
 import { useState, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { database, KABUPATEN_LIST, KABUPATEN_NAME_TO_ID, schoolsData } from '../../../shared/data/data-source';
 import {
   BSAN_MODUL_LABEL, BSAN_MODUL_LABEL_ID,
   BSAN_MODUL_SUBTITLE, BSAN_MODUL_SUBTITLE_ID, BSAN_MODUL_COLOR,
@@ -22,10 +21,9 @@ import {
 } from 'lucide-react';
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 import html2pdf from 'html2pdf.js';
-import { apiClient } from '../../../shared/services/api-client';
-import CustomSelect from '../../../shared/components/CustomSelect';
-import { buildBsanCsvHeader, buildCsvRow, triggerDownload, safeFilename, dateStamp } from '../../../shared/utils/exportCSV';
-import { downloadXlsxWorkbook, createProfilSekolahExcel } from '../../../shared/utils/exportExcel';
+import { apiClient, withQuery } from '../../../shared/services/api-client';
+import { exportTable, type ExportFormat } from '../../../shared/utils/tableExport';
+import { WilayahFilter, wilayahQuery, wilayahText, type WilayahValue } from '../../../shared/components/analytics/AnalyticsUI';
 
 /* ─── Icon Map ─── */
 const FRAMEWORK_ICONS: Record<string, typeof Brain> = {
@@ -225,28 +223,28 @@ function DimensiRow({ label, guru, murid, total, color }: { label: string; guru:
 export default function ModulBsan() {
   const [activeFrameworkKey, setActiveFrameworkKey] = useState<string>('with_myself');
   const [breakdownTab, setBreakdownTab] = useState<number>(1);
-  const [kabupaten, setKabupaten] = useState('Kab. Sidoarjo');
+  const [wilayah, setWilayah] = useState<WilayahValue>({});
+  const kabupaten = wilayahText(wilayah);
   const [exportMenu, setExportMenu] = useState(false);
   const [exporting, setExporting] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
-  const selectedKab = KABUPATEN_LIST.find(k => k.name === kabupaten || k.id === kabupaten);
-  const kabIdNumber = KABUPATEN_NAME_TO_ID[kabupaten] || (selectedKab ? KABUPATEN_NAME_TO_ID[selectedKab.name] : undefined);
+  const wq = wilayahQuery(wilayah);
 
-  // Query 3 Frameworks Data from DB
-  const { data: frameworksResponse } = useQuery({
-    queryKey: ['frameworksData', kabupaten],
-    queryFn: () => apiClient.analisis.getFrameworks(kabIdNumber),
+  // Semua data dihitung realtime dari jawaban survei & observasi SEL di database
+  const { data: frameworksResponse, dataUpdatedAt, isFetching } = useQuery({
+    queryKey: ['frameworksData', wq.kabupaten_id, wq.kecamatan],
+    queryFn: () => apiClient.get<any[]>(withQuery('/analisis/frameworks', wq)),
   });
 
   const { data: breakdownResponse } = useQuery({
-    queryKey: ['modulBreakdown', kabupaten],
-    queryFn: () => apiClient.analisis.getModulBreakdown(kabIdNumber),
+    queryKey: ['modulBreakdown', wq.kabupaten_id, wq.kecamatan],
+    queryFn: () => apiClient.get<Record<string, any>>(withQuery('/analisis/modul-breakdown', wq)),
   });
 
   const { data: modulDetailResponse } = useQuery({
-    queryKey: ['modulDetail', kabupaten],
-    queryFn: () => apiClient.analisis.getModulDetail(kabIdNumber),
+    queryKey: ['modulDetail', wq.kabupaten_id, wq.kecamatan],
+    queryFn: () => apiClient.get<any[]>(withQuery('/analisis/modul-detail', wq)),
   });
 
   const frameworksList = frameworksResponse?.data || [
@@ -286,11 +284,38 @@ export default function ModulBsan() {
   const kelasAwal = SURVEY_TEMA_TO_MODUL.kelasAwal[bsanModulKey] || [];
   const kelasTinggi = SURVEY_TEMA_TO_MODUL.kelasTinggi[bsanModulKey] || [];
 
-  const regionOptions = KABUPATEN_LIST.map(k => ({
-    value: k.id,
-    label: k.name,
-    icon: <span className="w-2.5 h-2.5 rounded-full shrink-0 inline-block" style={{ backgroundColor: k.color }} />
-  }));
+  const handleTableExport = (format: ExportFormat) => {
+    const mods = Object.entries(liveBreakdownMap)
+      .filter(([k]) => /^\d+$/.test(k))
+      .map(([, m]) => m as any);
+    exportTable({
+      title: 'Framework & Capaian Modul BSAN',
+      wilayah: kabupaten,
+      filename: `Modul_BSAN_${kabupaten}`,
+      sheets: [
+        {
+          name: 'Capaian Framework',
+          columns: ['Framework', 'Nama', 'Capaian (%)', 'Modul', 'Capaian Modul (%)', 'Responden Menjawab'],
+          rows: frameworksList.flatMap((fw: any) => (fw.modules?.length ? fw.modules : [{}]).map((m: any) => [
+            fw.nama, fw.nama_id, fw.progres, m.nama || '-', m.progres ?? '-', m.total_responden ?? '-',
+          ])),
+        },
+        {
+          name: 'Distribusi Jawaban',
+          columns: ['Modul', 'No', 'Pertanyaan', 'Tipe', 'Responden Menjawab', 'Skor Capaian (%)', 'Pilihan Jawaban', 'Jumlah', 'Persen (%)'],
+          rows: mods.flatMap((m: any) => (m.questions || []).flatMap((q: any, qi: number) =>
+            (q.options?.length ? q.options : [{ label: q.tipe === 'text' ? '(isian teks bebas)' : '-', count: q.total_responden, percent: '' }]).map((o: any) => [
+              m.title, qi + 1, q.q, q.tipe, q.total_responden, q.skor ?? '-', o.label, o.count, o.percent,
+            ]))),
+        },
+        {
+          name: 'Dimensi SEL',
+          columns: ['Dimensi', 'Modul/Framework', 'Rata Guru (1-4)', 'Rata Murid (1-4)', 'Rata Total (1-4)', 'Jumlah Sesi'],
+          rows: (modulDetailResponse?.data || []).map((d: any) => [d.dimensi_nama, d.modul_bsan_kode, d.guru_avg, d.murid_avg, d.total_avg, d.jumlah_sesi]),
+        },
+      ],
+    }, format);
+  };
 
   const handleExport = async (format: 'pdf' | 'docx') => {
     setExportMenu(false);
@@ -333,15 +358,8 @@ export default function ModulBsan() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="w-44 sm:w-48">
-                <CustomSelect
-                  options={regionOptions}
-                  value={kabupaten}
-                  onChange={(val) => setKabupaten(val)}
-                  size="sm"
-                />
-              </div>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full md:w-auto">
+              <WilayahFilter value={wilayah} onChange={setWilayah} />
 
               <div className="relative">
                 <button
@@ -362,43 +380,13 @@ export default function ModulBsan() {
                       <File className="h-4 w-4 text-blue-500" />
                       <div className="text-left"><div className="font-bold">Export DOCX</div><div className="text-[9px] text-slate-400">Dokumen Word</div></div>
                     </button>
-                    <button
-                      onClick={() => {
-                        setExportMenu(false);
-                        const filtered = schoolsData.filter(s => !kabupaten || kabupaten === 'Semua Wilayah' || s.kabupaten === kabupaten);
-                        const wb = createProfilSekolahExcel({ schools: filtered, wilayah: kabupaten });
-                        const kab = safeFilename(kabupaten || 'SemuaWilayah');
-                        downloadXlsxWorkbook(wb, `ModulBSAN_Sekolah_${kab}_${dateStamp()}.xlsx`);
-                      }}
-                      className="flex items-center gap-2.5 w-full px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
-                    >
+                    <button onClick={() => { setExportMenu(false); handleTableExport('xlsx'); }} className="flex items-center gap-2.5 w-full px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
                       <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-                      <div className="text-left"><div className="font-bold">Export Excel (.xlsx)</div><div className="text-[9px] text-slate-400">Multi-sheet terstruktur</div></div>
+                      <div className="text-left"><div className="font-bold">Export Excel (.xlsx)</div><div className="text-[9px] text-slate-400">Capaian, distribusi jawaban, dimensi SEL</div></div>
                     </button>
-                    <button
-                      onClick={() => {
-                        setExportMenu(false);
-
-                        let csv = buildBsanCsvHeader({
-                          title: 'DATA FRAMEWORK MODUL BSAN & SEKOLAH SASARAN',
-                          wilayah: kabupaten,
-                        });
-
-                        csv += buildCsvRow(['Timestamp', 'No.', 'NPSN', 'Nama Sekolah', 'Kabupaten', 'Kecamatan', 'Status Pengisian', 'Akreditasi']) + '\n';
-                        const filtered = schoolsData.filter(s => !kabupaten || kabupaten === 'Semua Wilayah' || s.kabupaten === kabupaten);
-                        filtered.forEach((s, i) => {
-                          const statusLabel = s.status === 'sudah' ? 'Lengkap' : s.status === 'sebagian' ? 'Sebagian' : 'Belum Mengisi';
-                          const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
-                          csv += buildCsvRow([ts, i + 1, s.npsn, s.nama, s.kabupaten, s.kecamatan, statusLabel, s.akreditasi]) + '\n';
-                        });
-
-                        const kab = safeFilename(kabupaten || 'SemuaWilayah');
-                        triggerDownload(csv, `ModulBSAN_Sekolah_${kab}_${dateStamp()}.csv`);
-                      }}
-                      className="flex items-center gap-2.5 w-full px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
-                    >
+                    <button onClick={() => { setExportMenu(false); handleTableExport('csv'); }} className="flex items-center gap-2.5 w-full px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer">
                       <FileText className="h-4 w-4 text-slate-600" />
-                      <div className="text-left"><div className="font-bold">Export CSV</div><div className="text-[9px] text-slate-400">Data mentah UTF-8 BOM</div></div>
+                      <div className="text-left"><div className="font-bold">Export CSV</div><div className="text-[9px] text-slate-400">Data mentah UTF-8</div></div>
                     </button>
                   </div>
                 )}
@@ -564,7 +552,7 @@ export default function ModulBsan() {
                   </div>
                 ) : (
                   activeBreakdown.questions.map((item: any, qIdx: number) => (
-                    <div key={item.id || qIdx} className="rounded-2xl border border-slate-100 bg-slate-50/50 p-5 space-y-4">
+                    <div key={item.id || qIdx} className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 sm:p-5 space-y-4">
                       <div className="flex items-start gap-3">
                         <span className="text-xs font-bold text-indigo-600 shrink-0 w-5 leading-relaxed">
                           {qIdx + 1}
@@ -573,16 +561,21 @@ export default function ModulBsan() {
                           <h5 className="text-xs font-bold text-slate-900 leading-relaxed">
                             {item.q}
                           </h5>
-                          {item.total_responden > 0 && (
-                            <span className="inline-block mt-1 text-[10px] text-slate-400 font-medium">
-                              {item.total_responden} responden menjawab
+                          <div className="flex flex-wrap items-center gap-2 mt-1">
+                            <span className="text-[10px] text-slate-400 font-medium">
+                              {item.total_responden > 0 ? `${item.total_responden} responden menjawab` : 'Belum ada jawaban'}
                             </span>
-                          )}
+                            {item.skor != null && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-100">
+                                Skor capaian {item.skor}%
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
 
                       {/* Options */}
-                      <div className="space-y-3.5 pl-8">
+                      <div className="space-y-3.5 pl-0 sm:pl-8">
                         {item.options && item.options.length > 0 ? (
                           item.options.map((opt: any, oi: number) => {
                             const optColors = ['#10B981', '#F59E0B', '#EF4444', '#3B82F6', '#8B5CF6', '#EC4899'];
