@@ -1,6 +1,6 @@
 /**
  * @module features/laporan/pages
- * @description Generate & download laporan PDF/Excel/DOCX dengan filter wilayah dan modul
+ * @description Generate & download laporan CSV dengan filter wilayah — format konsisten BSAN.
  * @tables laporan_export, satuan_pendidikan, responden_survey, sel_sesi_observasi
  * @queries database/queries/laporan_export.sql → semua query
  * @api POST /api/laporan/generate, GET /api/laporan/download/:id, GET /api/laporan/history
@@ -9,59 +9,83 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { database, KABUPATEN_LIST, KECAMATAN_LIST } from '../../../shared/data/data-source';
-import { Download, Filter, CheckCircle2, Building2, ChevronLeft, ChevronRight, X, Check, Settings, Award } from 'lucide-react';
+import { database, schoolsData } from '../../../shared/data/data-source';
+import {
+  Download, CheckCircle2, Building2, ChevronLeft, ChevronRight,
+  X, FileText, Users, BarChart3, Table2, Brain, Grid3X3, Layers
+} from 'lucide-react';
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import { notifyToast } from '../../../shared/components/NotificationToast';
 import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
 import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
+import {
+  buildBsanCsvHeader, buildCsvRow, triggerDownload, safeFilename, dateStamp
+} from '../../../shared/utils/exportCSV';
 
-interface ColumnOption {
-  id: string;
+// ─── Export type definitions ──────────────────────────────────
+
+type ExportType =
+  | 'survei_bsan_lengkap'
+  | 'observasi_sel'
+  | 'profil_sekolah'
+  | 'rekapitulasi_kecamatan'
+  | 'matriks_kuadran';
+
+interface ExportOption {
+  id: ExportType;
+  icon: typeof FileText;
   label: string;
-  category: 'metadata' | 'survey';
+  desc: string;
 }
 
+const EXPORT_OPTIONS: ExportOption[] = [
+  {
+    id: 'survei_bsan_lengkap',
+    icon: FileText,
+    label: '1. Hasil Survei Implementasi BSAN (Data Mentah Lengkap)',
+    desc: 'Seluruh data kuesioner dari pengajar & kepala sekolah (Identitas, NPSN, Pelatihan, Media, dll).',
+  },
+  {
+    id: 'observasi_sel',
+    icon: Brain,
+    label: '2. Hasil Observasi SEL (Social-Emotional Learning)',
+    desc: 'Data penilaian observasi 5 dimensi SEL, skor guru & murid, dan status cross-validasi.',
+  },
+  {
+    id: 'profil_sekolah',
+    icon: Building2,
+    label: '3. Profil & Status Pengisian Sekolah Sasaran',
+    desc: 'Data master sekolah sasaran BSAN beserta status progres pengisian survei.',
+  },
+  {
+    id: 'rekapitulasi_kecamatan',
+    icon: BarChart3,
+    label: '4. Rekapitulasi Partisipasi Survei per Kecamatan',
+    desc: 'Ringkasan statistik tingkat partisipasi pengisian survei per kecamatan.',
+  },
+  {
+    id: 'matriks_kuadran',
+    icon: Grid3X3,
+    label: '5. Matriks Evaluasi 4 Kuadran (Kesiapan vs Implementasi)',
+    desc: 'Data posisi evaluasi 4 kuadran (kesiapan sarana vs tingkat implementasi modul).',
+  },
+];
+
+// ─── Main Component ───────────────────────────────────────────
+
 export default function LaporanEkspor() {
-  // Main page states
   const [selectedKab, setSelectedKab] = useState<string>('');
   const [selectedKec, setSelectedKec] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('');
   const [currentPage, setCurrentPage] = useState(1);
   const perPage = 10;
 
-  // Modal states
   const [showExportModal, setShowExportModal] = useState(false);
-  const [exportFormat, setExportFormat] = useState<'csv' | 'json' | 'excel'>('excel');
-  const [exportType, setExportType] = useState<'metadata' | 'answers'>('metadata');
-  const [rowLimit, setRowLimit] = useState<number>(0); // 0 means all
-  const [selectedColumns, setSelectedColumns] = useState<string[]>([
-    'npsn', 'nama', 'kecamatan', 'status', 'akreditasi', 'totalSiswa', 'totalGuru'
-  ]);
-  
+  const [selectedExportType, setSelectedExportType] = useState<ExportType>('survei_bsan_lengkap');
   const [isExporting, setIsExporting] = useState(false);
 
-  const columnOptions: ColumnOption[] = [
-    { id: 'npsn', label: 'NPSN', category: 'metadata' },
-    { id: 'nama', label: 'Nama Sekolah', category: 'metadata' },
-    { id: 'kabupaten', label: 'Kabupaten', category: 'metadata' },
-    { id: 'kecamatan', label: 'Kecamatan', category: 'metadata' },
-    { id: 'status', label: 'Status Pengisian', category: 'metadata' },
-    { id: 'akreditasi', label: 'Akreditasi', category: 'metadata' },
-    { id: 'alamat', label: 'Alamat Lengkap', category: 'metadata' },
-    { id: 'totalSiswa', label: 'Jumlah Siswa', category: 'metadata' },
-    { id: 'totalGuru', label: 'Jumlah Guru', category: 'metadata' },
-    { id: 'telepon', label: 'Nomor Telepon', category: 'metadata' },
-    { id: 'email', label: 'Email Sekolah', category: 'metadata' },
-    
-    { id: 'm1', label: 'Modul 1 (Literasi & Numerasi)', category: 'survey' },
-    { id: 'm2', label: 'Modul 2 (Pengembangan Karakter)', category: 'survey' },
-    { id: 'm3', label: 'Modul 3 (Kepemimpinan Instruksional)', category: 'survey' },
-    { id: 'm4', label: 'Modul 4 (Lingkungan Belajar)', category: 'survey' },
-    { id: 'm5', label: 'Modul 5 (Kemitraan Orang Tua)', category: 'survey' },
-  ];
-
+  // ── Data queries ──
   const { data: dbKabupatenList = [] } = useQuery({
     queryKey: ['db-kabupaten-laporan'],
     queryFn: () => database.getKabupatenList(),
@@ -74,7 +98,6 @@ export default function LaporanEkspor() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Query database schools for preview table
   const { data: schools = [], isLoading, isError, error: fetchError, refetch } = useQuery({
     queryKey: ['schools-laporan', selectedKab, selectedKec, selectedStatus],
     queryFn: () => database.getSchools({
@@ -84,10 +107,41 @@ export default function LaporanEkspor() {
     }),
   });
 
+  // Respondents data for "survei_bsan_lengkap" export
+  const { data: respondents = [] } = useQuery({
+    queryKey: ['respondents-laporan', selectedKab],
+    queryFn: () => database.getRespondents({ kabupaten: selectedKab || undefined }),
+    enabled: showExportModal && selectedExportType === 'survei_bsan_lengkap',
+  });
+
+  // SEL Scores data for "observasi_sel" export
+  const { data: selScores = [] } = useQuery({
+    queryKey: ['sel-scores-laporan', selectedKab],
+    queryFn: () => database.getSELScores({ kabupaten: selectedKab || undefined }),
+    enabled: showExportModal && selectedExportType === 'observasi_sel',
+  });
+
+  // Matriks data for "matriks_kuadran" export
+  const { data: matriksData = [] } = useQuery({
+    queryKey: ['matriks-data-laporan', selectedKab],
+    queryFn: () => database.getMatriksKuadranData({ kabupaten: selectedKab || undefined }),
+    enabled: showExportModal && selectedExportType === 'matriks_kuadran',
+  });
+
+  // Helper NPSN lookup from schoolsData
+  const getNpsn = (sekolahNama: string): string => {
+    const found = schoolsData.find(
+      s => s.nama.toLowerCase().trim() === sekolahNama.toLowerCase().trim()
+    );
+    return found?.npsn || '';
+  };
+
+  // ── Metrics ──
   const total = schools.length;
   const sudah = schools.filter(s => s.status === 'sudah').length;
   const rate = total > 0 ? Math.round((sudah / total) * 100) : 0;
 
+  // ── Pagination ──
   const totalPages = Math.max(1, Math.ceil(schools.length / perPage));
   const paged = schools.slice((currentPage - 1) * perPage, currentPage * perPage);
 
@@ -101,12 +155,6 @@ export default function LaporanEkspor() {
     return range;
   };
 
-  const toggleColumn = (id: string) => {
-    setSelectedColumns(prev => 
-      prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
-    );
-  };
-
   const statusBadge = (status: string) => {
     const map: Record<string, { label: string; cls: string }> = {
       sudah: { label: 'Lengkap', cls: 'bg-status-sudah/10 text-status-sudah' },
@@ -117,105 +165,249 @@ export default function LaporanEkspor() {
     return <span className={`inline-block px-2 py-0.5 rounded-md text-[9px] font-bold ${s.cls}`}>{s.label}</span>;
   };
 
-  const getMockAnswers = (schoolName: string) => {
-    const answers = {
-      m1: 'Ya, rutin setiap bulan melalui forum KKG kelas awal.',
-      m2: 'Sangat baik, 3 projek per tahun bertema kearifan lokal.',
-      m3: 'Cukup (1-2 kali per semester oleh kepala sekolah).',
-      m4: 'Sangat Baik & Kondusif dengan sarana memadai.',
-      m5: 'Ya, berkala setiap bagi rapor / semester.'
-    };
-    const prefix = schoolName.length % 2 === 0 ? 'Secara umum, ' : '';
-    return {
-      m1: prefix + answers.m1,
-      m2: prefix + answers.m2,
-      m3: prefix + answers.m3,
-      m4: prefix + answers.m4,
-      m5: prefix + answers.m5,
-    };
+  // ── Export builders ──
+
+  const buildSurveiBsanLengkapCsv = () => {
+    const wilayah = [selectedKab || 'Semua Kabupaten', selectedKec || 'Semua Kecamatan'].join(' — ');
+    let out = buildBsanCsvHeader({
+      title: 'DATA HASIL SURVEI IMPLEMENTASI BSAN (RAW RESPONDEN)',
+      wilayah,
+      totalInfo: `Total Responden: ${respondents.length}`,
+    });
+
+    out += buildCsvRow([
+      'Timestamp', 'No.', 'NPSN Sekolah', 'Nama Sekolah', 'Nama Responden', 'Jenis Kelamin', 'Posisi',
+      'Kabupaten', 'Kecamatan',
+      'Penerima Modul BSAN', 'Penyelenggara Pelatihan',
+      'Status Implementasi', 'Kelas Mengajar',
+    ]) + '\n';
+    respondents.forEach((r, i) => {
+      const ts = r.timestamp || new Date().toISOString().replace('T', ' ').substring(0, 19);
+      out += buildCsvRow([
+        ts,
+        i + 1,
+        r.npsn || getNpsn(r.sekolah),
+        r.sekolah,
+        r.nama,
+        r.jenisKelamin,
+        r.posisi,
+        r.kabupaten,
+        r.kecamatan,
+        r.penerima,
+        r.penyelenggara || '',
+        r.statusImplementasi || '',
+        r.kelasMengajar || '',
+      ]) + '\n';
+    });
+
+    return out;
   };
 
-  const handleExportData = () => {
-    if (schools.length === 0) {
-      alert('Tidak ada data sekolah untuk diekspor.');
-      return;
-    }
+  const buildObservasiSelCsv = () => {
+    const wilayah = selectedKab || 'Semua Kabupaten';
+    let out = buildBsanCsvHeader({
+      title: 'DATA HASIL OBSERVASI SOCIAL-EMOTIONAL LEARNING (SEL) BSAN',
+      wilayah,
+      totalInfo: `Total Sekolah Diobservasi: ${selScores.length}`,
+    });
+
+    out += buildCsvRow([
+      'Timestamp', 'No.', 'NPSN', 'Nama Sekolah', 'Kabupaten', 'Kecamatan', 'Tanggal Observasi',
+      'Skor Guru (1-4)', 'Skor Murid (1-4)', 'Skor Total (1-4)',
+      'Kesadaran Diri', 'Regulasi Emosi', 'Kesadaran Sosial', 'Keterampilan Relasi', 'Tanggung Jawab',
+      'Skor Kuesioner BSAN (%)', 'Status Cross Validasi'
+    ]) + '\n';
+
+    selScores.forEach((s, i) => {
+      const dimMap: Record<string, string> = {};
+      s.dimensi.forEach(d => { dimMap[d.dimensi] = d.rataRata?.toFixed(2) || '0.00'; });
+      const klaim = s.kuisionerScore >= 60;
+      const selOk = s.totalRata >= 2.5;
+      const status = klaim && selOk ? 'Unggul' : !klaim && selOk ? 'Hidden Gem' : klaim && !selOk ? 'Overclaimer' : 'Intervensi';
+      const ts = s.tanggal ? `${s.tanggal} 08:00:00` : new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+      out += buildCsvRow([
+        ts,
+        i + 1,
+        getNpsn(s.sekolahNama),
+        s.sekolahNama,
+        s.kabupaten,
+        s.kecamatan,
+        s.tanggal,
+        s.guruTotal.toFixed(2),
+        s.muridTotal.toFixed(2),
+        s.totalRata.toFixed(2),
+        dimMap['kesadaran_diri'] || '0.00',
+        dimMap['regulasi_emosi'] || '0.00',
+        dimMap['kesadaran_sosial'] || '0.00',
+        dimMap['keterampilan_relasi'] || '0.00',
+        dimMap['tanggung_jawab'] || '0.00',
+        s.kuisionerScore,
+        status,
+      ]) + '\n';
+    });
+
+    return out;
+  };
+
+  const buildProfilSekolahCsv = () => {
+    const wilayah = [selectedKab || 'Semua Kabupaten', selectedKec || 'Semua Kecamatan'].join(' — ');
+    let out = buildBsanCsvHeader({
+      title: 'PROFIL & STATUS PENGISIAN SEKOLAH SASARAN BSAN',
+      wilayah,
+      totalInfo: `Total Sekolah: ${schools.length} | Partisipasi: ${rate}%`,
+    });
+
+    out += buildCsvRow([
+      'Timestamp', 'No.', 'NPSN', 'Nama Sekolah', 'Kabupaten', 'Kecamatan',
+      'Status Pengisian', 'Akreditasi', 'Jumlah Siswa', 'Jumlah Guru',
+      'Alamat', 'Email', 'Telepon',
+    ]) + '\n';
+    schools.forEach((s, i) => {
+      const statusLabel = s.status === 'sudah' ? 'Lengkap' : s.status === 'sebagian' ? 'Sebagian' : 'Belum Mengisi';
+      const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      out += buildCsvRow([
+        ts,
+        i + 1,
+        s.npsn,
+        s.nama,
+        s.kabupaten,
+        s.kecamatan,
+        statusLabel,
+        s.akreditasi,
+        s.totalSiswa,
+        s.totalGuru,
+        s.alamat,
+        s.email,
+        s.telepon,
+      ]) + '\n';
+    });
+
+    return out;
+  };
+
+  const buildRekapCsv = () => {
+    const wilayah = selectedKab || 'Semua Kabupaten';
+
+    const groupMap: Record<string, { kabupaten: string; total: number; sudah: number; sebagian: number; belum: number }> = {};
+    schools.forEach(s => {
+      const key = `${s.kabupaten}||${s.kecamatan}`;
+      if (!groupMap[key]) groupMap[key] = { kabupaten: s.kabupaten, total: 0, sudah: 0, sebagian: 0, belum: 0 };
+      groupMap[key].total += 1;
+      if (s.status === 'sudah') groupMap[key].sudah += 1;
+      else if (s.status === 'sebagian') groupMap[key].sebagian += 1;
+      else groupMap[key].belum += 1;
+    });
+
+    let out = buildBsanCsvHeader({
+      title: 'REKAPITULASI PARTISIPASI SURVEI BSAN PER KECAMATAN',
+      wilayah,
+      totalInfo: `Total Sekolah: ${schools.length} | Partisipasi: ${rate}%`,
+    });
+
+    out += buildCsvRow([
+      'Timestamp', 'No.', 'Kabupaten', 'Kecamatan',
+      'Total Sekolah', 'Sudah Mengisi', 'Sebagian Mengisi', 'Belum Mengisi',
+      'Partisipasi (%)',
+    ]) + '\n';
+    Object.entries(groupMap).forEach(([key, g], idx) => {
+      const kecamatan = key.split('||')[1];
+      const pct = g.total > 0 ? Math.round((g.sudah / g.total) * 100) : 0;
+      const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      out += buildCsvRow([
+        ts,
+        idx + 1, g.kabupaten, kecamatan,
+        g.total, g.sudah, g.sebagian, g.belum, `${pct}%`,
+      ]) + '\n';
+    });
+
+    return out;
+  };
+
+  const buildMatriksKuadranCsv = () => {
+    const wilayah = selectedKab || 'Semua Wilayah';
+    let out = buildBsanCsvHeader({
+      title: 'MATRIKS EVALUASI 4 KUADRAN (KESIAPAN VS IMPLEMENTASI) BSAN',
+      wilayah,
+      totalInfo: `Total Data: ${matriksData.length}`,
+    });
+
+    const getKuadranLabel = (impl: number, read: number): string =>
+      impl >= 60 && read >= 60 ? 'Kuadran I — Mandiri'
+        : impl < 60 && read >= 60 ? 'Kuadran II — Potensial'
+          : impl >= 60 && read < 60 ? 'Kuadran III — Perlu Sarana'
+            : 'Kuadran IV — Intervensi';
+
+    out += buildCsvRow([
+      'Timestamp', 'No.', 'NPSN', 'Nama Sekolah / Kecamatan',
+      'Tingkat Kesiapan (%)', 'Tingkat Implementasi (%)',
+      'Status', 'Posisi Kuadran',
+    ]) + '\n';
+
+    matriksData.forEach((p, i) => {
+      const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      out += buildCsvRow([
+        ts,
+        i + 1,
+        getNpsn(p.name),
+        p.name,
+        p.readiness,
+        p.implementation,
+        p.status,
+        getKuadranLabel(p.implementation, p.readiness),
+      ]) + '\n';
+    });
+
+    return out;
+  };
+
+  const handleExport = async () => {
     setIsExporting(true);
     setShowExportModal(false);
 
-    setTimeout(() => {
-      let outputContent = '';
-      let filename = `Laporan_Survei_BSAN_${Date.now()}`;
-      
-      // Filter list based on limit
-      const exportList = rowLimit > 0 ? schools.slice(0, rowLimit) : schools;
+    try {
+      await new Promise(r => setTimeout(r, 800)); // UX delay
 
-      if (exportFormat === 'json') {
-        const jsonOutput = exportList.map(s => {
-          const obj: Record<string, any> = {};
-          const surveyAnswers = getMockAnswers(s.nama);
-          selectedColumns.forEach(col => {
-            if (col.startsWith('m')) {
-              obj[col] = s.status === 'belum' ? 'Belum mengisi' : (surveyAnswers as any)[col];
-            } else {
-              obj[col] = (s as any)[col];
-            }
-          });
-          return obj;
-        });
-        outputContent = JSON.stringify(jsonOutput, null, 2);
-        filename += '.json';
-      } else {
-        const separator = exportFormat === 'excel' ? '\t' : ',';
-        const ext = exportFormat === 'excel' ? 'xls' : 'csv';
-        filename += `.${ext}`;
+      let csv = '';
+      let filename = '';
+      const stamp = dateStamp();
+      const kabSafe = safeFilename(selectedKab || 'SemuaWilayah');
 
-        // Header Title
-        outputContent += `LAPORAN HASIL EVALUASI IMPLEMENTASI BSAN${separator}\n`;
-        outputContent += `Dinas Pendidikan Provinsi Jawa Timur${separator}\n`;
-        outputContent += `Wilayah Filter: ${selectedKab || 'Semua Kabupaten'} - ${selectedKec || 'Semua Kecamatan'}${separator}\n`;
-        outputContent += `Waktu Cetak: ${new Date().toLocaleString('id-ID')}${separator}\n`;
-        outputContent += `Total Sasaran: ${exportList.length} Sekolah | Partisipasi: ${rate}%${separator}\n\n`;
-
-        // Column Titles
-        const headerTitles = selectedColumns.map(colId => {
-          const opt = columnOptions.find(o => o.id === colId);
-          return `"${opt ? opt.label : colId}"`;
-        });
-        outputContent += headerTitles.join(separator) + '\n';
-
-        // Data Rows
-        exportList.forEach(s => {
-          const surveyAnswers = getMockAnswers(s.nama);
-          const rowData = selectedColumns.map(colId => {
-            if (colId.startsWith('m')) {
-              if (s.status === 'belum') return '"Belum mengisi"';
-              return `"${(surveyAnswers as any)[colId]}"`;
-            }
-            const val = (s as any)[colId] || '';
-            return `"${val}"`;
-          });
-          outputContent += rowData.join(separator) + '\n';
-        });
+      switch (selectedExportType) {
+        case 'survei_bsan_lengkap':
+          csv = buildSurveiBsanLengkapCsv();
+          filename = `Hasil_Survei_Lengkap_${kabSafe}_${stamp}.csv`;
+          break;
+        case 'observasi_sel':
+          csv = buildObservasiSelCsv();
+          filename = `Hasil_Observasi_SEL_BSAN_${kabSafe}_${stamp}.csv`;
+          break;
+        case 'profil_sekolah':
+          csv = buildProfilSekolahCsv();
+          filename = `Profil_Sekolah_BSAN_${kabSafe}_${stamp}.csv`;
+          break;
+        case 'rekapitulasi_kecamatan':
+          csv = buildRekapCsv();
+          filename = `Rekapitulasi_Kecamatan_BSAN_${kabSafe}_${stamp}.csv`;
+          break;
+        case 'matriks_kuadran':
+          csv = buildMatriksKuadranCsv();
+          filename = `Matriks_Kuadran_BSAN_${kabSafe}_${stamp}.csv`;
+          break;
       }
 
-      const mimeType = exportFormat === 'json' ? 'application/json' : 'text/csv;charset=utf-8;';
-      const blob = new Blob([outputContent], { type: mimeType });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      setIsExporting(false);
+      triggerDownload(csv, filename);
       notifyToast({
         type: 'success',
         title: 'Ekspor Berhasil',
-        message: 'Berkas laporan berhasil diekspor.',
+        message: `${filename} telah diunduh.`,
       });
-    }, 1200);
+    } catch (err) {
+      console.error('Export error', err);
+      notifyToast({ type: 'error', title: 'Ekspor Gagal', message: 'Terjadi kesalahan saat ekspor.' });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   if (isError) {
@@ -228,6 +420,7 @@ export default function LaporanEkspor() {
     );
   }
 
+  // ── Render ──
   return (
     <div className="space-y-6">
 
@@ -236,26 +429,27 @@ export default function LaporanEkspor() {
         <div>
           <h2 className="text-xl font-bold font-display text-text-primary">Pusat Laporan & Ekspor Data</h2>
           <p className="text-xs text-text-secondary mt-0.5">
-            Saring data sekolah, lihat progres survei secara langsung, dan lakukan penyesuaian ekspor.
+            Pilih jenis data yang ingin diekspor (Survei BSAN, Observasi SEL, Profil Sekolah, Matriks Kuadran, Rekapitulasi).
           </p>
         </div>
 
         <button
           onClick={() => setShowExportModal(true)}
-          className="flex items-center space-x-2 rounded-xl bg-primary hover:bg-primary-dark text-white px-5 py-3 text-xs font-bold shadow-md hover:scale-[1.01] active:scale-[0.99] transition-smooth cursor-pointer"
+          disabled={isExporting}
+          className="flex items-center space-x-2 rounded-xl bg-primary hover:bg-primary-dark text-white px-5 py-3 text-xs font-bold shadow-md hover:scale-[1.01] active:scale-[0.99] transition-smooth cursor-pointer disabled:opacity-60"
         >
           <Download className="h-4 w-4" />
-          <span>Ekspor Laporan</span>
+          <span>Ekspor Data</span>
         </button>
       </div>
 
-      {/* Loading Modal Overlay */}
+      {/* Exporting overlay */}
       {isExporting && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 animate-fade-in">
           <div className="bg-surface p-8 rounded-2xl shadow-2xl flex flex-col items-center max-w-sm w-full mx-4 border border-border">
             <div className="w-16 h-16 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-6"></div>
-            <h3 className="text-lg font-bold text-text-primary font-display mb-2">Memproses Dokumen</h3>
-            <p className="text-sm text-text-secondary text-center">Menyusun baris dan kolom yang disesuaikan...</p>
+            <h3 className="text-lg font-bold text-text-primary font-display mb-2">Menyusun Berkas CSV</h3>
+            <p className="text-sm text-text-secondary text-center">Memformat kolom dan baris data...</p>
           </div>
         </div>,
         document.body
@@ -287,7 +481,7 @@ export default function LaporanEkspor() {
         </div>
         <div className="p-5 rounded-card bg-surface border border-border shadow-card flex items-center space-x-4">
           <div className="p-3.5 bg-accent/8 text-accent rounded-2xl">
-            <Award className="h-6 w-6" />
+            <Table2 className="h-6 w-6" />
           </div>
           <div>
             <span className="text-[9px] font-bold text-accent uppercase tracking-wider block">Persentase Partisipasi</span>
@@ -298,7 +492,7 @@ export default function LaporanEkspor() {
         </div>
       </div>
 
-      {/* Filters & Direct Table View */}
+      {/* Filters + Table */}
       <div className="rounded-card bg-surface shadow-card border border-border overflow-hidden">
         {/* Filter Bar */}
         <div className="p-5 border-b border-border bg-bg/20 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
@@ -311,12 +505,11 @@ export default function LaporanEkspor() {
                 { value: '', label: 'Semua Kabupaten (Target Jatim)' },
                 ...dbKabupatenList.map(k => ({ value: k.nama, label: k.nama }))
               ]}
-              placeholder="Semua Kabupaten (Target Jatim)"
+              placeholder="Semua Kabupaten"
               enableSearch={true}
               size="md"
             />
           </div>
-
           <div className="space-y-1">
             <label className="font-bold text-text-secondary uppercase">Kecamatan</label>
             <CustomSelect
@@ -331,7 +524,6 @@ export default function LaporanEkspor() {
               size="md"
             />
           </div>
-
           <div className="space-y-1">
             <label className="font-bold text-text-secondary uppercase">Status Pengisian</label>
             <CustomSelect
@@ -349,11 +541,12 @@ export default function LaporanEkspor() {
           </div>
         </div>
 
-        {/* Table View */}
+        {/* Table */}
         <div className="overflow-x-auto">
           <table className="w-full text-xs text-left">
             <thead>
               <tr className="bg-bg/40 border-b border-border">
+                <th className="py-3 px-5 text-[10px] font-bold text-text-secondary uppercase tracking-wider">Timestamp</th>
                 <th className="py-3 px-5 text-[10px] font-bold text-text-secondary uppercase tracking-wider">NPSN</th>
                 <th className="py-3 px-5 text-[10px] font-bold text-text-secondary uppercase tracking-wider">Nama Sekolah</th>
                 <th className="py-3 px-5 text-[10px] font-bold text-text-secondary uppercase tracking-wider">Kecamatan</th>
@@ -366,17 +559,18 @@ export default function LaporanEkspor() {
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center">
+                  <td colSpan={8} className="py-12 text-center">
                     <ThreeDotsLoader text="Memuat data laporan sekolah..." />
                   </td>
                 </tr>
               ) : paged.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-text-secondary">Tidak ada data sekolah terfilter.</td>
+                  <td colSpan={8} className="py-12 text-center text-text-secondary">Tidak ada data sekolah terfilter.</td>
                 </tr>
               ) : (
                 paged.map((s, idx) => (
                   <tr key={s.id || idx} className="border-b border-border/40 hover:bg-bg/10">
+                    <td className="py-3.5 px-5 font-mono text-text-secondary text-[11px] whitespace-nowrap">{s.lastUpdated || '2026-10-03 08:00:00'}</td>
                     <td className="py-3.5 px-5 font-mono text-primary font-semibold">{s.npsn}</td>
                     <td className="py-3.5 px-5 font-semibold text-text-primary">{s.nama}</td>
                     <td className="py-3.5 px-5 text-text-secondary">{s.kecamatan}</td>
@@ -398,29 +592,18 @@ export default function LaporanEkspor() {
               Hal. {currentPage} dari {totalPages} ({schools.length} total)
             </p>
             <div className="flex items-center space-x-1">
-              <button
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-                className="rounded-lg p-1.5 text-text-secondary hover:bg-bg disabled:opacity-30 transition-smooth"
-              >
+              <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
+                className="rounded-lg p-1.5 text-text-secondary hover:bg-bg disabled:opacity-30 transition-smooth">
                 <ChevronLeft className="h-4 w-4" />
               </button>
-              {getPageRange().map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setCurrentPage(p)}
-                  className={`h-8 w-8 rounded-lg text-xs font-semibold transition-smooth ${
-                    currentPage === p ? 'bg-primary text-white shadow-sm' : 'text-text-secondary hover:bg-bg'
-                  }`}
-                >
+              {getPageRange().map(p => (
+                <button key={p} onClick={() => setCurrentPage(p)}
+                  className={`h-8 w-8 rounded-lg text-xs font-semibold transition-smooth ${currentPage === p ? 'bg-primary text-white shadow-sm' : 'text-text-secondary hover:bg-bg'}`}>
                   {p}
                 </button>
               ))}
-              <button
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-                className="rounded-lg p-1.5 text-text-secondary hover:bg-bg disabled:opacity-30 transition-smooth"
-              >
+              <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
+                className="rounded-lg p-1.5 text-text-secondary hover:bg-bg disabled:opacity-30 transition-smooth">
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
@@ -428,164 +611,82 @@ export default function LaporanEkspor() {
         )}
       </div>
 
-      {/* Export Configuration Modal Dialog */}
+      {/* ── Simple Vertical Column Export Modal (Clean, Minimal, Mobile Friendly) ── */}
       {showExportModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-4 animate-fade-in">
-          <div className="bg-surface rounded-2xl shadow-2xl max-w-2xl w-full border border-border flex flex-col h-[85vh] animate-scale-in">
-            {/* Header */}
-            <div className="flex justify-between items-center p-5 border-b border-border bg-bg/50 rounded-t-2xl">
-              <div className="flex items-center space-x-3">
+          <div className="bg-surface rounded-2xl shadow-2xl max-w-lg w-full border border-border flex flex-col animate-scale-in max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="flex justify-between items-center p-4 sm:p-5 border-b border-border bg-bg/40 rounded-t-2xl shrink-0">
+              <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-primary/10 rounded-xl text-primary">
-                  <Settings className="h-5 w-5" />
+                  <Download className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-text-primary text-sm">Sesuaikan & Ekspor Laporan</h3>
-                  <p className="text-[10px] text-text-secondary font-medium">Atur format berkas, filter data, dan kolom sebelum diunduh.</p>
+                  <h3 className="font-bold text-text-primary text-sm sm:text-base font-display">Pilih Data Ekspor</h3>
+                  <p className="text-[11px] text-text-secondary font-medium mt-0.5">
+                    Wilayah: <strong>{selectedKab || 'Semua Kabupaten'}</strong> {selectedKec ? `— Kec. ${selectedKec}` : ''}
+                  </p>
                 </div>
               </div>
-              <button
-                onClick={() => setShowExportModal(false)}
-                className="p-1.5 rounded-lg text-text-secondary hover:bg-border/40 transition-smooth"
-              >
+              <button onClick={() => setShowExportModal(false)}
+                className="p-1.5 rounded-lg text-text-secondary hover:bg-border/40 transition-smooth">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar text-xs">
-              {/* Export Type Selection */}
-              <div className="space-y-2">
-                <label className="font-bold text-text-secondary uppercase">Jenis Data Ekspor</label>
-                <div className="grid grid-cols-2 gap-3">
+            {/* Modal Body — Stacked 1 Column List Downward (Simple & Mobile-Friendly, No Color Badges) */}
+            <div className="p-4 sm:p-5 space-y-2.5 overflow-y-auto">
+              {EXPORT_OPTIONS.map(opt => {
+                const Icon = opt.icon;
+                const isSelected = selectedExportType === opt.id;
+                return (
                   <button
+                    key={opt.id}
                     type="button"
-                    onClick={() => {
-                      setExportType('metadata');
-                      setSelectedColumns(['npsn', 'nama', 'kecamatan', 'status', 'akreditasi', 'totalSiswa', 'totalGuru']);
-                    }}
-                    className={`p-3.5 rounded-xl border text-left transition-smooth cursor-pointer ${
-                      exportType === 'metadata'
-                        ? 'border-primary bg-primary/5 text-text-primary font-bold shadow-sm'
-                        : 'border-border bg-bg/40 text-text-secondary hover:bg-bg'
+                    onClick={() => setSelectedExportType(opt.id)}
+                    className={`w-full text-left p-3.5 sm:p-4 rounded-xl border transition-all cursor-pointer flex items-center gap-3.5 ${
+                      isSelected
+                        ? 'border-primary bg-primary/5 shadow-xs ring-1 ring-primary/30'
+                        : 'border-border bg-bg/30 hover:bg-bg hover:border-border/80'
                     }`}
                   >
-                    <p className="text-xs">Profil & Status Sekolah</p>
-                    <p className="text-[10px] text-text-secondary/70 font-medium mt-1">Data master wilayah, akreditasi, dan jumlah sarana siswa.</p>
+                    <div className={`p-2.5 rounded-xl shrink-0 transition-colors ${
+                      isSelected ? 'bg-primary text-white' : 'bg-border/30 text-text-secondary'
+                    }`}>
+                      <Icon className="h-4 w-4" />
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <h4 className={`font-bold text-xs sm:text-sm leading-snug ${
+                        isSelected ? 'text-primary' : 'text-text-primary'
+                      }`}>
+                        {opt.label}
+                      </h4>
+                      <p className="text-text-secondary text-[11px] mt-0.5 leading-relaxed line-clamp-2">
+                        {opt.desc}
+                      </p>
+                    </div>
+
+                    <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center transition-colors ${
+                      isSelected ? 'border-primary bg-primary' : 'border-border'
+                    }`}>
+                      {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                    </div>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setExportType('answers');
-                      setSelectedColumns(['npsn', 'nama', 'kecamatan', 'm1', 'm2', 'm3', 'm4', 'm5']);
-                    }}
-                    className={`p-3.5 rounded-xl border text-left transition-smooth cursor-pointer ${
-                      exportType === 'answers'
-                        ? 'border-primary bg-primary/5 text-text-primary font-bold shadow-sm'
-                        : 'border-border bg-bg/40 text-text-secondary hover:bg-bg'
-                    }`}
-                  >
-                    <p className="text-xs">Rincian Jawaban Kuesioner</p>
-                    <p className="text-[10px] text-text-secondary/70 font-medium mt-1">Skor per modul & agregat indikator survei sekolah.</p>
-                  </button>
-                </div>
-              </div>
-
-              {/* Export Format */}
-              <div className="space-y-2">
-                <label className="font-bold text-text-secondary uppercase">Format Berkas Unduhan</label>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { id: 'excel', label: 'MS Excel (.xls)', desc: 'Tabular format' },
-                    { id: 'csv', label: 'CSV Comma', desc: 'Flat text format' },
-                    { id: 'json', label: 'JSON Object', desc: 'Web developers' }
-                  ].map(fmt => (
-                    <button
-                      key={fmt.id}
-                      type="button"
-                      onClick={() => setExportFormat(fmt.id as any)}
-                      className={`p-3 rounded-xl border text-center transition-smooth cursor-pointer ${
-                        exportFormat === fmt.id
-                          ? 'border-primary bg-primary/8 text-primary font-bold shadow-sm'
-                          : 'border-border bg-bg/40 text-text-secondary hover:bg-bg'
-                      }`}
-                    >
-                      <p className="text-[11px]">{fmt.label}</p>
-                      <p className="text-[8px] text-text-secondary/70 mt-0.5">{fmt.desc}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Row Limit Options */}
-              <div className="space-y-2">
-                <label className="font-bold text-text-secondary uppercase">Batasi Jumlah Baris (Sekolah)</label>
-                <div className="grid grid-cols-4 gap-2">
-                  {[
-                    { val: 0, label: 'Semua Data' },
-                    { val: 10, label: '10 Sekolah' },
-                    { val: 50, label: '50 Sekolah' },
-                    { val: 100, label: '100 Sekolah' }
-                  ].map(lim => (
-                    <button
-                      key={lim.val}
-                      type="button"
-                      onClick={() => setRowLimit(lim.val)}
-                      className={`p-2 rounded-lg border text-center transition-smooth cursor-pointer ${
-                        rowLimit === lim.val
-                          ? 'border-primary bg-primary/5 text-primary font-bold'
-                          : 'border-border bg-bg/40 text-text-secondary hover:bg-bg'
-                      }`}
-                    >
-                      <span className="text-[10px]">{lim.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Columns Selector Checklist */}
-              <div className="space-y-3 pt-2 border-t border-border">
-                <label className="font-bold text-text-secondary uppercase block">Pilih Kolom Ekspor</label>
-                <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1 custom-scrollbar">
-                  {columnOptions
-                    .filter(o => o.category === (exportType === 'metadata' ? 'metadata' : 'survey') || o.id === 'npsn' || o.id === 'nama' || o.id === 'kecamatan')
-                    .map(col => {
-                      const isSelected = selectedColumns.includes(col.id);
-                      return (
-                        <button
-                          key={col.id}
-                          type="button"
-                          onClick={() => toggleColumn(col.id)}
-                          className={`flex items-center space-x-2.5 px-3 py-2 rounded-xl border text-left transition-smooth cursor-pointer ${
-                            isSelected
-                              ? 'border-primary bg-primary/5 text-text-primary font-semibold'
-                              : 'border-border bg-bg/40 text-text-secondary hover:bg-bg'
-                          }`}
-                        >
-                          <div className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border ${isSelected ? 'border-primary bg-primary text-white' : 'border-border'}`}>
-                            {isSelected && <Check className="h-3 w-3" />}
-                          </div>
-                          <span className="text-[10px] leading-tight truncate">{col.label}</span>
-                        </button>
-                      );
-                    })}
-                </div>
-              </div>
+                );
+              })}
             </div>
 
-            {/* Footer */}
-            <div className="p-4 border-t border-border bg-bg/30 flex justify-end space-x-3 rounded-b-2xl">
-              <button
-                onClick={() => setShowExportModal(false)}
-                className="px-4 py-2 rounded-xl border border-border bg-surface text-text-secondary text-xs font-semibold hover:bg-bg transition-smooth"
-              >
+            {/* Modal Footer */}
+            <div className="p-4 px-5 border-t border-border bg-bg/30 flex items-center justify-end gap-3 rounded-b-2xl shrink-0">
+              <button onClick={() => setShowExportModal(false)}
+                className="px-4 py-2 rounded-xl border border-border bg-surface text-text-secondary text-xs font-semibold hover:bg-bg transition-smooth">
                 Batal
               </button>
-              <button
-                onClick={handleExportData}
-                className="flex items-center space-x-1.5 rounded-xl bg-primary hover:bg-primary-dark text-white px-5 py-2 text-xs font-bold shadow-md transition-smooth active:scale-95 cursor-pointer"
-              >
+              <button onClick={handleExport}
+                className="flex items-center gap-2 rounded-xl bg-primary hover:bg-primary-dark text-white px-5 py-2 text-xs font-bold shadow-md transition-smooth active:scale-95 cursor-pointer">
                 <Download className="h-4 w-4" />
-                <span>Unduh Laporan</span>
+                <span>Unduh CSV</span>
               </button>
             </div>
           </div>
