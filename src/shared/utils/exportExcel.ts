@@ -51,15 +51,28 @@ export function createSurveiBsanExcel(payload: {
   const { respondents, questions, answersMap, schools = [] } = payload;
 
   // Sheet 1: Data Mentah Survei
-  const surveyHeaders = ['Timestamp'];
+  const surveyHeaders = [
+    'Timestamp', 'No.', 'NPSN Sekolah', 'Nama Sekolah', 'Nama Responden',
+    'Jenis Kelamin', 'Posisi', 'Kabupaten', 'Kecamatan'
+  ];
   questions.forEach((q: any) => {
     surveyHeaders.push(cleanCellValue(q.teks_pertanyaan));
   });
 
   const surveyRows: any[][] = [surveyHeaders];
-  respondents.forEach((r: any) => {
+  respondents.forEach((r: any, index: number) => {
     const ts = formatTimestampISO(r.submitted_at);
-    const row = [ts];
+    const row = [
+      ts,
+      index + 1,
+      cleanCellValue(r.npsn),
+      cleanCellValue(r.sekolah),
+      cleanCellValue(r.nama),
+      cleanCellValue(r.jenis_kelamin),
+      cleanCellValue(r.posisi),
+      cleanCellValue(r.kabupaten),
+      cleanCellValue(r.kecamatan)
+    ];
     const rAnswers = answersMap[r.responden_id] || {};
     questions.forEach((q: any) => {
       row.push(cleanCellValue(rAnswers[q.id]));

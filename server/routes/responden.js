@@ -69,7 +69,7 @@ router.get('/export-full', async (req, res) => {
     const [rows] = await pool.execute(`
       SELECT
         rs.id AS responden_id, rs.nama, rs.jenis_kelamin, rs.posisi,
-        sp.nama AS sekolah, rs.npsn,
+        sp.nama AS sekolah, COALESCE(rs.npsn, sp.npsn, '') AS npsn,
         kb.nama AS kabupaten, k.nama AS kecamatan,
         rs.penerima_modul, rs.penyelenggara_pelatihan,
         rs.status_implementasi, rs.kelas_mengajar,
@@ -82,7 +82,13 @@ router.get('/export-full', async (req, res) => {
       ORDER BY kb.nama, k.nama, sp.nama, rs.nama
     `, [kabupatenId, kabupatenId]);
 
-    const [questions] = await pool.execute('SELECT id, teks_pertanyaan FROM pertanyaan_survey ORDER BY id');
+    const [questions] = await pool.execute(`
+      SELECT id, kode_pertanyaan, TRIM(teks_pertanyaan) AS teks_pertanyaan 
+      FROM pertanyaan_survey 
+      WHERE is_active = 1 AND deleted_at IS NULL 
+        AND id NOT IN (1, 2, 3, 4, 5, 6, 7, 8, 45)
+      ORDER BY urutan ASC, id ASC
+    `);
     
     // Using IN clause for answers if rows exist
     const ansMap = {};

@@ -196,13 +196,27 @@ export default function LaporanEkspor() {
     const answersMap = dataset?.answers || {};
 
     let out = '';
-    const headers = ['Timestamp'];
+    const headers = [
+      'Timestamp', 'No.', 'NPSN Sekolah', 'Nama Sekolah', 'Nama Responden',
+      'Jenis Kelamin', 'Posisi', 'Kabupaten', 'Kecamatan'
+    ];
     questions.forEach((q: any) => headers.push(cleanCellValue(q.teks_pertanyaan)));
     out += buildCsvRow(headers) + '\n';
 
-    respondents.forEach((r: any) => {
+    respondents.forEach((r: any, index: number) => {
       const ts = formatTimestampISO(r.submitted_at);
-      const rowData = [ts];
+      const rowData = [
+        ts,
+        index + 1,
+        cleanCellValue(r.npsn),
+        cleanCellValue(r.sekolah),
+        cleanCellValue(r.nama),
+        cleanCellValue(r.jenis_kelamin),
+        cleanCellValue(r.posisi),
+        cleanCellValue(r.kabupaten),
+        cleanCellValue(r.kecamatan)
+      ];
+      
       const respondentAnswers = answersMap[r.responden_id] || {};
       questions.forEach((q: any) => {
         rowData.push(cleanCellValue(respondentAnswers[q.id]));
