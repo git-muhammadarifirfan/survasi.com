@@ -372,7 +372,7 @@ router.get('/frameworks', async (req, res) => {
       let sumProgress = 0;
       const modulesWithProgress = fwModules.map(m => {
         const stats = modulAnswerStats[m.id];
-        let pct = DEFAULT_MODUL_PROGRESS[m.id] || 40;
+        let pct = 0;
         if (stats && stats.total > 0) {
           pct = Math.round((stats.positive / stats.total) * 100);
         }
@@ -385,7 +385,7 @@ router.get('/frameworks', async (req, res) => {
 
       const avgFrameworkProgress = fwModules.length > 0
         ? Math.round(sumProgress / fwModules.length)
-        : (fw.framework_key === 'with_myself' ? 62 : fw.framework_key === 'with_others' ? 37 : 39);
+        : 0;
 
       return {
         ...fw,
@@ -509,10 +509,9 @@ router.get('/modul-breakdown', async (req, res) => {
         };
       });
 
-      const defaultProgress = modul.id === 1 ? 62 : modul.id === 2 ? 45 : modul.id === 3 ? 36 : modul.id === 4 ? 42 : 28;
       const progresPct = totalAnswersInModul > 0 
         ? Math.round((positiveAnswersInModul / totalAnswersInModul) * 100) 
-        : defaultProgress;
+        : 0;
 
       const modulObj = {
         modul_id: modul.id,

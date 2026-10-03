@@ -90,7 +90,7 @@ async function exportPDF(el: HTMLElement, title: string) {
 async function exportDOCX(
   modul: BSANModul,
   skills: BSANGeneralSkill[],
-  indicatorCounts: { label: string; guru: number; murid: number; total: number }[],
+  indicatorCounts: { label: string; guru: number | string; murid: number | string; total: number | string }[],
   kelasAwalTemas: readonly string[],
   kelasTinggiTemas: readonly string[],
   progres: number,
@@ -195,7 +195,7 @@ function SkillCard({ gs, index, color }: { gs: BSANGeneralSkill; index: number; 
   );
 }
 
-function DimensiRow({ label, guru, murid, total, color }: { label: string; guru: number; murid: number; total: number; color: string }) {
+function DimensiRow({ label, guru, murid, total, color }: { label: string; guru: number | string; murid: number | string; total: number | string; color: string }) {
   return (
     <div className="flex items-center justify-between py-2.5 border-b border-border/30 last:border-0">
       <div className="flex items-center gap-2.5">
@@ -243,10 +243,15 @@ export default function ModulBsan() {
     queryFn: () => apiClient.analisis.getModulBreakdown(kabIdNumber),
   });
 
+  const { data: modulDetailResponse } = useQuery({
+    queryKey: ['modulDetail', kabupaten],
+    queryFn: () => apiClient.analisis.getModulDetail(kabIdNumber),
+  });
+
   const frameworksList = frameworksResponse?.data || [
-    { framework_key: 'with_myself', nama: 'With Myself', nama_id: 'Dengan Diriku', progres: 34 },
-    { framework_key: 'with_others', nama: 'With Others', nama_id: 'Dengan Orang Lain', progres: 34 },
-    { framework_key: 'with_challenges', nama: 'With Our Challenges', nama_id: 'Dengan Tantangan Kita', progres: 33 },
+    { framework_key: 'with_myself', nama: 'With Myself', nama_id: 'Dengan Diriku', progres: 0 },
+    { framework_key: 'with_others', nama: 'With Others', nama_id: 'Dengan Orang Lain', progres: 0 },
+    { framework_key: 'with_challenges', nama: 'With Our Challenges', nama_id: 'Dengan Tantangan Kita', progres: 0 },
   ];
 
   const currentFramework = frameworksList.find(f => f.framework_key === activeFrameworkKey) || frameworksList[0];
@@ -255,7 +260,7 @@ export default function ModulBsan() {
 
   const activeBreakdown = liveBreakdownMap[breakdownTab] || {
     title: `MODUL ${breakdownTab}: ${breakdownTab === 1 ? 'LITERASI & NUMERASI DASAR' : breakdownTab === 2 ? 'DISIPLIN POSITIF & ANTIPERUNDUNGAN' : breakdownTab === 3 ? 'KESEHATAN EMOSI & PENGELOLAAN STRES' : breakdownTab === 4 ? 'KEBERSIHAN & KESEHATAN LINGKUNGAN' : 'KEMITRAAN ORANG TUA & KOMITE'}`,
-    progres: breakdownTab === 1 ? '62%' : breakdownTab === 2 ? '45%' : breakdownTab === 3 ? '36%' : breakdownTab === 4 ? '42%' : '28%',
+    progres: '0%',
     questions: [],
   };
 
@@ -264,15 +269,18 @@ export default function ModulBsan() {
   const Icon = FRAMEWORK_ICONS[activeFrameworkKey] || Brain;
   const skills = getGeneralSkillsByModul(bsanModulKey);
   const dims = getDimensiByModul(bsanModulKey);
-  const numericProg = parseInt(String(activeBreakdown.progres || '34').replace('%', '')) || 34;
+  const numericProg = parseInt(String(activeBreakdown.progres || '0').replace('%', '')) || 0;
 
-  const indicatorCounts = dims.map(d => ({
-    dimensi: d,
-    label: SEL_DIMENSI_LABEL[d],
-    guru: SEL_INDIKATORS.filter(i => i.dimensi === d && i.subjek === 'guru').length,
-    murid: SEL_INDIKATORS.filter(i => i.dimensi === d && i.subjek === 'murid').length,
-    total: SEL_INDIKATORS.filter(i => i.dimensi === d).length,
-  }));
+  const indicatorCounts = dims.map(d => {
+    const apiDetail = (modulDetailResponse?.data || []).find((x: any) => x.dimensi_kode === d);
+    return {
+      dimensi: d,
+      label: SEL_DIMENSI_LABEL[d],
+      guru: apiDetail?.guru_avg ? parseFloat(apiDetail.guru_avg).toFixed(1) : '0',
+      murid: apiDetail?.murid_avg ? parseFloat(apiDetail.murid_avg).toFixed(1) : '0',
+      total: apiDetail?.total_avg ? parseFloat(apiDetail.total_avg).toFixed(1) : '0',
+    };
+  });
 
   const kelasAwal = SURVEY_TEMA_TO_MODUL.kelasAwal[bsanModulKey] || [];
   const kelasTinggi = SURVEY_TEMA_TO_MODUL.kelasTinggi[bsanModulKey] || [];
@@ -498,11 +506,11 @@ export default function ModulBsan() {
               {/* 5 Module Tabs (Modul 1 - Modul 5) */}
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 {[
-                  { id: 1, name: 'Modul 1', defaultPct: '62%' },
-                  { id: 2, name: 'Modul 2', defaultPct: '45%' },
-                  { id: 3, name: 'Modul 3', defaultPct: '36%' },
-                  { id: 4, name: 'Modul 4', defaultPct: '42%' },
-                  { id: 5, name: 'Modul 5', defaultPct: '28%' },
+                  { id: 1, name: 'Modul 1', defaultPct: '0%' },
+                  { id: 2, name: 'Modul 2', defaultPct: '0%' },
+                  { id: 3, name: 'Modul 3', defaultPct: '0%' },
+                  { id: 4, name: 'Modul 4', defaultPct: '0%' },
+                  { id: 5, name: 'Modul 5', defaultPct: '0%' },
                 ].map(m => {
                   const active = breakdownTab === m.id;
                   const mProgress = liveBreakdownMap[m.id]?.progres || m.defaultPct;
@@ -624,8 +632,12 @@ export default function ModulBsan() {
                 ))}
               </div>
               <div className="pt-2 border-t border-slate-100 flex justify-between text-xs text-slate-500 font-medium">
-                <span>Total Indikator</span>
-                <span className="font-bold text-slate-800">{indicatorCounts.reduce((s, c) => s + c.total, 0)}</span>
+                <span>Rata-Rata Modul</span>
+                <span className="font-bold text-slate-800">
+                  {indicatorCounts.length > 0 
+                    ? (indicatorCounts.reduce((s, c) => s + parseFloat(String(c.total)), 0) / indicatorCounts.length).toFixed(2) 
+                    : 0}
+                </span>
               </div>
             </div>
 
