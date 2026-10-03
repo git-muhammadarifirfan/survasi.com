@@ -61,6 +61,59 @@ router.get('/distribusi', async (req, res) => {
   }
 });
 
+// ─── GET /api/responden/export-full ──────────────────────────────────────────
+router.get('/export-full', async (req, res) => {
+  try {
+    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
+
+    const [rows] = await pool.execute(`
+      SELECT
+        rs.id AS responden_id, rs.nama, rs.jenis_kelamin, rs.posisi,
+        sp.nama AS sekolah, rs.npsn,
+        kb.nama AS kabupaten, k.nama AS kecamatan,
+        rs.penerima_modul, rs.penyelenggara_pelatihan,
+        rs.status_implementasi, rs.kelas_mengajar,
+        rs.no_wa, rs.submitted_at
+      FROM responden_survey rs
+      JOIN satuan_pendidikan sp ON rs.sekolah_id = sp.id
+      JOIN kecamatan k ON rs.kecamatan_id = k.id
+      JOIN kabupaten kb ON rs.kabupaten_id = kb.id
+      WHERE (? IS NULL OR kb.id = ?) AND rs.deleted_at IS NULL
+      ORDER BY kb.nama, k.nama, sp.nama, rs.nama
+    `, [kabupatenId, kabupatenId]);
+
+    const [questions] = await pool.execute('SELECT id, teks_pertanyaan FROM pertanyaan_survey ORDER BY id');
+    
+    // Using IN clause for answers if rows exist
+    const ansMap = {};
+    if (rows.length > 0) {
+      const respIds = rows.map(r => r.responden_id);
+      const placeholders = respIds.map(() => '?').join(',');
+      const [answers] = await pool.execute(
+        `SELECT responden_id, pertanyaan_id, jawaban_terstruktur FROM jawaban_survey WHERE responden_id IN (${placeholders})`,
+        respIds
+      );
+      
+      answers.forEach(a => {
+        if (!ansMap[a.responden_id]) ansMap[a.responden_id] = {};
+        ansMap[a.responden_id][a.pertanyaan_id] = a.jawaban_terstruktur;
+      });
+    }
+
+    return res.json({ 
+      success: true, 
+      data: {
+        respondents: rows,
+        questions: questions,
+        answers: ansMap
+      } 
+    });
+  } catch (err) {
+    console.error('[Responden] export-full error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 // ─── GET /api/responden/export ───────────────────────────────────────────────
 router.get('/export', async (req, res) => {
   try {

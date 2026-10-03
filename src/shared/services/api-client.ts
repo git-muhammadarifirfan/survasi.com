@@ -236,6 +236,12 @@ export const apiClient = {
       fetchJson<{ success: boolean; responden?: any; data: Array<{ id: number; kode: string; pertanyaan: string; section: string; tipe: string; jawaban: string }> }>(`/sekolah/${id}/answers`),
   },
 
+  // ── Responden ──────────────────────────────────────────────────────────────
+  responden: {
+    getExportFull: (kabupatenId?: number) =>
+      fetchJson<ApiResponse<{ respondents: any[]; questions: any[]; answers: any }>>(`/responden/export-full${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
+  },
+
   // ── Users Management (Admin) ───────────────────────────────────────────────
   users: {
     getAll: (params?: { role?: string; search?: string; page?: number; limit?: number }) => {

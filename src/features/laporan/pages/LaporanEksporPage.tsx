@@ -108,9 +108,9 @@ export default function LaporanEkspor() {
   });
 
   // Respondents data for "survei_bsan_lengkap" export
-  const { data: respondents = [] } = useQuery({
-    queryKey: ['respondents-laporan', selectedKab],
-    queryFn: () => database.getRespondents({ kabupaten: selectedKab || undefined }),
+  const { data: exportFullData } = useQuery({
+    queryKey: ['respondents-laporan-full', selectedKab],
+    queryFn: () => apiClient.responden.getExportFull(selectedKab ? parseInt(selectedKab) : undefined),
     enabled: showExportModal && selectedExportType === 'survei_bsan_lengkap',
   });
 
@@ -169,35 +169,54 @@ export default function LaporanEkspor() {
 
   const buildSurveiBsanLengkapCsv = () => {
     const wilayah = [selectedKab || 'Semua Kabupaten', selectedKec || 'Semua Kecamatan'].join(' — ');
+    const fullData = exportFullData?.data;
+    const respondents = fullData?.respondents || [];
+    const questions = fullData?.questions || [];
+    const answersMap = fullData?.answers || {};
+
     let out = buildBsanCsvHeader({
       title: 'DATA HASIL SURVEI IMPLEMENTASI BSAN (RAW RESPONDEN)',
       wilayah,
       totalInfo: `Total Responden: ${respondents.length}`,
     });
 
-    out += buildCsvRow([
+    const headers = [
       'Timestamp', 'No.', 'NPSN Sekolah', 'Nama Sekolah', 'Nama Responden', 'Jenis Kelamin', 'Posisi',
       'Kabupaten', 'Kecamatan',
       'Penerima Modul BSAN', 'Penyelenggara Pelatihan',
-      'Status Implementasi', 'Kelas Mengajar',
-    ]) + '\n';
-    respondents.forEach((r, i) => {
-      const ts = r.timestamp || new Date().toISOString().replace('T', ' ').substring(0, 19);
-      out += buildCsvRow([
+      'Status Implementasi', 'Kelas Mengajar'
+    ];
+    
+    // Append all question texts to header
+    questions.forEach((q: any) => headers.push(q.teks_pertanyaan));
+    
+    out += buildCsvRow(headers) + '\n';
+    
+    respondents.forEach((r: any, i: number) => {
+      const ts = r.submitted_at || new Date().toISOString().replace('T', ' ').substring(0, 19);
+      const rowData = [
         ts,
         i + 1,
         r.npsn || getNpsn(r.sekolah),
         r.sekolah,
         r.nama,
-        r.jenisKelamin,
+        r.jenis_kelamin,
         r.posisi,
         r.kabupaten,
         r.kecamatan,
-        r.penerima,
-        r.penyelenggara || '',
-        r.statusImplementasi || '',
-        r.kelasMengajar || '',
-      ]) + '\n';
+        r.penerima_modul,
+        r.penyelenggara_pelatihan || '',
+        r.status_implementasi || '',
+        r.kelas_mengajar || '',
+      ];
+      
+      // Append answers for each question
+      const respondentAnswers = answersMap[r.responden_id] || {};
+      questions.forEach((q: any) => {
+        rowData.push(respondentAnswers[q.id] || '');
+      });
+      
+      out += buildCsvRow(rowData) + '\n';
     });
 
     return out;
