@@ -237,6 +237,16 @@ export default function LaporanEkspor() {
       else if (s.jangkauan_siswa === 3) jangkauanLabel = 'Sebagian Besar Siswa';
       else if (s.jangkauan_siswa === 4) jangkauanLabel = `Sebagian Kecil Siswa (${s.jumlah_siswa_sebagian_kecil} Siswa)`;
 
+      const safeParseArray = (val: any) => {
+        if (!val) return '';
+        try {
+          const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+          return Array.isArray(parsed) ? parsed.join(', ') : String(parsed);
+        } catch {
+          return String(val);
+        }
+      };
+
       const rowData = [
         ts,
         i + 1,
@@ -245,8 +255,8 @@ export default function LaporanEkspor() {
         s.kabupaten,
         s.kecamatan,
         s.tanggal || '',
-        s.lokasi_diamati ? JSON.parse(s.lokasi_diamati).join(', ') : '',
-        s.waktu_pengamatan ? JSON.parse(s.waktu_pengamatan).join(', ') : '',
+        safeParseArray(s.lokasi_diamati),
+        safeParseArray(s.waktu_pengamatan),
         s.kelas_diamati || '',
         s.mata_pelajaran || '',
         s.guru_inisial || '',
