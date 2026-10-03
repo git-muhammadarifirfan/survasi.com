@@ -1,9 +1,9 @@
 /**
  * @module features/responden/pages
- * @description Tabel data responden dengan filter, search, pagination, dan export CSV/Excel
- * @tables responden_survey, satuan_pendidikan, kecamatan, kabupaten
+ * @description Tabel data responden / sasaran sekolah dengan filter, search, pagination, dan fitur Send Reminder terintegrasi Database MySQL
+ * @tables satuan_pendidikan, users, notifikasi, responden_survey
  * @queries database/queries/data_responden.sql → semua query
- * @api GET /api/responden?kabupaten_id=&kecamatan_id=&search=&page=&limit=
+ * @api GET /api/sekolah, POST /api/sekolah/:id/reminder
  */
 
 import { useState } from 'react';
@@ -11,12 +11,17 @@ import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { database, KECAMATAN_LIST, KABUPATEN_LIST } from '../../../shared/data/data-source';
 import type { School } from '../../../shared/data/data-source';
+import { apiClient } from '../../../shared/services/api-client';
 import {
-  Search, Filter, ChevronLeft, ChevronRight, Send, Users, Check, X,
-  Download, Eye, Building2, CheckCircle2, AlertCircle, Clock
+  Search, ChevronLeft, ChevronRight, Send, Users, Check, X,
+  Download, Eye, Building2, CheckCircle2, AlertCircle, Clock, ShieldCheck, UserX
 } from 'lucide-react';
 
 import CustomSelect from '../../../shared/components/CustomSelect';
+import { notifyToast } from '../../../shared/components/NotificationToast';
+import PaginationCardMinimal from '../../../shared/components/PaginationCardMinimal';
+import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
+import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard';
 
 interface DataRespondenProps {
   activeKecamatan: string | null;
@@ -30,13 +35,16 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [currentPage, setCurrentPage] = useState(1);
   const [remindedSchools, setRemindedSchools] = useState<Record<string, boolean>>({});
+  const [sendingReminderId, setSendingReminderId] = useState<string | null>(null);
   const [selectedSchool, setSelectedSchool] = useState<School | null>(null);
   const [activeModalTab, setActiveModalTab] = useState('modul1');
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isBulkMode, setIsBulkMode] = useState(false);
+
   const perPage = 15;
 
-  const { data: schools = [], isLoading } = useQuery({
-    queryKey: ['schools', kabupatenFilter, activeKecamatan, statusFilter, searchTerm],
+  const { data: schools = [], isLoading, isError, error: fetchError, refetch } = useQuery({
+    queryKey: ['schools-responden', kabupatenFilter, activeKecamatan, statusFilter, searchTerm],
     queryFn: () => database.getSchools({
       kabupaten: kabupatenFilter || undefined,
       kecamatan: activeKecamatan || undefined,
@@ -45,12 +53,104 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
     }),
   });
 
+  const { data: dbKabupatenList = [] } = useQuery({
+    queryKey: ['db-kabupaten-responden'],
+    queryFn: () => database.getKabupatenList(),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: dbKecamatanList = [] } = useQuery({
+    queryKey: ['db-kecamatan-responden', kabupatenFilter],
+    queryFn: () => database.getKecamatanList(kabupatenFilter),
+    staleTime: 5 * 60 * 1000,
+  });
+
   const totalPages = Math.max(1, Math.ceil(schools.length / perPage));
   const paged = schools.slice((currentPage - 1) * perPage, currentPage * perPage);
 
-  const showToast = (msg: string) => {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(null), 3500);
+  const toggleSelectAll = () => {
+    if (selectedIds.length === paged.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(paged.map(s => s.npsn));
+    }
+  };
+
+  const toggleSelectRow = (npsn: string) => {
+    setSelectedIds(prev =>
+      prev.includes(npsn) ? prev.filter(id => id !== npsn) : [...prev, npsn]
+    );
+  };
+
+  const handleSendReminder = async (sch: School) => {
+    if (!sch.is_registered) {
+      notifyToast({
+        type: 'warning',
+        title: 'Sekolah Belum Terdaftar',
+        message: `Pengingat tidak dapat dikirim karena ${sch.nama} belum terhubung dengan akun terdaftar di sistem.`,
+      });
+      return;
+    }
+
+    try {
+      setSendingReminderId(sch.id);
+      const res = await apiClient.sekolah.sendReminder(sch.id);
+      if (res.success) {
+        setRemindedSchools(prev => ({ ...prev, [sch.id]: true }));
+        notifyToast({
+          type: 'success',
+          title: 'Pengingat Terkirim',
+          message: res.message || `Notifikasi pengingat BSAN berhasil dikirimkan ke akun ${sch.nama}.`,
+        });
+      }
+    } catch (err: any) {
+      notifyToast({
+        type: 'error',
+        title: 'Gagal Mengirim Pengingat',
+        message: err.message || 'Terjadi kesalahan saat memproses pengingat.',
+      });
+    } finally {
+      setSendingReminderId(null);
+    }
+  };
+
+  const handleBulkRemind = async () => {
+    if (selectedIds.length === 0) return;
+    
+    const selectedSchools = paged.filter(s => selectedIds.includes(s.npsn));
+    const registeredSchools = selectedSchools.filter(s => s.is_registered);
+    const unregisteredCount = selectedSchools.length - registeredSchools.length;
+
+    if (registeredSchools.length === 0) {
+      notifyToast({
+        type: 'warning',
+        title: 'Pengingat Tidak Dapat Dikirim',
+        message: 'Semua sekolah yang Anda pilih belum terhubung dengan akun terdaftar.',
+      });
+      return;
+    }
+
+    let successCount = 0;
+    for (const sch of registeredSchools) {
+      try {
+        const res = await apiClient.sekolah.sendReminder(sch.id);
+        if (res.success) {
+          setRemindedSchools(prev => ({ ...prev, [sch.id]: true }));
+          successCount++;
+        }
+      } catch (err) {
+        console.error(`Failed sending reminder to ${sch.nama}:`, err);
+      }
+    }
+
+    notifyToast({
+      type: 'success',
+      title: 'Pengiriman Pengingat Berhasil',
+      message: `Pengingat berhasil dikirim untuk ${successCount} sekolah terdaftar.${unregisteredCount > 0 ? ` (${unregisteredCount} sekolah dilewati karena belum terdaftar)` : ''}`,
+    });
+
+    setSelectedIds([]);
+    setIsBulkMode(false);
   };
 
   const statusBadge = (status: string) => {
@@ -58,7 +158,7 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-700 border border-emerald-200">
           <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-          <span>Sudah Mengisi</span>
+          <span>Selesai</span>
         </span>
       );
     }
@@ -66,7 +166,7 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold bg-amber-100 text-amber-700 border border-amber-200">
           <Clock className="w-3 h-3 text-amber-600" />
-          <span>Sebagian</span>
+          <span>Proses Mengisi</span>
         </span>
       );
     }
@@ -78,67 +178,23 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
     );
   };
 
-  const getPageRange = () => {
-    const range: number[] = [];
-    const maxVisible = 5;
-    let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-    const end = Math.min(totalPages, start + maxVisible - 1);
-    if (end - start + 1 < maxVisible) start = Math.max(1, end - maxVisible + 1);
-    for (let i = start; i <= end; i++) range.push(i);
-    return range;
-  };
+  // Fetch Real Survey Answers from Database
+  const { data: realAnswersRes, isLoading: isLoadingAnswers } = useQuery({
+    queryKey: ['school-real-answers', selectedSchool?.id],
+    queryFn: () => (selectedSchool ? apiClient.sekolah.getAnswers(selectedSchool.id) : null),
+    enabled: !!selectedSchool,
+  });
 
-  const generateRealAnswers = (sch: School) => {
-    return [
-      {
-        tabId: 'modul1',
-        title: 'Modul 1: Literasi & Numerasi Dasar',
-        questions: [
-          { q: 'Apakah sekolah melakukan refleksi berkala terhadap metode pembelajaran?', a: sch.status === 'sudah' ? 'Ya, rutin setiap bulan melalui rapat guru kelas.' : 'Sebagian guru telah menerima sosialisasi.' },
-          { q: 'Jenis media pembelajaran yang paling sering digunakan dalam kelas awal:', a: 'Alat Peraga Fisik, Kartu Afirmasi, & Roda Emosi' },
-          { q: 'Frekuensi pelaksanaan membaca bersama murid:', a: 'Rutin 15 menit setiap pagi sebelum kegiatan belajar mengajar.' }
-        ]
-      },
-      {
-        tabId: 'modul2',
-        title: 'Modul 2: Pengembangan Karakter & P5',
-        questions: [
-          { q: 'Keterlaksanaan Projek Penguatan Profil Pelajar Pancasila (P5):', a: 'Sangat baik, 3 projek per tahun bertema kearifan lokal.' },
-          { q: 'Apakah terdapat Kesepakatan Kelas yang disusun bersama murid?', a: 'Ya, disepakati dan ditandatangani oleh guru dan siswa di awal semester.' }
-        ]
-      },
-      {
-        tabId: 'modul3',
-        title: 'Modul 3: Kepemimpinan Instruksional',
-        questions: [
-          { q: 'Dukungan Kepala Sekolah dalam supervisi akademik:', a: 'Memimpin diskusi refleksi berkala dan supervisi klinis 2 kali per semester.' }
-        ]
-      },
-      {
-        tabId: 'modul4',
-        title: 'Modul 4: Lingkungan Belajar Aman & Nyaman',
-        questions: [
-          { q: 'Kondisi fisik ruang kelas di sekolah:', a: `Ruang kelas dalam kondisi layak dengan kapasitas total ${sch.totalSiswa} siswa dan ${sch.totalGuru} guru.` },
-          { q: 'Program pencegahan penanganan kekerasan:', a: 'Tersedia poster area pribadi, SOP aduan, dan pembentukan tim TPKK.' }
-        ]
-      },
-      {
-        tabId: 'modul5',
-        title: 'Modul 5: Kemitraan Orang Tua & Komite',
-        questions: [
-          { q: 'Bentuk keterlibatan wali murid dalam BSAN:', a: 'Aktif dalam forum paguyuban wali murid dan gotong royong kegiatan sekolah.' }
-        ]
-      }
-    ];
-  };
+  const realAnswersList = realAnswersRes?.data || [];
+  const respondenInfo = realAnswersRes?.responden;
+
+  // Group real database questions into tabs by section or default chunks
+  const sectionsInAnswers = Array.from(new Set(realAnswersList.map(a => a.section || 'identitas')));
 
   const handleExportCSV = (sch: School) => {
-    const modules = generateRealAnswers(sch);
-    let csv = 'Modul,Pertanyaan,Jawaban Real Responden\n';
-    modules.forEach(m => {
-      m.questions.forEach(q => {
-        csv += `"${m.title}","${q.q}","${q.a}"\n`;
-      });
+    let csv = 'No,Kode,Section,Pertanyaan,Jawaban Real Responden\n';
+    realAnswersList.forEach((q, idx) => {
+      csv += `"${idx + 1}","${q.kode}","${q.section}","${q.pertanyaan.replace(/"/g, '""')}","${q.jawaban.replace(/"/g, '""')}"\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -149,34 +205,83 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    showToast(`Jawaban survei ${sch.nama} berhasil diekspor!`);
+    notifyToast({
+      type: 'success',
+      title: 'Ekspor Berhasil',
+      message: `Jawaban survei ${sch.nama} berhasil diekspor!`,
+    });
   };
+
+  if (isError) {
+    return (
+      <ConnectionErrorCard
+        title="Gagal Memuat Data Responden"
+        message={(fetchError as any)?.message || 'Gagal terhubung ke server.'}
+        onRetry={() => refetch()}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6 animate-fade-in relative">
-      {/* Toast Notification di ATAS KANAN (top-6 right-6) */}
-      {toastMsg && (
-        <div className="fixed top-6 right-6 z-50 flex items-center gap-2.5 rounded-xl bg-slate-900 text-white px-4 py-3 shadow-2xl text-xs font-semibold animate-scale-in border border-slate-700">
-          <Check className="w-4 h-4 text-emerald-400" />
-          <span>{toastMsg}</span>
-        </div>
-      )}
-
       {/* Header Banner & Filters */}
       <div className="rounded-2xl bg-surface p-6 shadow-card border border-border">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
           <div>
-            <h2 className="text-lg font-bold font-display text-text-primary">Data Responden Survei Sekolah</h2>
+            <h2 className="text-lg font-bold font-display text-text-primary">Data Responden & Sasaran Sekolah</h2>
             <p className="text-xs text-text-secondary mt-0.5">
-              Daftar sekolah sasaran beserta status pengisian instrumen BSAN.
+              Daftar seluruh satuan pendidikan sasaran, status akun terdaftar, dan pemantauan pengisian BSAN.
             </p>
           </div>
 
-          <div className="flex items-center space-x-2">
-            <Users className="h-4 w-4 text-primary" />
-            <span className="text-xs font-semibold text-text-primary">{schools.length} sekolah sasaran</span>
+          <div className="flex items-center space-x-3">
+            <button
+              type="button"
+              onClick={() => {
+                setIsBulkMode(!isBulkMode);
+                setSelectedIds([]);
+              }}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer border ${
+                isBulkMode
+                  ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              <Users className="h-4 w-4" />
+              <span>{isBulkMode ? 'Tutup Pilihan Massal' : 'Pilih Massal (Bulk Action)'}</span>
+            </button>
+            <span className="text-xs font-semibold text-text-primary">{schools.length} sekolah terdaftar</span>
           </div>
         </div>
+
+        {/* Bulk Action Sticky Bar when triggered */}
+        {isBulkMode && (
+          <div className="p-3 mb-4 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-between gap-4 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                checked={selectedIds.length === paged.length && paged.length > 0}
+                onChange={toggleSelectAll}
+                className="w-4 h-4 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+              />
+              <span className="text-xs font-semibold text-indigo-950">
+                Terpilih <strong>{selectedIds.length}</strong> dari <strong>{paged.length}</strong> sekolah di halaman ini
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={selectedIds.length === 0}
+                onClick={handleBulkRemind}
+                className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex items-center gap-1.5"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>Kirim Broadcast Pengingat ({selectedIds.length})</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Filter Controls */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -195,11 +300,12 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
             <CustomSelect
               options={[
                 { value: '', label: 'Semua Kabupaten/Kota' },
-                ...KABUPATEN_LIST.map(k => ({ value: k.name, label: k.name }))
+                ...dbKabupatenList.map(k => ({ value: k.nama, label: k.nama }))
               ]}
               value={kabupatenFilter}
               onChange={(val) => { setKabupatenFilter(val); setCurrentPage(1); }}
               placeholder="Pilih Kabupaten"
+              enableSearch={true}
             />
           </div>
 
@@ -207,7 +313,7 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
             <CustomSelect
               options={[
                 { value: '', label: 'Semua Kecamatan' },
-                ...KECAMATAN_LIST.map((k) => ({ value: k, label: k }))
+                ...dbKecamatanList.map((k) => ({ value: k.nama, label: k.nama }))
               ]}
               value={activeKecamatan || ''}
               onChange={(val) => { setActiveKecamatan(val || null); setCurrentPage(1); }}
@@ -219,9 +325,9 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
           <div className="relative">
             <CustomSelect
               options={[
-                { value: '', label: 'Semua Status' },
+                { value: '', label: 'Semua Status Pengisian' },
                 { value: 'sudah', label: 'Sudah Mengisi' },
-                { value: 'sebagian', label: 'Sebagian Mengisi' },
+                { value: 'sebagian', label: 'Proses Mengisi' },
                 { value: 'belum', label: 'Belum Mengisi' },
               ]}
               value={statusFilter}
@@ -238,72 +344,138 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-bg/60 border-b border-border text-text-secondary font-bold uppercase tracking-wider text-[10px]">
+                {isBulkMode && (
+                  <th className="py-3.5 px-4 text-center w-10">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.length === paged.length && paged.length > 0}
+                      onChange={toggleSelectAll}
+                      className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                  </th>
+                )}
                 <th className="py-3.5 px-5 text-left">NPSN</th>
-                <th className="py-3.5 px-5 text-left">Nama Sekolah</th>
-                <th className="py-3.5 px-5 text-left hidden md:table-cell">Kecamatan</th>
+                <th className="py-3.5 px-5 text-left">Nama Sekolah & Akun</th>
+                <th className="py-3.5 px-5 text-left hidden md:table-cell">Kecamatan / Kab</th>
                 <th className="py-3.5 px-5 text-center hidden lg:table-cell">Akreditasi</th>
-                <th className="py-3.5 px-5 text-center">Status</th>
-                <th className="py-3.5 px-5 text-center">Aksi</th>
+                <th className="py-3.5 px-5 text-center">Status Pengisian</th>
+                <th className="py-3.5 px-5 text-center">Aksi Reminder & Jawaban</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/40 text-text-primary">
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="py-16 text-center text-xs font-semibold text-text-secondary animate-pulse">
-                    Memuat data sekolah...
+                  <td colSpan={isBulkMode ? 7 : 6} className="py-16 text-center">
+                    <ThreeDotsLoader text="Memuat data sekolah sasaran..." />
                   </td>
                 </tr>
               ) : paged.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-16 text-center text-xs font-normal text-text-secondary">
-                    Tidak ditemukan sekolah yang sesuai dengan filter.
+                  <td colSpan={isBulkMode ? 7 : 6} className="py-16 px-4 text-center">
+                    <div className="max-w-md mx-auto space-y-3">
+                      <div className="w-16 h-16 rounded-2xl bg-primary/10 text-primary mx-auto flex items-center justify-center border border-primary/20 shadow-xs">
+                        <Users className="w-8 h-8" />
+                      </div>
+                      <h3 className="text-base font-bold text-text-primary font-display">Tidak Ada Data Sekolah</h3>
+                      <p className="text-xs text-text-secondary leading-relaxed">
+                        Tidak ditemukan sekolah sasaran yang sesuai dengan kriteria filter pencarian Anda.
+                      </p>
+                    </div>
                   </td>
                 </tr>
               ) : (
                 paged.map((s) => (
                   <tr key={s.id} className="table-row-hover">
+                    {isBulkMode && (
+                      <td className="py-3.5 px-4 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(s.npsn)}
+                          onChange={() => toggleSelectRow(s.npsn)}
+                          className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        />
+                      </td>
+                    )}
                     <td className="py-3.5 px-5 font-mono text-xs font-semibold text-primary">{s.npsn}</td>
                     <td className="py-3.5 px-5">
-                      <p className="font-semibold text-text-primary text-xs truncate max-w-[220px]">{s.nama}</p>
-                      <span className="text-[10px] text-text-secondary font-normal">{s.alamat || '-'}</span>
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-text-primary text-xs truncate max-w-[220px]">{s.nama}</p>
+                        {s.is_registered ? (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200/60" title="Akun terdaftar di sistem">
+                            <ShieldCheck className="w-2.5 h-2.5 text-emerald-600" />
+                            <span>Terdaftar</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-slate-100 text-slate-500 border border-slate-200" title="Belum memiliki akun terdaftar atau email terhubung">
+                            <UserX className="w-2.5 h-2.5 text-slate-400" />
+                            <span>Tanpa Akun</span>
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-text-secondary font-normal block mt-0.5">
+                        {s.jenjang || 'SD'} • {s.statusSekolah || 'Negeri'} {s.email ? `• ${s.email}` : ''}
+                      </span>
                     </td>
                     <td className="py-3.5 px-5 text-xs text-text-secondary hidden md:table-cell">
                       <span className="font-semibold text-text-primary block">{s.kecamatan}</span>
                       <span className="text-[10px]">{s.kabupaten}</span>
                     </td>
                     <td className="py-3.5 px-5 text-center text-xs text-text-secondary hidden lg:table-cell font-semibold">
-                      {s.akreditasi || '-'}
+                      {s.akreditasi || 'A'}
                     </td>
                     <td className="py-3.5 px-5 text-center">{statusBadge(s.status)}</td>
                     <td className="py-3.5 px-5 text-center">
-                      {s.status === 'belum' ? (
-                        remindedSchools[s.id] ? (
-                          <span className="inline-flex items-center space-x-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1.5 text-[10px] font-bold">
-                            <Check className="h-3 w-3 text-emerald-600" />
+                      <div className="flex items-center justify-center gap-2">
+                        {/* Send Reminder Action */}
+                        {s.status === 'sudah' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200" title="Sekolah ini telah menyelesaikan seluruh instrumen survei BSAN">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Selesai Mengisi</span>
+                          </span>
+                        ) : remindedSchools[s.id] ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold bg-indigo-100 text-indigo-700 border border-indigo-200">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" />
                             <span>Terkirim</span>
                           </span>
+                        ) : !s.is_registered ? (
+                          <button
+                            type="button"
+                            disabled
+                            onClick={() => handleSendReminder(s)}
+                            title="Sekolah ini belum memiliki akun terdaftar atau email terhubung, sehingga reminder tidak dapat dikirim."
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 text-slate-400 border border-slate-200 text-[10px] font-medium cursor-not-allowed opacity-75"
+                          >
+                            <AlertCircle className="w-3 h-3 text-slate-400" />
+                            <span>Belum Terdaftar</span>
+                          </button>
                         ) : (
                           <button
-                            onClick={() => {
-                              setRemindedSchools(p => ({ ...p, [s.id]: true }));
-                              showToast(`Pemberitahuan reminder survei berhasil dikirim ke ${s.nama}!`);
-                            }}
-                            className="inline-flex items-center space-x-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1.5 text-[10px] font-bold transition-smooth active:scale-95 cursor-pointer shadow-sm"
+                            type="button"
+                            disabled={sendingReminderId === s.id}
+                            onClick={() => handleSendReminder(s)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-[10px] shadow-xs transition-smooth active:scale-95 cursor-pointer disabled:opacity-50"
                           >
-                            <Send className="h-3 w-3" />
+                            {sendingReminderId === s.id ? (
+                              <div className="h-3 w-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            ) : (
+                              <Send className="w-3 h-3" />
+                            )}
                             <span>Kirim Reminder</span>
                           </button>
-                        )
-                      ) : (
-                        /* Tombol Lihat Jawaban: WARNA HIJAU (bg-emerald-600) */
-                        <button
-                          onClick={() => { setSelectedSchool(s); setActiveModalTab('modul1'); }}
-                          className="inline-flex items-center space-x-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-[10px] font-bold transition-smooth active:scale-95 cursor-pointer shadow-sm"
-                        >
-                          <Eye className="h-3.5 w-3.5 text-white" />
-                          <span>Lihat Jawaban</span>
-                        </button>
-                      )}
+                        )}
+
+                        {/* View Answer Action if school filled survey */}
+                        {(s.status === 'sudah' || s.status === 'sebagian') && (
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedSchool(s); setActiveModalTab('all'); }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-teal-500 hover:bg-teal-600 text-white font-bold text-[10px] shadow-xs transition-smooth active:scale-95 cursor-pointer"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>Lihat Jawaban</span>
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -312,124 +484,118 @@ export default function DataResponden({ activeKecamatan, setActiveKecamatan, sea
           </table>
         </div>
 
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-5 py-3.5 border-t border-border/50 bg-bg/30 text-xs">
-            <p className="text-[11px] text-text-secondary font-normal">
-              Halaman <span className="font-bold text-text-primary">{currentPage}</span> dari <span className="font-bold text-text-primary">{totalPages}</span> ({schools.length} sekolah)
-            </p>
-            <div className="flex items-center space-x-1">
-              <button
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-                className="rounded-lg p-1.5 text-text-secondary hover:bg-bg disabled:opacity-30 transition-smooth"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              {getPageRange().map((p) => (
-                <button
-                  key={p}
-                  onClick={() => setCurrentPage(p)}
-                  className={`h-8 w-8 rounded-lg text-xs font-semibold transition-smooth ${
-                    currentPage === p ? 'bg-primary text-white shadow-sm' : 'text-text-secondary hover:bg-bg'
-                  }`}
-                >
-                  {p}
-                </button>
-              ))}
-              <button
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-                className="rounded-lg p-1.5 text-text-secondary hover:bg-bg disabled:opacity-30 transition-smooth"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Minimal Pagination */}
+        <div className="p-3 border-t border-border/50 bg-bg/20">
+          <PaginationCardMinimal
+            currentPage={currentPage}
+            totalPages={totalPages}
+            onPageChange={setCurrentPage}
+            totalItems={schools.length}
+            itemsPerPage={perPage}
+          />
+        </div>
       </div>
 
-      {/* Modal Preview Jawaban */}
+      {/* Modal View Answers */}
       {selectedSchool && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-4 animate-fade-in">
-          <div className="bg-surface rounded-2xl shadow-2xl max-w-2xl w-full border border-border flex flex-col max-h-[82vh] overflow-hidden">
-            <div className="flex justify-between items-center p-4 border-b border-border bg-bg/40">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl">
-                  <Building2 className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-text-primary text-sm leading-tight">{selectedSchool.nama}</h3>
-                  <p className="text-[11px] text-text-secondary font-normal mt-0.5">NPSN: {selectedSchool.npsn} • {selectedSchool.kecamatan}, {selectedSchool.kabupaten}</p>
-                </div>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-surface border border-border rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-border/80 flex items-center justify-between bg-primary/5">
+              <div>
+                <h3 className="font-bold text-text-primary text-sm sm:text-base font-display">
+                  Jawaban Kuesioner — {selectedSchool.nama}
+                </h3>
+                <p className="text-[11px] text-text-secondary mt-0.5">
+                  {selectedSchool.kecamatan}, {selectedSchool.kabupaten} • NPSN: {selectedSchool.npsn}
+                </p>
               </div>
               <button
+                type="button"
                 onClick={() => setSelectedSchool(null)}
-                className="p-1 rounded-lg text-text-secondary hover:bg-border/40 transition-smooth"
+                className="p-1.5 rounded-lg text-text-secondary hover:bg-border/40 hover:text-text-primary transition-smooth"
               >
-                <X className="h-5 w-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="flex overflow-x-auto space-x-1.5 px-4 py-2 bg-bg/20 border-b border-border">
-              {[
-                { id: 'modul1', label: 'Modul 1' },
-                { id: 'modul2', label: 'Modul 2' },
-                { id: 'modul3', label: 'Modul 3' },
-                { id: 'modul4', label: 'Modul 4' },
-                { id: 'modul5', label: 'Modul 5' }
-              ].map(tab => (
+            {/* Tabs Per Modul/Section */}
+            <div className="flex border-b border-border/60 overflow-x-auto bg-surface px-4 pt-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveModalTab('all')}
+                className={`px-3 py-1.5 text-xs font-bold rounded-t-lg transition-smooth border-b-2 whitespace-nowrap ${
+                  activeModalTab === 'all'
+                    ? 'border-primary text-primary bg-primary/5'
+                    : 'border-transparent text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                Semua ({realAnswersList.length})
+              </button>
+              {sectionsInAnswers.map((secKey) => (
                 <button
-                  key={tab.id}
-                  onClick={() => setActiveModalTab(tab.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-smooth whitespace-nowrap ${
-                    activeModalTab === tab.id
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'text-text-secondary hover:bg-bg'
+                  key={secKey}
+                  type="button"
+                  onClick={() => setActiveModalTab(secKey)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-t-lg transition-smooth border-b-2 whitespace-nowrap capitalize ${
+                    activeModalTab === secKey
+                      ? 'border-primary text-primary bg-primary/5'
+                      : 'border-transparent text-text-secondary hover:text-text-primary'
                   }`}
                 >
-                  {tab.label}
+                  {secKey.replace(/_/g, ' ')}
                 </button>
               ))}
             </div>
 
-            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs font-normal text-text-primary custom-scrollbar bg-bg/10">
-              {generateRealAnswers(selectedSchool)
-                .filter(m => m.tabId === activeModalTab)
-                .map((m) => (
-                  <div key={m.tabId} className="space-y-3">
-                    <h4 className="font-bold text-xs text-emerald-700 uppercase tracking-wider border-b border-border/60 pb-1.5">{m.title}</h4>
-                    <div className="space-y-3">
-                      {m.questions.map((q, idx) => (
-                        <div key={idx} className="p-3.5 rounded-xl bg-surface border border-border/80 space-y-1.5">
-                          <p className="font-semibold text-text-primary text-xs flex items-start space-x-2">
-                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-emerald-100 text-emerald-700 text-[10px] font-bold">
-                              {idx + 1}
-                            </span>
-                            <span>{q.q}</span>
-                          </p>
-                          <div className="p-2.5 bg-bg/40 rounded-lg border border-border/50 text-[11px] text-text-secondary font-normal leading-relaxed">
-                            {q.a}
-                          </div>
-                        </div>
-                      ))}
+            {/* Modal Body / Answer List */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3.5 text-xs font-normal text-text-primary bg-bg/20">
+              {isLoadingAnswers ? (
+                <div className="py-12 text-center">
+                  <ThreeDotsLoader text="Memuat data jawaban..." />
+                </div>
+              ) : realAnswersList.length === 0 ? (
+                <div className="py-16 text-center text-text-secondary font-medium">
+                  Belum ada jawaban tersimpan untuk sekolah ini.
+                </div>
+              ) : (
+                realAnswersList
+                  .filter(q => activeModalTab === 'all' || q.section === activeModalTab)
+                  .map((q, idx) => (
+                    <div key={q.id} className="p-4 rounded-2xl bg-surface border border-border space-y-2 shadow-card transition hover:border-primary/40">
+                      <div className="flex items-start space-x-2.5">
+                        <span className="flex h-5 min-w-[20px] px-1.5 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary text-[10px] font-bold mt-0.5">
+                          {idx + 1}
+                        </span>
+                        <p className="font-semibold text-text-primary text-xs sm:text-sm leading-relaxed">
+                          {q.pertanyaan}
+                        </p>
+                      </div>
+                      <div className="p-3 bg-bg/40 rounded-xl border border-border/60 text-xs text-text-secondary font-medium leading-relaxed">
+                        {q.jawaban}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+              )}
             </div>
 
-            <div className="p-3.5 border-t border-border bg-bg/30 flex items-center justify-between">
-              <span className="text-[10px] text-text-secondary font-normal">Status Pengisian: <strong className="text-emerald-600 font-semibold">Lengkap</strong></span>
-              <div className="flex items-center space-x-2">
+            {/* Modal Footer */}
+            <div className="p-4 sm:px-6 border-t border-border bg-surface flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="text-xs text-text-secondary text-center sm:text-left truncate">
+                Responden: <span className="font-bold text-text-primary">{respondenInfo?.nama || 'Responden Sekolah'}</span> {respondenInfo?.posisi ? `(${respondenInfo.posisi})` : ''}
+              </div>
+              <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
                 <button
+                  type="button"
                   onClick={() => setSelectedSchool(null)}
-                  className="px-3.5 py-1.5 rounded-xl border border-border bg-surface text-text-secondary text-xs font-semibold hover:bg-bg transition-smooth"
+                  className="px-4 py-2 rounded-xl border border-border text-text-secondary font-semibold text-xs hover:bg-bg transition cursor-pointer"
                 >
                   Tutup
                 </button>
                 <button
+                  type="button"
                   onClick={() => handleExportCSV(selectedSchool)}
-                  className="flex items-center space-x-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 text-xs font-bold shadow-md transition-smooth active:scale-95 cursor-pointer"
+                  className="flex items-center justify-center space-x-1.5 rounded-xl bg-primary hover:bg-primary-dark text-white px-4 py-2 text-xs font-bold shadow-sm transition active:scale-95 cursor-pointer"
                 >
                   <Download className="h-3.5 w-3.5" />
                   <span>Ekspor CSV</span>
