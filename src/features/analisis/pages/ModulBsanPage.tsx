@@ -7,7 +7,7 @@
 
 import { useState, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { database, KABUPATEN_LIST, schoolsData } from '../../../shared/data/data-source';
+import { database, KABUPATEN_LIST, KABUPATEN_NAME_TO_ID, schoolsData } from '../../../shared/data/data-source';
 import {
   BSAN_MODUL_LABEL, BSAN_MODUL_LABEL_ID,
   BSAN_MODUL_SUBTITLE, BSAN_MODUL_SUBTITLE_ID, BSAN_MODUL_COLOR,
@@ -18,13 +18,14 @@ import {
 import type { BSANModul, BSANGeneralSkill, SELDimensi } from '../../../shared/data/sel-indicators';
 import {
   Brain, Users, Target, ChevronDown, Download, FileText, File,
-  BookOpen, CheckCircle2, Eye, Loader2
+  BookOpen, CheckCircle2, Eye, Loader2, FileSpreadsheet
 } from 'lucide-react';
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 import html2pdf from 'html2pdf.js';
 import { apiClient } from '../../../shared/services/api-client';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import { buildBsanCsvHeader, buildCsvRow, triggerDownload, safeFilename, dateStamp } from '../../../shared/utils/exportCSV';
+import { downloadXlsxWorkbook, createProfilSekolahExcel } from '../../../shared/utils/exportExcel';
 
 /* ─── Icon Map ─── */
 const FRAMEWORK_ICONS: Record<string, typeof Brain> = {
@@ -230,7 +231,7 @@ export default function ModulBsan() {
   const printRef = useRef<HTMLDivElement>(null);
 
   const selectedKab = KABUPATEN_LIST.find(k => k.name === kabupaten || k.id === kabupaten);
-  const kabIdNumber = selectedKab?.id === 'Kab. Sidoarjo' ? 1 : selectedKab?.id === 'Kab. Gresik' ? 2 : selectedKab?.id === 'Kab. Sampang' ? 3 : undefined;
+  const kabIdNumber = KABUPATEN_NAME_TO_ID[kabupaten] || (selectedKab ? KABUPATEN_NAME_TO_ID[selectedKab.name] : undefined);
 
   // Query 3 Frameworks Data from DB
   const { data: frameworksResponse } = useQuery({
@@ -364,6 +365,19 @@ export default function ModulBsan() {
                     <button
                       onClick={() => {
                         setExportMenu(false);
+                        const filtered = schoolsData.filter(s => !kabupaten || kabupaten === 'Semua Wilayah' || s.kabupaten === kabupaten);
+                        const wb = createProfilSekolahExcel({ schools: filtered, wilayah: kabupaten });
+                        const kab = safeFilename(kabupaten || 'SemuaWilayah');
+                        downloadXlsxWorkbook(wb, `ModulBSAN_Sekolah_${kab}_${dateStamp()}.xlsx`);
+                      }}
+                      className="flex items-center gap-2.5 w-full px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
+                    >
+                      <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                      <div className="text-left"><div className="font-bold">Export Excel (.xlsx)</div><div className="text-[9px] text-slate-400">Multi-sheet terstruktur</div></div>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setExportMenu(false);
 
                         let csv = buildBsanCsvHeader({
                           title: 'DATA FRAMEWORK MODUL BSAN & SEKOLAH SASARAN',
@@ -383,8 +397,8 @@ export default function ModulBsan() {
                       }}
                       className="flex items-center gap-2.5 w-full px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 cursor-pointer"
                     >
-                      <Download className="h-4 w-4 text-emerald-600" />
-                      <div className="text-left"><div className="font-bold">Export CSV</div><div className="text-[9px] text-slate-400">Data tabel Excel</div></div>
+                      <FileText className="h-4 w-4 text-slate-600" />
+                      <div className="text-left"><div className="font-bold">Export CSV</div><div className="text-[9px] text-slate-400">Data mentah UTF-8 BOM</div></div>
                     </button>
                   </div>
                 )}
@@ -555,9 +569,16 @@ export default function ModulBsan() {
                         <span className="text-xs font-bold text-indigo-600 shrink-0 w-5 leading-relaxed">
                           {qIdx + 1}
                         </span>
-                        <h5 className="text-xs font-bold text-slate-900 leading-relaxed flex-1">
-                          {item.q}
-                        </h5>
+                        <div className="flex-1 min-w-0">
+                          <h5 className="text-xs font-bold text-slate-900 leading-relaxed">
+                            {item.q}
+                          </h5>
+                          {item.total_responden > 0 && (
+                            <span className="inline-block mt-1 text-[10px] text-slate-400 font-medium">
+                              {item.total_responden} responden menjawab
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       {/* Options */}
@@ -568,9 +589,12 @@ export default function ModulBsan() {
                             const barColor = opt.color || optColors[oi % optColors.length];
                             return (
                               <div key={oi} className="space-y-1">
-                                <div className="flex justify-between items-center text-xs">
-                                  <span className="font-semibold text-slate-800">{opt.label}</span>
-                                  <span className="font-bold text-slate-800 ml-2">{opt.percent}%</span>
+                                <div className="flex justify-between items-center text-xs gap-2">
+                                  <span className="font-semibold text-slate-800 flex-1 leading-snug">{opt.label}</span>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <span className="text-slate-400 text-[10px]">({opt.count})</span>
+                                    <span className="font-bold text-slate-800 min-w-[36px] text-right">{opt.percent}%</span>
+                                  </div>
                                 </div>
                                 <div className="h-1.5 w-full rounded-full bg-slate-200/60 overflow-hidden">
                                   <div
@@ -582,7 +606,14 @@ export default function ModulBsan() {
                             );
                           })
                         ) : (
-                          <p className="text-xs text-slate-400 italic">Pertanyaan esai / isian bebas.</p>
+                          <div className="flex items-center gap-2 py-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                            <p className="text-xs text-slate-400 italic">
+                              {item.total_responden > 0
+                                ? `${item.total_responden} responden telah mengisi isian bebas.`
+                                : 'Belum ada jawaban untuk pertanyaan ini.'}
+                            </p>
+                          </div>
                         )}
                       </div>
                     </div>

@@ -96,19 +96,31 @@ router.get('/export-full', async (req, res) => {
       
       answers.forEach(a => {
         if (!ansMap[a.responden_id]) ansMap[a.responden_id] = {};
-        let finalAnswer = a.jawaban_terstruktur || a.jawaban_bebas || '';
+        
+        let textAns = a.jawaban_bebas ? a.jawaban_bebas.trim() : '';
+        let structAns = a.jawaban_terstruktur ? a.jawaban_terstruktur.trim() : '';
+        if (structAns.toLowerCase() === 'jawaban esai') {
+          structAns = '';
+        }
+
+        let finalAnswer = structAns || textAns || '';
         if (a.jawaban_multi) {
           try {
-            const arr = JSON.parse(a.jawaban_multi);
-            if (Array.isArray(arr)) {
+            const arr = typeof a.jawaban_multi === 'string' ? JSON.parse(a.jawaban_multi) : a.jawaban_multi;
+            if (Array.isArray(arr) && arr.length > 0) {
               finalAnswer = arr.join('; ');
-            } else {
+            } else if (typeof a.jawaban_multi === 'string' && a.jawaban_multi !== 'null') {
               finalAnswer = a.jawaban_multi;
             }
           } catch (e) {
             finalAnswer = a.jawaban_multi;
           }
         }
+
+        if (typeof finalAnswer === 'string' && finalAnswer.trim().toLowerCase() === 'jawaban esai') {
+          finalAnswer = '';
+        }
+
         ansMap[a.responden_id][a.pertanyaan_id] = finalAnswer;
       });
     }

@@ -7,8 +7,10 @@
 /** Escape CSV cell agar aman (double-quote, newlines) */
 export function escapeCsvCell(val: unknown): string {
   if (val === null || val === undefined) return '""';
-  const str = String(val).replace(/"/g, '""');
-  return `"${str}"`;
+  const str = String(val).trim();
+  if (str === 'null' || str === 'undefined' || str === 'NaN' || str.toLowerCase() === 'jawaban esai') return '""';
+  const escaped = str.replace(/"/g, '""');
+  return `"${escaped}"`;
 }
 
 /** Build one CSV row from an array of values */

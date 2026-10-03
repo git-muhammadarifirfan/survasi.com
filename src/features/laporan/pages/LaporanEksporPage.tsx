@@ -1,19 +1,19 @@
 /**
  * @module features/laporan/pages
- * @description Generate & download laporan CSV dengan filter wilayah — format konsisten BSAN.
+ * @description Generate & download laporan Excel (.xlsx Multi-sheet) & CSV (Data Mentah UTF-8 BOM)
+ *   dengan filter wilayah — format konsisten BSAN.
  * @tables laporan_export, satuan_pendidikan, responden_survey, sel_sesi_observasi
- * @queries database/queries/laporan_export.sql → semua query
- * @api POST /api/laporan/generate, GET /api/laporan/download/:id, GET /api/laporan/history
+ * @api GET /api/responden/export-full, GET /api/sel/export
  */
 
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { database, schoolsData } from '../../../shared/data/data-source';
+import { database, schoolsData, KABUPATEN_NAME_TO_ID } from '../../../shared/data/data-source';
 import { apiClient } from '../../../shared/services/api-client';
 import {
   Download, CheckCircle2, Building2, ChevronLeft, ChevronRight,
-  X, FileText, Users, BarChart3, Table2, Brain, Grid3X3, Layers
+  X, FileText, BarChart3, Table2, Brain, Grid3X3, FileSpreadsheet, Loader2
 } from 'lucide-react';
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
 import CustomSelect from '../../../shared/components/CustomSelect';
@@ -23,6 +23,11 @@ import ConnectionErrorCard from '../../../shared/components/ConnectionErrorCard'
 import {
   buildBsanCsvHeader, buildCsvRow, triggerDownload, safeFilename, dateStamp
 } from '../../../shared/utils/exportCSV';
+import {
+  downloadXlsxWorkbook, createSurveiBsanExcel, createObservasiSelExcel,
+  createProfilSekolahExcel, createRekapKecamatanExcel, createMatriksKuadranExcel,
+  cleanCellValue, formatTimestampISO
+} from '../../../shared/utils/exportExcel';
 
 // ─── Export type definitions ──────────────────────────────────
 
@@ -45,7 +50,7 @@ const EXPORT_OPTIONS: ExportOption[] = [
     id: 'survei_bsan_lengkap',
     icon: FileText,
     label: '1. Hasil Survei Implementasi BSAN (Data Mentah Lengkap)',
-    desc: 'Seluruh data kuesioner dari pengajar & kepala sekolah (Identitas, NPSN, Pelatihan, Media, dll).',
+    desc: 'Seluruh data kuesioner dari pengajar & kepala sekolah (Identitas, NPSN, Pelatihan, Media, Q1-Q34+).',
   },
   {
     id: 'observasi_sel',
@@ -85,6 +90,7 @@ export default function LaporanEkspor() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [selectedExportType, setSelectedExportType] = useState<ExportType>('survei_bsan_lengkap');
   const [isExporting, setIsExporting] = useState(false);
+  const [exportFormatLoading, setExportFormatLoading] = useState<'excel' | 'csv' | null>(null);
 
   // ── Data queries ──
   const { data: dbKabupatenList = [] } = useQuery({
@@ -106,27 +112,6 @@ export default function LaporanEkspor() {
       kecamatan: selectedKec || undefined,
       status: selectedStatus || undefined,
     }),
-  });
-
-  // Respondents data for "survei_bsan_lengkap" export
-  const { data: exportFullData } = useQuery({
-    queryKey: ['respondents-laporan-full', selectedKab],
-    queryFn: () => apiClient.responden.getExportFull(selectedKab ? parseInt(selectedKab) : undefined),
-    enabled: showExportModal && selectedExportType === 'survei_bsan_lengkap',
-  });
-
-  // SEL Scores data for "observasi_sel" export
-  const { data: exportFullDataSel } = useQuery({
-    queryKey: ['sel-laporan-full', selectedKab],
-    queryFn: () => apiClient.sel.getExportFull(selectedKab ? parseInt(selectedKab) : undefined),
-    enabled: showExportModal && selectedExportType === 'observasi_sel',
-  });
-
-  // Matriks data for "matriks_kuadran" export
-  const { data: matriksData = [] } = useQuery({
-    queryKey: ['matriks-data-laporan', selectedKab],
-    queryFn: () => database.getMatriksKuadranData({ kabupaten: selectedKab || undefined }),
-    enabled: showExportModal && selectedExportType === 'matriks_kuadran',
   });
 
   // Helper NPSN lookup from schoolsData
@@ -166,49 +151,74 @@ export default function LaporanEkspor() {
     return <span className={`inline-block px-2 py-0.5 rounded-md text-[9px] font-bold ${s.cls}`}>{s.label}</span>;
   };
 
-  // ── Export builders ──
+  // ── Single Dataset Fetcher (No query duplication) ──
+  const fetchExportDataset = async (type: ExportType) => {
+    const kabIdNumber = selectedKab ? KABUPATEN_NAME_TO_ID[selectedKab] : undefined;
 
-  const buildSurveiBsanLengkapCsv = () => {
-    const wilayah = [selectedKab || 'Semua Kabupaten', selectedKec || 'Semua Kecamatan'].join(' — ');
-    const fullData = exportFullData?.data;
-    const respondents = fullData?.respondents || [];
-    const questions = fullData?.questions || [];
-    const answersMap = fullData?.answers || {};
+    if (type === 'survei_bsan_lengkap') {
+      const res = await apiClient.responden.getExportFull(kabIdNumber);
+      if (!res || !res.success) {
+        throw new Error('Gagal mengambil data survei BSAN dari server.');
+      }
+      return res.data;
+    }
+
+    if (type === 'observasi_sel') {
+      const res = await apiClient.sel.getExportFull(kabIdNumber);
+      if (!res || !res.success) {
+        throw new Error('Gagal mengambil data observasi SEL dari server.');
+      }
+      return res.data;
+    }
+
+    if (type === 'profil_sekolah' || type === 'rekapitulasi_kecamatan') {
+      const data = await database.getSchools({
+        kabupaten: selectedKab || undefined,
+        kecamatan: selectedKec || undefined,
+        status: selectedStatus || undefined,
+      });
+      return data;
+    }
+
+    if (type === 'matriks_kuadran') {
+      const data = await database.getMatriksKuadranData({ kabupaten: selectedKab || undefined });
+      return data;
+    }
+
+    throw new Error('Tipe ekspor tidak dikenali.');
+  };
+
+  // ── CSV Exporter Builders (Data Mentah UTF-8 BOM) ──
+
+  const buildSurveiBsanLengkapCsv = (dataset: any) => {
+    const respondents = dataset?.respondents || [];
+    const questions = dataset?.questions || [];
+    const answersMap = dataset?.answers || {};
 
     let out = '';
-
     const headers = ['Timestamp'];
-    // Append all question texts to header exactly as in database
-    questions.forEach((q: any) => headers.push(q.teks_pertanyaan.trim()));
-    
+    questions.forEach((q: any) => headers.push(cleanCellValue(q.teks_pertanyaan)));
     out += buildCsvRow(headers) + '\n';
-    
+
     respondents.forEach((r: any) => {
-      // Use submitted_at for Timestamp
-      const ts = r.submitted_at || new Date().toISOString().replace('T', ' ').substring(0, 19);
+      const ts = formatTimestampISO(r.submitted_at);
       const rowData = [ts];
-      
-      // Append answers for exactly each question from the database
       const respondentAnswers = answersMap[r.responden_id] || {};
       questions.forEach((q: any) => {
-        rowData.push(respondentAnswers[q.id] || '');
+        rowData.push(cleanCellValue(respondentAnswers[q.id]));
       });
-      
       out += buildCsvRow(rowData) + '\n';
     });
 
     return out;
   };
 
-  const buildObservasiSelCsv = () => {
-    const wilayah = selectedKab || 'Semua Kabupaten';
-    const fullData = exportFullDataSel?.data;
-    const sessions = fullData?.sessions || [];
-    const questions = fullData?.questions || [];
-    const answersMap = fullData?.answers || {};
+  const buildObservasiSelCsv = (dataset: any) => {
+    const sessions = dataset?.sessions || [];
+    const questions = dataset?.questions || [];
+    const answersMap = dataset?.answers || {};
 
     let out = '';
-
     const headers = [
       'Timestamp', 'No.', 'NPSN', 'Nama Sekolah', 'Kabupaten', 'Kecamatan', 'Tanggal Observasi',
       'Lokasi Diamati', 'Waktu Pengamatan', 'Kelas Diamati', 'Mata Pelajaran',
@@ -220,16 +230,15 @@ export default function LaporanEkspor() {
       'Skor Kuesioner BSAN (%)'
     ];
 
-    // Append all SEL questions to header (Score and Notes)
     questions.forEach((q: any) => {
-      headers.push(`[${q.dimensi_nama.toUpperCase()} - ${q.subjek.toUpperCase()}] ${q.teks} (SKOR)`);
-      headers.push(`[${q.dimensi_nama.toUpperCase()} - ${q.subjek.toUpperCase()}] ${q.teks} (CATATAN)`);
+      headers.push(`[${cleanCellValue(q.dimensi_nama).toUpperCase()} - ${cleanCellValue(q.subjek).toUpperCase()}] ${cleanCellValue(q.teks)} (SKOR)`);
+      headers.push(`[${cleanCellValue(q.dimensi_nama).toUpperCase()} - ${cleanCellValue(q.subjek).toUpperCase()}] ${cleanCellValue(q.teks)} (CATATAN)`);
     });
 
     out += buildCsvRow(headers) + '\n';
 
     sessions.forEach((s: any, i: number) => {
-      const ts = s.tanggal ? `${s.tanggal} 08:00:00` : new Date().toISOString().replace('T', ' ').substring(0, 19);
+      const ts = formatTimestampISO(s.tanggal ? `${s.tanggal} 08:00:00` : null);
 
       let jangkauanLabel = '';
       if (s.jangkauan_siswa === 1) jangkauanLabel = 'Seluruh Siswa di Sekolah';
@@ -250,21 +259,21 @@ export default function LaporanEkspor() {
       const rowData = [
         ts,
         i + 1,
-        s.npsn || getNpsn(s.sekolah_nama),
-        s.sekolah_nama,
-        s.kabupaten,
-        s.kecamatan,
-        s.tanggal || '',
-        safeParseArray(s.lokasi_diamati),
-        safeParseArray(s.waktu_pengamatan),
-        s.kelas_diamati || '',
-        s.mata_pelajaran || '',
-        s.guru_inisial || '',
-        s.guru_jk || '',
+        cleanCellValue(s.npsn || getNpsn(s.sekolah_nama)),
+        cleanCellValue(s.sekolah_nama),
+        cleanCellValue(s.kabupaten),
+        cleanCellValue(s.kecamatan),
+        cleanCellValue(s.tanggal),
+        cleanCellValue(safeParseArray(s.lokasi_diamati)),
+        cleanCellValue(safeParseArray(s.waktu_pengamatan)),
+        cleanCellValue(s.kelas_diamati),
+        cleanCellValue(s.mata_pelajaran),
+        cleanCellValue(s.guru_inisial),
+        cleanCellValue(s.guru_jk),
         jangkauanLabel,
         `${s.jumlah_siswa_l || 0} / ${s.jumlah_siswa_p || 0}`,
         `${s.siswa_disabilitas_l || 0} / ${s.siswa_disabilitas_p || 0}`,
-        s.observer_nama || '',
+        cleanCellValue(s.observer_nama),
         s.guru_total || '0',
         s.murid_total || '0',
         s.total_rata || '0',
@@ -276,12 +285,11 @@ export default function LaporanEkspor() {
         s.kuisioner_score || '0'
       ];
 
-      // Append answers for each SEL question
       const respondentAnswers = answersMap[s.id] || {};
       questions.forEach((q: any) => {
         const ans = respondentAnswers[q.id];
         rowData.push(ans?.skor !== undefined && ans?.skor !== null ? ans.skor : '');
-        rowData.push(ans?.catatan || '');
+        rowData.push(cleanCellValue(ans?.catatan));
       });
 
       out += buildCsvRow(rowData) + '\n';
@@ -290,12 +298,12 @@ export default function LaporanEkspor() {
     return out;
   };
 
-  const buildProfilSekolahCsv = () => {
+  const buildProfilSekolahCsv = (schoolList: any[]) => {
     const wilayah = [selectedKab || 'Semua Kabupaten', selectedKec || 'Semua Kecamatan'].join(' — ');
     let out = buildBsanCsvHeader({
       title: 'PROFIL & STATUS PENGISIAN SEKOLAH SASARAN BSAN',
       wilayah,
-      totalInfo: `Total Sekolah: ${schools.length} | Partisipasi: ${rate}%`,
+      totalInfo: `Total Sekolah: ${schoolList.length} | Partisipasi: ${rate}%`,
     });
 
     out += buildCsvRow([
@@ -303,34 +311,34 @@ export default function LaporanEkspor() {
       'Status Pengisian', 'Akreditasi', 'Jumlah Siswa', 'Jumlah Guru',
       'Alamat', 'Email', 'Telepon',
     ]) + '\n';
-    schools.forEach((s, i) => {
+    schoolList.forEach((s: any, i: number) => {
       const statusLabel = s.status === 'sudah' ? 'Lengkap' : s.status === 'sebagian' ? 'Sebagian' : 'Belum Mengisi';
-      const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      const ts = formatTimestampISO(new Date().toISOString());
       out += buildCsvRow([
         ts,
         i + 1,
-        s.npsn,
-        s.nama,
-        s.kabupaten,
-        s.kecamatan,
+        cleanCellValue(s.npsn),
+        cleanCellValue(s.nama),
+        cleanCellValue(s.kabupaten),
+        cleanCellValue(s.kecamatan),
         statusLabel,
-        s.akreditasi,
-        s.totalSiswa,
-        s.totalGuru,
-        s.alamat,
-        s.email,
-        s.telepon,
+        cleanCellValue(s.akreditasi),
+        s.totalSiswa || 0,
+        s.totalGuru || 0,
+        cleanCellValue(s.alamat),
+        cleanCellValue(s.email),
+        cleanCellValue(s.telepon),
       ]) + '\n';
     });
 
     return out;
   };
 
-  const buildRekapCsv = () => {
+  const buildRekapCsv = (schoolList: any[]) => {
     const wilayah = selectedKab || 'Semua Kabupaten';
 
     const groupMap: Record<string, { kabupaten: string; total: number; sudah: number; sebagian: number; belum: number }> = {};
-    schools.forEach(s => {
+    schoolList.forEach((s: any) => {
       const key = `${s.kabupaten}||${s.kecamatan}`;
       if (!groupMap[key]) groupMap[key] = { kabupaten: s.kabupaten, total: 0, sudah: 0, sebagian: 0, belum: 0 };
       groupMap[key].total += 1;
@@ -342,7 +350,7 @@ export default function LaporanEkspor() {
     let out = buildBsanCsvHeader({
       title: 'REKAPITULASI PARTISIPASI SURVEI BSAN PER KECAMATAN',
       wilayah,
-      totalInfo: `Total Sekolah: ${schools.length} | Partisipasi: ${rate}%`,
+      totalInfo: `Total Sekolah: ${schoolList.length} | Partisipasi: ${rate}%`,
     });
 
     out += buildCsvRow([
@@ -353,10 +361,10 @@ export default function LaporanEkspor() {
     Object.entries(groupMap).forEach(([key, g], idx) => {
       const kecamatan = key.split('||')[1];
       const pct = g.total > 0 ? Math.round((g.sudah / g.total) * 100) : 0;
-      const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+      const ts = formatTimestampISO(new Date().toISOString());
       out += buildCsvRow([
         ts,
-        idx + 1, g.kabupaten, kecamatan,
+        idx + 1, cleanCellValue(g.kabupaten), cleanCellValue(kecamatan),
         g.total, g.sudah, g.sebagian, g.belum, `${pct}%`,
       ]) + '\n';
     });
@@ -364,12 +372,12 @@ export default function LaporanEkspor() {
     return out;
   };
 
-  const buildMatriksKuadranCsv = () => {
+  const buildMatriksKuadranCsv = (matriksList: any[]) => {
     const wilayah = selectedKab || 'Semua Wilayah';
     let out = buildBsanCsvHeader({
       title: 'MATRIKS EVALUASI 4 KUADRAN (KESIAPAN VS IMPLEMENTASI) BSAN',
       wilayah,
-      totalInfo: `Total Data: ${matriksData.length}`,
+      totalInfo: `Total Data: ${matriksList.length}`,
     });
 
     const getKuadranLabel = (impl: number, read: number): string =>
@@ -384,16 +392,16 @@ export default function LaporanEkspor() {
       'Status', 'Posisi Kuadran',
     ]) + '\n';
 
-    matriksData.forEach((p, i) => {
-      const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    matriksList.forEach((p: any, i: number) => {
+      const ts = formatTimestampISO(new Date().toISOString());
       out += buildCsvRow([
         ts,
         i + 1,
-        getNpsn(p.name),
-        p.name,
+        cleanCellValue(getNpsn(p.name)),
+        cleanCellValue(p.name),
         p.readiness,
         p.implementation,
-        p.status,
+        cleanCellValue(p.status),
         getKuadranLabel(p.implementation, p.readiness),
       ]) + '\n';
     });
@@ -401,52 +409,126 @@ export default function LaporanEkspor() {
     return out;
   };
 
-  const handleExport = async () => {
+  // ── Unified Handler for Excel (.xlsx) & CSV ──
+  const handleExportFormat = async (format: 'excel' | 'csv', overrideType?: ExportType) => {
+    const targetType = overrideType || selectedExportType;
     setIsExporting(true);
-    setShowExportModal(false);
+    setExportFormatLoading(format);
 
     try {
-      await new Promise(r => setTimeout(r, 800)); // UX delay
-
-      let csv = '';
-      let filename = '';
+      // Fetch raw dataset ONCE
+      const dataset: any = await fetchExportDataset(targetType);
       const stamp = dateStamp();
       const kabSafe = safeFilename(selectedKab || 'SemuaWilayah');
 
-      switch (selectedExportType) {
-        case 'survei_bsan_lengkap':
-          csv = buildSurveiBsanLengkapCsv();
-          filename = `Hasil_Survei_Lengkap_${kabSafe}_${stamp}.csv`;
-          break;
-        case 'observasi_sel':
-          csv = buildObservasiSelCsv();
-          filename = `Hasil_Observasi_SEL_BSAN_${kabSafe}_${stamp}.csv`;
-          break;
-        case 'profil_sekolah':
-          csv = buildProfilSekolahCsv();
-          filename = `Profil_Sekolah_BSAN_${kabSafe}_${stamp}.csv`;
-          break;
-        case 'rekapitulasi_kecamatan':
-          csv = buildRekapCsv();
-          filename = `Rekapitulasi_Kecamatan_BSAN_${kabSafe}_${stamp}.csv`;
-          break;
-        case 'matriks_kuadran':
-          csv = buildMatriksKuadranCsv();
-          filename = `Matriks_Kuadran_BSAN_${kabSafe}_${stamp}.csv`;
-          break;
+      if (format === 'excel') {
+        let wb: any;
+        let filename = '';
+
+        switch (targetType) {
+          case 'survei_bsan_lengkap':
+            wb = createSurveiBsanExcel({
+              respondents: dataset.respondents || [],
+              questions: dataset.questions || [],
+              answersMap: dataset.answers || {},
+              schools: schools,
+              wilayah: selectedKab || 'Semua Kabupaten',
+            });
+            filename = `Hasil_Survei_Lengkap_${kabSafe}_${stamp}.xlsx`;
+            break;
+
+          case 'observasi_sel':
+            wb = createObservasiSelExcel({
+              sessions: dataset.sessions || [],
+              questions: dataset.questions || [],
+              answersMap: dataset.answers || {},
+              schoolsDataLookup: getNpsn,
+            });
+            filename = `Hasil_Observasi_SEL_BSAN_${kabSafe}_${stamp}.xlsx`;
+            break;
+
+          case 'profil_sekolah':
+            wb = createProfilSekolahExcel({
+              schools: dataset,
+              wilayah: selectedKab || 'Semua Kabupaten',
+            });
+            filename = `Profil_Sekolah_BSAN_${kabSafe}_${stamp}.xlsx`;
+            break;
+
+          case 'rekapitulasi_kecamatan':
+            wb = createRekapKecamatanExcel({
+              schools: dataset,
+              wilayah: selectedKab || 'Semua Kabupaten',
+            });
+            filename = `Rekapitulasi_Kecamatan_BSAN_${kabSafe}_${stamp}.xlsx`;
+            break;
+
+          case 'matriks_kuadran':
+            wb = createMatriksKuadranExcel({
+              matriksData: dataset,
+              getNpsn,
+            });
+            filename = `Matriks_Kuadran_BSAN_${kabSafe}_${stamp}.xlsx`;
+            break;
+        }
+
+        downloadXlsxWorkbook(wb, filename);
+        notifyToast({
+          type: 'success',
+          title: 'Ekspor Excel Berhasil',
+          message: `Berkas "${filename}" (Format Rapi Multi-Sheet) berhasil dibuat dan diunduh.`,
+        });
+      } else {
+        // CSV Format
+        let csv = '';
+        let filename = '';
+
+        switch (targetType) {
+          case 'survei_bsan_lengkap':
+            csv = buildSurveiBsanLengkapCsv(dataset);
+            filename = `Hasil_Survei_Lengkap_${kabSafe}_${stamp}.csv`;
+            break;
+
+          case 'observasi_sel':
+            csv = buildObservasiSelCsv(dataset);
+            filename = `Hasil_Observasi_SEL_BSAN_${kabSafe}_${stamp}.csv`;
+            break;
+
+          case 'profil_sekolah':
+            csv = buildProfilSekolahCsv(dataset);
+            filename = `Profil_Sekolah_BSAN_${kabSafe}_${stamp}.csv`;
+            break;
+
+          case 'rekapitulasi_kecamatan':
+            csv = buildRekapCsv(dataset);
+            filename = `Rekapitulasi_Kecamatan_BSAN_${kabSafe}_${stamp}.csv`;
+            break;
+
+          case 'matriks_kuadran':
+            csv = buildMatriksKuadranCsv(dataset);
+            filename = `Matriks_Kuadran_BSAN_${kabSafe}_${stamp}.csv`;
+            break;
+        }
+
+        triggerDownload(csv, filename);
+        notifyToast({
+          type: 'success',
+          title: 'Ekspor CSV Berhasil',
+          message: `Berkas "${filename}" (Data Mentah UTF-8 BOM) berhasil diunduh.`,
+        });
       }
 
-      triggerDownload(csv, filename);
+      setShowExportModal(false);
+    } catch (err: any) {
+      console.error('Export failed:', err);
       notifyToast({
-        type: 'success',
-        title: 'Ekspor Berhasil',
-        message: `${filename} telah diunduh.`,
+        type: 'error',
+        title: 'Ekspor Gagal',
+        message: err?.message || 'Terjadi kesalahan saat memproses berkas ekspor.',
       });
-    } catch (err) {
-      console.error('Export error', err);
-      notifyToast({ type: 'error', title: 'Ekspor Gagal', message: 'Terjadi kesalahan saat ekspor.' });
     } finally {
       setIsExporting(false);
+      setExportFormatLoading(null);
     }
   };
 
@@ -469,7 +551,7 @@ export default function LaporanEkspor() {
         <div>
           <h2 className="text-xl font-bold font-display text-text-primary">Pusat Laporan & Ekspor Data</h2>
           <p className="text-xs text-text-secondary mt-0.5">
-            Pilih jenis data yang ingin diekspor (Survei BSAN, Observasi SEL, Profil Sekolah, Matriks Kuadran, Rekapitulasi).
+            Ekspor data Survei BSAN, Observasi SEL, Profil Sekolah, Matriks Kuadran, dan Rekapitulasi dalam format Excel (.xlsx - Multi-sheet) atau CSV (Data Mentah).
           </p>
         </div>
 
@@ -479,7 +561,7 @@ export default function LaporanEkspor() {
           className="flex items-center space-x-2 rounded-xl bg-primary hover:bg-primary-dark text-white px-5 py-3 text-xs font-bold shadow-md hover:scale-[1.01] active:scale-[0.99] transition-smooth cursor-pointer disabled:opacity-60"
         >
           <Download className="h-4 w-4" />
-          <span>Ekspor Data</span>
+          <span>Ekspor Data (Excel / CSV)</span>
         </button>
       </div>
 
@@ -488,8 +570,14 @@ export default function LaporanEkspor() {
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 animate-fade-in">
           <div className="bg-surface p-8 rounded-2xl shadow-2xl flex flex-col items-center max-w-sm w-full mx-4 border border-border">
             <div className="w-16 h-16 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-6"></div>
-            <h3 className="text-lg font-bold text-text-primary font-display mb-2">Menyusun Berkas CSV</h3>
-            <p className="text-sm text-text-secondary text-center">Memformat kolom dan baris data...</p>
+            <h3 className="text-lg font-bold text-text-primary font-display mb-2">
+              {exportFormatLoading === 'excel' ? 'Menyusun Berkas Excel (.xlsx)' : 'Menyusun Berkas CSV'}
+            </h3>
+            <p className="text-xs text-text-secondary text-center">
+              {exportFormatLoading === 'excel'
+                ? 'Membangun lembar kerja multi-sheet, profil, & katalog...'
+                : 'Memformat kolom & data mentah UTF-8 BOM...'}
+            </p>
           </div>
         </div>,
         document.body
@@ -528,6 +616,71 @@ export default function LaporanEkspor() {
             <h4 className="text-xl font-bold text-accent mt-0.5">
               <AnimatedCounter value={rate} suffix="%" />
             </h4>
+          </div>
+        </div>
+      </div>
+
+      {/* Quick Action Cards for Survei and Observasi SEL */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Card 1: Survei BSAN */}
+        <div className="p-5 rounded-2xl bg-surface border border-border shadow-card space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600 border border-emerald-100">
+              <FileText className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-text-primary text-sm font-display">Survei Implementasi BSAN</h3>
+              <p className="text-[11px] text-text-secondary">Data lengkap jawaban kuesioner responden (Q1 - Q34+)</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={() => handleExportFormat('excel', 'survei_bsan_lengkap')}
+              disabled={isExporting}
+              className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-xs disabled:opacity-60 cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Export Excel (.xlsx)</span>
+            </button>
+            <button
+              onClick={() => handleExportFormat('csv', 'survei_bsan_lengkap')}
+              disabled={isExporting}
+              className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition-all shadow-xs disabled:opacity-60 cursor-pointer"
+            >
+              <FileText className="w-4 h-4" />
+              <span>Export CSV - Data Mentah</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Card 2: Observasi SEL */}
+        <div className="p-5 rounded-2xl bg-surface border border-border shadow-card space-y-4">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-indigo-50 rounded-xl text-indigo-600 border border-indigo-100">
+              <Brain className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-text-primary text-sm font-display">Hasil Observasi SEL</h3>
+              <p className="text-[11px] text-text-secondary">Penilaian 5 Dimensi SEL, skor guru & murid per sesi</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={() => handleExportFormat('excel', 'observasi_sel')}
+              disabled={isExporting}
+              className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-xs disabled:opacity-60 cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Export Excel (.xlsx)</span>
+            </button>
+            <button
+              onClick={() => handleExportFormat('csv', 'observasi_sel')}
+              disabled={isExporting}
+              className="flex-1 flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition-all shadow-xs disabled:opacity-60 cursor-pointer"
+            >
+              <FileText className="w-4 h-4" />
+              <span>Export CSV - Data Mentah</span>
+            </button>
           </div>
         </div>
       </div>
@@ -651,10 +804,10 @@ export default function LaporanEkspor() {
         )}
       </div>
 
-      {/* ── Simple Vertical Column Export Modal (Clean, Minimal, Mobile Friendly) ── */}
+      {/* ── Modal Ekspor Data dengan 2 Pilihan Format Terpisah (Excel .xlsx Rapi & CSV Data Mentah) ── */}
       {showExportModal && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/75 p-4 animate-fade-in">
-          <div className="bg-surface rounded-2xl shadow-2xl max-w-lg w-full border border-border flex flex-col animate-scale-in max-h-[90vh]">
+          <div className="bg-surface rounded-2xl shadow-2xl max-w-xl w-full border border-border flex flex-col animate-scale-in max-h-[92vh]">
             {/* Modal Header */}
             <div className="flex justify-between items-center p-4 sm:p-5 border-b border-border bg-bg/40 rounded-t-2xl shrink-0">
               <div className="flex items-center gap-3">
@@ -662,7 +815,7 @@ export default function LaporanEkspor() {
                   <Download className="h-5 w-5" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-text-primary text-sm sm:text-base font-display">Pilih Data Ekspor</h3>
+                  <h3 className="font-bold text-text-primary text-sm sm:text-base font-display">Pusat Ekspor Data BSAN</h3>
                   <p className="text-[11px] text-text-secondary font-medium mt-0.5">
                     Wilayah: <strong>{selectedKab || 'Semua Kabupaten'}</strong> {selectedKec ? `— Kec. ${selectedKec}` : ''}
                   </p>
@@ -674,8 +827,12 @@ export default function LaporanEkspor() {
               </button>
             </div>
 
-            {/* Modal Body — Stacked 1 Column List Downward (Simple & Mobile-Friendly, No Color Badges) */}
-            <div className="p-4 sm:p-5 space-y-2.5 overflow-y-auto">
+            {/* Modal Body — Stacked Category Options */}
+            <div className="p-4 sm:p-5 space-y-3 overflow-y-auto">
+              <label className="text-[10px] font-bold text-text-secondary uppercase tracking-wider block mb-1">
+                1. Pilih Jenis Data
+              </label>
+
               {EXPORT_OPTIONS.map(opt => {
                 const Icon = opt.icon;
                 const isSelected = selectedExportType === opt.id;
@@ -684,22 +841,19 @@ export default function LaporanEkspor() {
                     key={opt.id}
                     type="button"
                     onClick={() => setSelectedExportType(opt.id)}
-                    className={`w-full text-left p-3.5 sm:p-4 rounded-xl border transition-all cursor-pointer flex items-center gap-3.5 ${
-                      isSelected
-                        ? 'border-primary bg-primary/5 shadow-xs ring-1 ring-primary/30'
-                        : 'border-border bg-bg/30 hover:bg-bg hover:border-border/80'
-                    }`}
+                    className={`w-full text-left p-3.5 rounded-xl border transition-all cursor-pointer flex items-center gap-3.5 ${isSelected
+                      ? 'border-primary bg-primary/5 shadow-xs ring-1 ring-primary/30'
+                      : 'border-border bg-bg/30 hover:bg-bg hover:border-border/80'
+                      }`}
                   >
-                    <div className={`p-2.5 rounded-xl shrink-0 transition-colors ${
-                      isSelected ? 'bg-primary text-white' : 'bg-border/30 text-text-secondary'
-                    }`}>
+                    <div className={`p-2.5 rounded-xl shrink-0 transition-colors ${isSelected ? 'bg-primary text-white' : 'bg-border/30 text-text-secondary'
+                      }`}>
                       <Icon className="h-4 w-4" />
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <h4 className={`font-bold text-xs sm:text-sm leading-snug ${
-                        isSelected ? 'text-primary' : 'text-text-primary'
-                      }`}>
+                      <h4 className={`font-bold text-xs sm:text-sm leading-snug ${isSelected ? 'text-primary' : 'text-text-primary'
+                        }`}>
                         {opt.label}
                       </h4>
                       <p className="text-text-secondary text-[11px] mt-0.5 leading-relaxed line-clamp-2">
@@ -707,9 +861,8 @@ export default function LaporanEkspor() {
                       </p>
                     </div>
 
-                    <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center transition-colors ${
-                      isSelected ? 'border-primary bg-primary' : 'border-border'
-                    }`}>
+                    <div className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center transition-colors ${isSelected ? 'border-primary bg-primary' : 'border-border'
+                      }`}>
                       {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
                     </div>
                   </button>
@@ -717,17 +870,47 @@ export default function LaporanEkspor() {
               })}
             </div>
 
-            {/* Modal Footer */}
-            <div className="p-4 px-5 border-t border-border bg-bg/30 flex items-center justify-end gap-3 rounded-b-2xl shrink-0">
-              <button onClick={() => setShowExportModal(false)}
-                className="px-4 py-2 rounded-xl border border-border bg-surface text-text-secondary text-xs font-semibold hover:bg-bg transition-smooth">
+            {/* Modal Footer — Dua Pilihan Ekspor Terpisah (Excel .xlsx Rapi vs CSV Data Mentah) */}
+            <div className="p-4 px-5 border-t border-border bg-bg/40 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 rounded-b-2xl shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                className="px-4 py-2.5 rounded-xl border border-border bg-surface text-text-secondary text-xs font-semibold hover:bg-bg transition-smooth text-center"
+              >
                 Batal
               </button>
-              <button onClick={handleExport}
-                className="flex items-center gap-2 rounded-xl bg-primary hover:bg-primary-dark text-white px-5 py-2 text-xs font-bold shadow-md transition-smooth active:scale-95 cursor-pointer">
-                <Download className="h-4 w-4" />
-                <span>Unduh CSV</span>
-              </button>
+
+              <div className="flex flex-col sm:flex-row items-center gap-2 flex-1 sm:justify-end">
+                {/* Option 1: Excel (.xlsx) Rapi - Multi Sheet */}
+                <button
+                  type="button"
+                  onClick={() => handleExportFormat('excel')}
+                  disabled={isExporting}
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 text-xs font-bold shadow-md transition-smooth active:scale-95 cursor-pointer disabled:opacity-60"
+                >
+                  {isExporting && exportFormatLoading === 'excel' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileSpreadsheet className="h-4 w-4" />
+                  )}
+                  <span>Export Excel (.xlsx)</span>
+                </button>
+
+                {/* Option 2: CSV Data Mentah UTF-8 BOM */}
+                <button
+                  type="button"
+                  onClick={() => handleExportFormat('csv')}
+                  disabled={isExporting}
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 text-xs font-bold shadow-md transition-smooth active:scale-95 cursor-pointer disabled:opacity-60"
+                >
+                  {isExporting && exportFormatLoading === 'csv' ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileText className="h-4 w-4" />
+                  )}
+                  <span>Export CSV - Data Mentah</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>,

@@ -13,7 +13,7 @@
  */
 
 const router = require('express').Router();
-const pool   = require('../db/pool');
+const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth');
 
 router.use(authMiddleware);
@@ -70,23 +70,23 @@ router.get('/modul-progress', async (req, res) => {
     const progress = modulRows.map(m => {
       const selScore = selMap[m.kode] || 0;
       // Formula: 40% base_rate + 30% impl_rate + 30% SEL score
-      const weight   = m.urutan === 1 ? { b: 0.40, i: 0.30, s: 0.30 }
-                     : m.urutan === 2 ? { b: 0.38, i: 0.32, s: 0.30 }
-                     : { b: 0.35, i: 0.35, s: 0.30 };
-      const progres  = Math.min(100, Math.round(
+      const weight = m.urutan === 1 ? { b: 0.40, i: 0.30, s: 0.30 }
+        : m.urutan === 2 ? { b: 0.38, i: 0.32, s: 0.30 }
+          : { b: 0.35, i: 0.35, s: 0.30 };
+      const progres = Math.min(100, Math.round(
         (base_rate || 0) * weight.b +
         (impl_rate || 0) * weight.i +
         selScore * weight.s
       ));
       return {
-        id:              m.kode,
-        nama:            m.nama,
+        id: m.kode,
+        nama: m.nama,
         progres,
         totalPertanyaan: total_responden || 0,
-        terisi:          sudah_mengisi || 0,
+        terisi: sudah_mengisi || 0,
         selScore,
-        base_rate:       base_rate || 0,
-        impl_rate:       impl_rate || 0,
+        base_rate: base_rate || 0,
+        impl_rate: impl_rate || 0,
       };
     });
 
@@ -176,9 +176,9 @@ router.get('/proporsi', async (req, res) => {
     return res.json({
       success: true,
       data: {
-        proporsiPenerima:           pieRows,
-        distribusiPerKecamatan:     distribusiRows,
-        statusImplementasiPosisi:   posisiRows,
+        proporsiPenerima: pieRows,
+        distribusiPerKecamatan: distribusiRows,
+        statusImplementasiPosisi: posisiRows,
         statusImplementasiKecamatan: kecamatanRows,
       }
     });
@@ -216,14 +216,14 @@ router.get('/funnel', async (req, res) => {
 
     const r = rows[0];
     const total = r.total_sasaran || 0;
-    const pct   = (n) => total > 0 ? Math.round(n / total * 100) : 0;
+    const pct = (n) => total > 0 ? Math.round(n / total * 100) : 0;
 
     const funnel = [
-      { name: 'Total Sasaran Sekolah',       schools: total,                 percentage: 100 },
-      { name: 'Mengisi Survei (Aktif)',       schools: r.mengisi,             percentage: pct(r.mengisi) },
-      { name: 'Menerima Modul BSAN',          schools: r.menerima_modul,      percentage: pct(r.menerima_modul) },
-      { name: 'Mengimplementasikan (Sebagian/Penuh)', schools: r.implementasi,percentage: pct(r.implementasi) },
-      { name: 'Implementasi Penuh',           schools: r.implementasi_penuh,  percentage: pct(r.implementasi_penuh) },
+      { name: 'Total Sasaran Sekolah', schools: total, percentage: 100 },
+      { name: 'Mengisi Survei (Aktif)', schools: r.mengisi, percentage: pct(r.mengisi) },
+      { name: 'Menerima Modul BSAN', schools: r.menerima_modul, percentage: pct(r.menerima_modul) },
+      { name: 'Mengimplementasikan (Sebagian/Penuh)', schools: r.implementasi, percentage: pct(r.implementasi) },
+      { name: 'Implementasi Penuh', schools: r.implementasi_penuh, percentage: pct(r.implementasi_penuh) },
     ];
 
     return res.json({ success: true, data: funnel });
@@ -338,6 +338,7 @@ router.get('/frameworks', async (req, res) => {
        FROM modul_bsan WHERE is_active = 1 ORDER BY urutan ASC`
     );
 
+    // Fetch structured (radio/dropdown) answers — exclude 'Jawaban esai' placeholder
     const [answerRows] = await pool.execute(
       `SELECT 
          ps.modul_id,
@@ -346,29 +347,55 @@ router.get('/frameworks', async (req, res) => {
        FROM jawaban_survey js
        JOIN pertanyaan_survey ps ON js.pertanyaan_id = ps.id
        JOIN responden_survey rs ON js.responden_id = rs.id
-       WHERE js.jawaban_terstruktur IS NOT NULL AND js.jawaban_terstruktur != ''
+       WHERE js.jawaban_terstruktur IS NOT NULL 
+         AND js.jawaban_terstruktur != ''
+         AND js.jawaban_terstruktur != 'Jawaban esai'
          AND (? IS NULL OR rs.kabupaten_id = ?)
        GROUP BY ps.modul_id, js.jawaban_terstruktur`,
       [kabupatenId, kabupatenId]
     );
 
+    // Fetch checkbox answers (jawaban_multi) to also count towards progres
+    const [multiAnswerRows] = await pool.execute(
+      `SELECT 
+         ps.modul_id,
+         ps.id AS pertanyaan_id,
+         js.jawaban_multi
+       FROM jawaban_survey js
+       JOIN pertanyaan_survey ps ON js.pertanyaan_id = ps.id
+       JOIN responden_survey rs ON js.responden_id = rs.id
+       WHERE js.jawaban_multi IS NOT NULL
+         AND js.jawaban_multi != 'null'
+         AND js.jawaban_multi != ''
+         AND (? IS NULL OR rs.kabupaten_id = ?)`,
+      [kabupatenId, kabupatenId]
+    );
+
     const modulAnswerStats = {};
+    // Count structured (radio/dropdown) answers
     answerRows.forEach(row => {
-      if (!modulAnswerStats[row.modul_id]) {
-        modulAnswerStats[row.modul_id] = { total: 0, positive: 0 };
-      }
+      if (row.modul_id == null) return;
+      if (!modulAnswerStats[row.modul_id]) modulAnswerStats[row.modul_id] = { total: 0, positive: 0 };
       modulAnswerStats[row.modul_id].total += row.total_count;
       const ansLower = (row.jawaban_terstruktur || '').toLowerCase();
       if (['ya', 'sudah', 'rutin', 'lengkap', 'restoratif'].some(k => ansLower.includes(k))) {
         modulAnswerStats[row.modul_id].positive += row.total_count;
       }
     });
-
-    const DEFAULT_MODUL_PROGRESS = { 1: 62, 2: 45, 3: 36, 4: 42, 5: 28 };
+    // Count checkbox answers (each item in the array = 1 answer)
+    multiAnswerRows.forEach(row => {
+      if (row.modul_id == null) return;
+      let arr = [];
+      try { arr = typeof row.jawaban_multi === 'string' ? JSON.parse(row.jawaban_multi) : (Array.isArray(row.jawaban_multi) ? row.jawaban_multi : []); } catch (e) { arr = []; }
+      if (!Array.isArray(arr)) return;
+      if (!modulAnswerStats[row.modul_id]) modulAnswerStats[row.modul_id] = { total: 0, positive: 0 };
+      // Each checked option counts as 1 answer
+      modulAnswerStats[row.modul_id].total += arr.length;
+    });
 
     const formattedFrameworks = frameworkRows.map(fw => {
       const fwModules = modulRows.filter(m => m.framework_key === fw.framework_key);
-      
+
       let sumProgress = 0;
       const modulesWithProgress = fwModules.map(m => {
         const stats = modulAnswerStats[m.id];
@@ -377,21 +404,14 @@ router.get('/frameworks', async (req, res) => {
           pct = Math.round((stats.positive / stats.total) * 100);
         }
         sumProgress += pct;
-        return {
-          ...m,
-          progres: pct,
-        };
+        return { ...m, progres: pct };
       });
 
       const avgFrameworkProgress = fwModules.length > 0
         ? Math.round(sumProgress / fwModules.length)
         : 0;
 
-      return {
-        ...fw,
-        progres: avgFrameworkProgress,
-        modules: modulesWithProgress,
-      };
+      return { ...fw, progres: avgFrameworkProgress, modules: modulesWithProgress };
     });
 
     return res.json({ success: true, data: formattedFrameworks });
@@ -422,36 +442,90 @@ router.get('/modul-breakdown', async (req, res) => {
       [targetModulId, targetModulId]
     );
 
-    // Fetch answer counts per question option
-    const [answerRows] = await pool.execute(
+    // Fetch structured answers (radio/dropdown) — exclude 'Jawaban esai' placeholder from old seed
+    const [answerStructured] = await pool.execute(
       `SELECT 
          js.pertanyaan_id,
          js.jawaban_terstruktur,
          COUNT(*) AS total_count
        FROM jawaban_survey js
        JOIN responden_survey rs ON js.responden_id = rs.id
-       WHERE js.jawaban_terstruktur IS NOT NULL AND js.jawaban_terstruktur != ''
+       WHERE js.jawaban_terstruktur IS NOT NULL 
+         AND js.jawaban_terstruktur != ''
+         AND js.jawaban_terstruktur != 'Jawaban esai'
          AND (? IS NULL OR rs.kabupaten_id = ?)
        GROUP BY js.pertanyaan_id, js.jawaban_terstruktur`,
       [kabupatenId, kabupatenId]
     );
 
-    // Group answers by question ID
+    // Fetch checkbox answers (jawaban_multi stored as JSON array in DB)
+    const [answerMultiRows] = await pool.execute(
+      `SELECT 
+         js.pertanyaan_id,
+         js.jawaban_multi
+       FROM jawaban_survey js
+       JOIN responden_survey rs ON js.responden_id = rs.id
+       WHERE js.jawaban_multi IS NOT NULL 
+         AND js.jawaban_multi != 'null'
+         AND js.jawaban_multi != ''
+         AND (? IS NULL OR rs.kabupaten_id = ?)`,
+      [kabupatenId, kabupatenId]
+    );
+
+    // Fetch text answers (jawaban_bebas) — for display/count only
+    const [answerTextRows] = await pool.execute(
+      `SELECT 
+         js.pertanyaan_id,
+         js.jawaban_bebas,
+         COUNT(*) AS total_count
+       FROM jawaban_survey js
+       JOIN responden_survey rs ON js.responden_id = rs.id
+       WHERE js.jawaban_bebas IS NOT NULL 
+         AND TRIM(js.jawaban_bebas) != ''
+         AND (? IS NULL OR rs.kabupaten_id = ?)
+       GROUP BY js.pertanyaan_id, js.jawaban_bebas`,
+      [kabupatenId, kabupatenId]
+    );
+
+    // Build: { qId -> { optionLabel -> count } } for radio/dropdown
     const answersByQ = {};
-    answerRows.forEach(row => {
-      if (!answersByQ[row.pertanyaan_id]) {
-        answersByQ[row.pertanyaan_id] = {};
-      }
-      answersByQ[row.pertanyaan_id][row.jawaban_terstruktur] = row.total_count;
+    answerStructured.forEach(row => {
+      if (!answersByQ[row.pertanyaan_id]) answersByQ[row.pertanyaan_id] = {};
+      answersByQ[row.pertanyaan_id][row.jawaban_terstruktur] =
+        (answersByQ[row.pertanyaan_id][row.jawaban_terstruktur] || 0) + row.total_count;
+    });
+
+    // Build: { qId -> { optionLabel -> count } } for checkbox (expand JSON arrays)
+    const multiByQ = {};
+    // Also track how many respondents answered each checkbox question
+    const multiRespCountByQ = {};
+    answerMultiRows.forEach(row => {
+      let arr = [];
+      try {
+        arr = typeof row.jawaban_multi === 'string' ? JSON.parse(row.jawaban_multi) : (Array.isArray(row.jawaban_multi) ? row.jawaban_multi : []);
+      } catch (e) { arr = []; }
+      if (!Array.isArray(arr) || arr.length === 0) return;
+      if (!multiByQ[row.pertanyaan_id]) multiByQ[row.pertanyaan_id] = {};
+      if (!multiRespCountByQ[row.pertanyaan_id]) multiRespCountByQ[row.pertanyaan_id] = 0;
+      multiRespCountByQ[row.pertanyaan_id]++;
+      arr.forEach(item => {
+        const key = String(item).trim();
+        if (key) multiByQ[row.pertanyaan_id][key] = (multiByQ[row.pertanyaan_id][key] || 0) + 1;
+      });
+    });
+
+    // Build: { qId -> total_text_resp } for text questions
+    const textRespByQ = {};
+    answerTextRows.forEach(row => {
+      textRespByQ[row.pertanyaan_id] = (textRespByQ[row.pertanyaan_id] || 0) + row.total_count;
     });
 
     const COLOR_PALETTE = ['#10B981', '#F59E0B', '#EF4444', '#3B82F6', '#8B5CF6', '#EC4899', '#06B6D4'];
-
     const result = {};
 
     modulRows.forEach(modul => {
       const qInModul = questionRows.filter(q => q.modul_id === modul.id);
-      
+
       let totalAnswersInModul = 0;
       let positiveAnswersInModul = 0;
 
@@ -463,54 +537,80 @@ router.get('/modul-breakdown', async (req, res) => {
           rawOpts = [];
         }
 
+        const isCheckbox = q.tipe === 'checkbox';
+        const isText = ['text', 'essay', 'textarea'].includes(q.tipe);
+
+        if (isText) {
+          // Text question: just show how many responded
+          const textResp = textRespByQ[q.id] || 0;
+          return {
+            id: q.id, kode: q.kode_pertanyaan, q: q.teks_pertanyaan, tipe: q.tipe,
+            total_responden: textResp,
+            options: [] // no bar chart for text
+          };
+        }
+
+        if (isCheckbox) {
+          const multiCounts = multiByQ[q.id] || {};
+          const numRespondents = multiRespCountByQ[q.id] || 0;
+          const denominator = numRespondents || 1;
+
+          let options = [];
+          if (rawOpts.length > 0) {
+            options = rawOpts.map((optLabel, idx) => {
+              const count = multiCounts[optLabel] || 0;
+              const percent = parseFloat(((count / denominator) * 100).toFixed(1));
+              totalAnswersInModul += count;
+              return { label: optLabel, count, percent, color: COLOR_PALETTE[idx % COLOR_PALETTE.length] };
+            });
+          } else {
+            options = Object.entries(multiCounts).map(([key, count], idx) => {
+              const percent = parseFloat(((count / denominator) * 100).toFixed(1));
+              totalAnswersInModul += count;
+              return { label: key, count, percent, color: COLOR_PALETTE[idx % COLOR_PALETTE.length] };
+            });
+          }
+
+          return {
+            id: q.id, kode: q.kode_pertanyaan, q: q.teks_pertanyaan, tipe: q.tipe,
+            total_responden: numRespondents,
+            options
+          };
+        }
+
+        // Radio / dropdown
         const qAnswersMap = answersByQ[q.id] || {};
         const totalResp = Object.values(qAnswersMap).reduce((acc, curr) => acc + curr, 0);
 
         let options = [];
-        if (rawOpts && rawOpts.length > 0) {
+        if (rawOpts.length > 0) {
           options = rawOpts.map((optLabel, idx) => {
             const count = qAnswersMap[optLabel] || 0;
             const percent = totalResp > 0 ? parseFloat(((count / totalResp) * 100).toFixed(1)) : 0;
-            
             totalAnswersInModul += count;
-            if (['ya', 'sudah', 'rutin', 'lengkap', 'restoratif'].some(k => optLabel.toLowerCase().includes(k))) {
+            const optLower = optLabel.toLowerCase();
+            if (['ya', 'sudah', 'rutin', 'lengkap', 'restoratif'].some(k => optLower.includes(k))) {
               positiveAnswersInModul += count;
             }
-
-            return {
-              label: optLabel,
-              count,
-              percent,
-              color: COLOR_PALETTE[idx % COLOR_PALETTE.length]
-            };
+            return { label: optLabel, count, percent, color: COLOR_PALETTE[idx % COLOR_PALETTE.length] };
           });
         } else {
-          const keys = Object.keys(qAnswersMap);
-          options = keys.map((key, idx) => {
-            const count = qAnswersMap[key];
+          options = Object.entries(qAnswersMap).map(([key, count], idx) => {
             const percent = totalResp > 0 ? parseFloat(((count / totalResp) * 100).toFixed(1)) : 0;
             totalAnswersInModul += count;
-            return {
-              label: key,
-              count,
-              percent,
-              color: COLOR_PALETTE[idx % COLOR_PALETTE.length]
-            };
+            return { label: key, count, percent, color: COLOR_PALETTE[idx % COLOR_PALETTE.length] };
           });
         }
 
         return {
-          id: q.id,
-          kode: q.kode_pertanyaan,
-          q: q.teks_pertanyaan,
-          tipe: q.tipe,
+          id: q.id, kode: q.kode_pertanyaan, q: q.teks_pertanyaan, tipe: q.tipe,
           total_responden: totalResp,
           options
         };
       });
 
-      const progresPct = totalAnswersInModul > 0 
-        ? Math.round((positiveAnswersInModul / totalAnswersInModul) * 100) 
+      const progresPct = totalAnswersInModul > 0
+        ? Math.round((positiveAnswersInModul / totalAnswersInModul) * 100)
         : 0;
 
       const modulObj = {
@@ -534,4 +634,3 @@ router.get('/modul-breakdown', async (req, res) => {
 });
 
 module.exports = router;
-
