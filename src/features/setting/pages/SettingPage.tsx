@@ -1,14 +1,22 @@
-import React, { useState, useEffect } from 'react';
+/**
+ * @module features/setting/pages
+ * @description Pengaturan akun — profil, keamanan (ganti sandi via OTP email),
+ *   notifikasi, preferensi tampilan, dan target observasi SEL (khusus admin).
+ * @api GET/PUT /api/setting/profile, GET/PUT /api/setting/preferences,
+ *      POST /api/auth/forgot-password, POST /api/auth/reset-password,
+ *      GET/PUT /api/setting/target-observasi(/batch)
+ */
+import React, { useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
-  User, Shield, Bell, Globe, Save, Lock, Key, RefreshCw, Check, CheckCircle2,
-  AlertCircle, Eye, EyeOff, Laptop, Building2, Phone, Mail, FileText, BadgeCheck,
-  Send, Sparkles, ArrowRight, RotateCcw, Target, Search, ChevronDown, ChevronUp
+  User, Shield, Bell, SlidersHorizontal, Target, Save, Mail, Phone, Briefcase, Building2, MapPin,
+  Eye, EyeOff, KeyRound, Send, ArrowLeft, Search, Minus, Plus, Loader2, CheckCircle2, Lock, Clock,
 } from 'lucide-react';
 import CustomSelect from '../../../shared/components/CustomSelect';
 import { notifyToast } from '../../../shared/components/NotificationToast';
 import { apiClient } from '../../../shared/services/api-client';
 
-type SettingTabType = 'profile' | 'security' | 'notif' | 'pref' | 'target';
+type TabId = 'profile' | 'security' | 'notif' | 'pref' | 'target';
 
 interface TargetSchool {
   id: number;
@@ -21,1189 +29,591 @@ interface TargetSchool {
   _edited?: boolean;
 }
 
+const toBool = (v: unknown, fallback: boolean) => (v === undefined || v === null ? fallback : Boolean(Number(v)));
+
+const ROLE_LABEL: Record<string, string> = { admin: 'Administrator', pengawas: 'Pengawas Sekolah', sekolah: 'Operator Sekolah' };
+
 export default function Setting() {
-  const [userRole, setUserRole] = useState<'admin' | 'pengawas' | 'sekolah'>('admin');
-  const [activeTab, setActiveTab] = useState<SettingTabType>('profile');
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
+  const qc = useQueryClient();
+  const [tab, setTab] = useState<TabId>('profile');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [account, setAccount] = useState<any>(null);
+  const role: string = account?.role || 'pengawas';
 
-  // Profile Form State
-  const [profile, setProfile] = useState({
-    nama: '',
-    email: '',
-    phone: '',
-    nip: '',
-    instansi: '',
-    jabatan: '',
-  });
+  const [profile, setProfile] = useState({ nama: '', email: '', phone: '', instansi: '', jabatan: '' });
+  const [notif, setNotif] = useState({ weeklyReport: true, instantAlert: true, reminderEmail: false, systemUpdate: true });
+  const [pref, setPref] = useState({ language: 'id', theme: 'light', autoSaveInterval: 30 });
 
-  // Security & OTP Password State
-  const [securityStep, setSecurityStep] = useState<'input_pass' | 'verify_otp'>('input_pass');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [otpCode, setOtpCode] = useState('');
-  const [showPass, setShowPass] = useState({ new: false, confirm: false });
-  const [isSendingOtp, setIsSendingOtp] = useState(false);
-  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
-  const [resendTimer, setResendTimer] = useState(0);
-
-  // Notification Preferences State
-  const [notif, setNotif] = useState({
-    weeklyReport: true,
-    instantAlert: true,
-    reminderEmail: true,
-    systemUpdate: true,
-  });
-
-  // System & Dashboard Preferences State
-  const [pref, setPref] = useState({
-    language: 'id',
-    theme: 'light',
-    autoSaveInterval: 30,
-  });
-
-  // Target Observasi State
-  const [targetDefault, setTargetDefault] = useState(2);
-  const [targetSchools, setTargetSchools] = useState<TargetSchool[]>([]);
-  const [targetLoading, setTargetLoading] = useState(false);
-  const [targetSaving, setTargetSaving] = useState(false);
-  const [targetSearch, setTargetSearch] = useState('');
-  const [applyToAll, setApplyToAll] = useState(false);
-
-  // Resend Timer Countdown Effect
   useEffect(() => {
-    let timer: any;
-    if (resendTimer > 0) {
-      timer = setTimeout(() => setResendTimer(resendTimer - 1), 1000);
-    }
-    return () => clearTimeout(timer);
-  }, [resendTimer]);
-
-  // Load User Configuration & Profile from Database
-  useEffect(() => {
-    let isMounted = true;
-    const fetchUserData = async () => {
+    let alive = true;
+    (async () => {
       try {
-        setIsLoading(true);
-        // Load user profile from DB
-        const resProfile = await apiClient.setting.getProfile();
-        if (isMounted && resProfile?.success && resProfile?.data) {
-          const data = resProfile.data;
-          setProfile({
-            nama: data.nama || '',
-            email: data.email || '',
-            phone: data.phone || '',
-            nip: data.nip || '',
-            instansi: data.instansi || data.sekolah_nama || 'Instansi Terdaftar',
-            jabatan: data.jabatan || '',
-          });
-          setUserRole(data.role || 'admin');
-        }
-
-        // Load user preferences from DB
-        const resPref = await apiClient.setting.getPreferences();
-        if (isMounted && resPref?.success && resPref?.data) {
-          const p = resPref.data;
-          setPref({
-            language: p.bahasa || 'id',
-            theme: p.tema || 'light',
-            autoSaveInterval: p.auto_save_interval || 30,
-          });
-          setNotif({
-            weeklyReport: p.notif_weekly_report !== false,
-            instantAlert: p.notif_instant_alert !== false,
-            reminderEmail: p.notif_reminder_email !== false,
-            systemUpdate: p.notif_system_update !== false,
-          });
-        }
-      } catch (err) {
-        // Fallback to local storage profile if offline / error
-        const saved = localStorage.getItem('bsan_user_profile');
-        if (saved && isMounted) {
-          try {
-            const parsed = JSON.parse(saved);
-            setProfile({
-              nama: parsed.nama || '',
-              email: parsed.email || '',
-              phone: parsed.telepon || parsed.phone || '',
-              nip: parsed.nip || '',
-              instansi: parsed.instansi || '',
-              jabatan: parsed.jabatan || '',
-            });
-            setUserRole(parsed.role || 'admin');
-          } catch {}
-        }
+        const [p, pr] = await Promise.all([apiClient.setting.getProfile(), apiClient.setting.getPreferences()]);
+        if (!alive) return;
+        const d = p?.data || {};
+        setAccount(d);
+        setProfile({
+          nama: d.nama || '',
+          email: d.email || '',
+          phone: d.phone || '',
+          instansi: d.role === 'sekolah' ? (d.sekolah_nama || d.instansi || '') : (d.instansi || ''),
+          jabatan: d.jabatan || '',
+        });
+        const x = pr?.data || {};
+        setPref({ language: x.bahasa || 'id', theme: x.tema || 'light', autoSaveInterval: Number(x.auto_save_interval || 30) });
+        setNotif({
+          weeklyReport: toBool(x.notif_weekly_report, true),
+          instantAlert: toBool(x.notif_instant_alert, true),
+          reminderEmail: toBool(x.notif_reminder_email, false),
+          systemUpdate: toBool(x.notif_system_update, true),
+        });
+      } catch (err: any) {
+        notifyToast({ type: 'error', title: 'Gagal memuat', message: err?.message || 'Pengaturan akun tidak dapat dimuat.' });
       } finally {
-        if (isMounted) setIsLoading(false);
+        if (alive) setLoading(false);
       }
-    };
-
-    fetchUserData();
-    return () => { isMounted = false; };
+    })();
+    return () => { alive = false; };
   }, []);
 
-  // Compute Password Strength
-  const computePasswordStrength = (pwd: string) => {
-    if (!pwd) return { score: 0, label: 'Kosong', color: 'bg-slate-200' };
-    let score = 0;
-    if (pwd.length >= 6) score += 25;
-    if (pwd.length >= 10) score += 25;
-    if (/[A-Z]/.test(pwd)) score += 25;
-    if (/[0-9!@#$%^&*]/.test(pwd)) score += 25;
-
-    if (score <= 25) return { score: 25, label: 'Lemah', color: 'bg-rose-500' };
-    if (score <= 50) return { score: 50, label: 'Sedang', color: 'bg-amber-500' };
-    if (score <= 75) return { score: 75, label: 'Bagus', color: 'bg-indigo-500' };
-    return { score: 100, label: 'Sangat Kuat', color: 'bg-emerald-500' };
-  };
-
-  const pwdStrength = computePasswordStrength(newPassword);
-
-  // Handle Profile Update Submission
-  const handleSaveProfile = async (e: React.FormEvent) => {
+  const saveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSaving(true);
+    if (!profile.nama.trim()) {
+      notifyToast({ type: 'warning', title: 'Nama wajib diisi', message: 'Nama tidak boleh kosong.' });
+      return;
+    }
+    setSaving(true);
     try {
-      const res = await apiClient.setting.updateProfile({
-        nama: profile.nama,
-        phone: profile.phone,
-        jabatan: profile.jabatan,
-        instansi: profile.instansi,
-      });
-
-      if (res?.success) {
-        const updatedProfile = {
-          ...profile,
-          role: userRole,
-        };
-        localStorage.setItem('bsan_user_profile', JSON.stringify(updatedProfile));
-        
-        notifyToast({
-          type: 'success',
-          title: 'Profil Berhasil Diperbarui',
-          message: 'Data profil identitas Anda telah diperbarui di database.',
-        });
-      } else {
-        notifyToast({
-          type: 'error',
-          title: 'Gagal Menyimpan',
-          message: res?.message || 'Terjadi kesalahan saat menyimpan profil.',
-        });
-      }
+      const res = await apiClient.setting.updateProfile({ nama: profile.nama.trim(), phone: profile.phone, jabatan: profile.jabatan, instansi: profile.instansi });
+      if (!res?.success) throw new Error(res?.message);
+      const cached = JSON.parse(localStorage.getItem('bsan_user_profile') || '{}');
+      localStorage.setItem('bsan_user_profile', JSON.stringify({ ...cached, ...profile, role }));
+      qc.invalidateQueries({ queryKey: ['auth-me'] });
+      notifyToast({ type: 'success', title: 'Profil disimpan', message: 'Perubahan profil tersimpan di database.' });
     } catch (err: any) {
-      notifyToast({
-        type: 'error',
-        title: 'Error Koneksi',
-        message: err.message || 'Gagal terhubung ke server.',
-      });
+      notifyToast({ type: 'error', title: 'Gagal menyimpan', message: err?.message || 'Terjadi kesalahan.' });
     } finally {
-      setIsSaving(false);
+      setSaving(false);
     }
   };
 
-  // STEP 1: Request OTP Email for Change Password
-  const handleRequestPasswordOtp = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPassword || newPassword.length < 6) {
-      notifyToast({ type: 'warning', title: 'Perhatian', message: 'Kata sandi baru minimal 6 karakter.' });
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      notifyToast({ type: 'error', title: 'Validasi Gagal', message: 'Konfirmasi kata sandi tidak cocok.' });
-      return;
-    }
-
-    if (!profile.email) {
-      notifyToast({ type: 'error', title: 'Email Tidak Ditemukan', message: 'Alamat email profil Anda tidak valid.' });
-      return;
-    }
-
-    setIsSendingOtp(true);
-    try {
-      const res = await apiClient.auth.forgotPassword({ email: profile.email });
-      if (res?.success) {
-        setSecurityStep('verify_otp');
-        setResendTimer(30);
-        notifyToast({
-          type: 'info',
-          title: 'Kode OTP Dikirim',
-          message: `Kode verifikasi 6-digit telah dikirimkan ke email ${profile.email}. Silakan cek inbox/spam Anda.`,
-        });
-      } else {
-        notifyToast({
-          type: 'error',
-          title: 'Gagal Mengirim OTP',
-          message: res?.message || 'Gagal mengirimkan kode OTP verifikasi ke email.',
-        });
-      }
-    } catch (err: any) {
-      notifyToast({
-        type: 'error',
-        title: 'Gagal Mengirim OTP',
-        message: err.message || 'Gagal terhubung ke server pengirim email.',
-      });
-    } finally {
-      setIsSendingOtp(false);
-    }
-  };
-
-  // STEP 2: Verify OTP & Save New Password
-  const handleVerifyOtpAndChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanOtp = otpCode.trim();
-    if (!cleanOtp || cleanOtp.length < 6) {
-      notifyToast({ type: 'warning', title: 'Perhatian', message: 'Masukkan 6-digit kode OTP dengan lengkap.' });
-      return;
-    }
-
-    setIsVerifyingOtp(true);
-    try {
-      const res = await apiClient.auth.resetPassword({
-        email: profile.email,
-        otp_code: cleanOtp,
-        new_password: newPassword,
-      });
-
-      if (res?.success) {
-        setSecurityStep('input_pass');
-        setNewPassword('');
-        setConfirmPassword('');
-        setOtpCode('');
-        notifyToast({
-          type: 'success',
-          title: 'Kata Sandi Diperbarui!',
-          message: 'Kata sandi akun Anda telah berhasil diperbarui di database.',
-        });
-      } else {
-        notifyToast({
-          type: 'error',
-          title: 'Verifikasi Gagal',
-          message: res?.message || 'Kode OTP salah atau sudah kedaluwarsa.',
-        });
-      }
-    } catch (err: any) {
-      notifyToast({
-        type: 'error',
-        title: 'Gagal Verifikasi',
-        message: err.message || 'Kode OTP salah atau sudah kedaluwarsa.',
-      });
-    } finally {
-      setIsVerifyingOtp(false);
-    }
-  };
-
-  // Handle Preferences & Notifications Save
-  const handleSavePreferences = async () => {
-    setIsSaving(true);
+  const savePreferences = async (label: string) => {
+    setSaving(true);
     try {
       const res = await apiClient.setting.updatePreferences({
-        bahasa: pref.language,
-        tema: pref.theme,
-        auto_save_interval: pref.autoSaveInterval,
-        notif_weekly_report: notif.weeklyReport,
-        notif_instant_alert: notif.instantAlert,
-        notif_reminder_email: notif.reminderEmail,
-        notif_system_update: notif.systemUpdate,
+        bahasa: pref.language, tema: pref.theme, auto_save_interval: pref.autoSaveInterval,
+        notif_weekly_report: notif.weeklyReport, notif_instant_alert: notif.instantAlert,
+        notif_reminder_email: notif.reminderEmail, notif_system_update: notif.systemUpdate,
       });
-
-      if (res?.success) {
-        notifyToast({
-          type: 'success',
-          title: 'Preferensi Disimpan',
-          message: 'Pengaturan preferensi dasbor & kanal notifikasi berhasil disimpan.',
-        });
-      }
+      if (!res?.success) throw new Error();
+      notifyToast({ type: 'success', title: `${label} disimpan`, message: 'Pengaturan berhasil diperbarui.' });
     } catch (err: any) {
-      notifyToast({
-        type: 'error',
-        title: 'Gagal Menyimpan',
-        message: err.message || 'Gagal menyimpan preferensi.',
-      });
+      notifyToast({ type: 'error', title: 'Gagal menyimpan', message: err?.message || 'Pengaturan gagal disimpan.' });
     } finally {
-      setIsSaving(false);
+      setSaving(false);
     }
   };
 
-  // Fetch Target Observasi Data
-  const fetchTargetData = async () => {
-    setTargetLoading(true);
-    try {
-      const res = await apiClient.setting.getTargetObservasi();
-      if (res?.success && res?.data) {
-        setTargetDefault(res.data.default_target || 2);
-        setTargetSchools(
-          (res.data.schools || []).map((s: any) => ({
-            id: s.id,
-            npsn: s.npsn || '',
-            nama: s.nama || '',
-            target_observasi: s.target_observasi || 2,
-            kecamatan: s.kecamatan || '',
-            kabupaten: s.kabupaten || '',
-            observasi_count: Number(s.observasi_count || 0),
-            _edited: false,
-          }))
-        );
-      }
-    } catch (err: any) {
-      notifyToast({ type: 'error', title: 'Gagal Memuat', message: err.message || 'Gagal memuat data target observasi.' });
-    } finally {
-      setTargetLoading(false);
-    }
-  };
+  const tabs: { id: TabId; label: string; desc: string; icon: typeof User }[] = [
+    { id: 'profile', label: 'Profil', desc: 'Identitas akun', icon: User },
+    { id: 'security', label: 'Keamanan', desc: 'Ganti kata sandi', icon: Shield },
+    { id: 'notif', label: 'Notifikasi', desc: 'Email & pemberitahuan', icon: Bell },
+    { id: 'pref', label: 'Preferensi', desc: 'Tampilan & draft', icon: SlidersHorizontal },
+    ...(role === 'admin' ? [{ id: 'target' as TabId, label: 'Target Observasi', desc: 'Target sesi SEL per sekolah', icon: Target }] : []),
+  ];
 
-  // Auto-fetch when target tab is selected
-  useEffect(() => {
-    if (activeTab === 'target' && userRole === 'admin' && targetSchools.length === 0) {
-      fetchTargetData();
-    }
-  }, [activeTab]);
-
-  // Save Global Default Target
-  const handleSaveGlobalTarget = async () => {
-    setTargetSaving(true);
-    try {
-      const res = await apiClient.setting.updateTargetObservasi({
-        default_target: targetDefault,
-        apply_to_all: applyToAll,
-      });
-      if (res?.success) {
-        notifyToast({ type: 'success', title: 'Berhasil', message: res.message });
-        if (applyToAll) {
-          setTargetSchools(prev => prev.map(s => ({ ...s, target_observasi: targetDefault, _edited: false })));
-        }
-      } else {
-        notifyToast({ type: 'error', title: 'Gagal', message: res?.message || 'Gagal menyimpan.' });
-      }
-    } catch (err: any) {
-      notifyToast({ type: 'error', title: 'Error', message: err.message || 'Gagal menyimpan target.' });
-    } finally {
-      setTargetSaving(false);
-    }
-  };
-
-  // Save Batch Per-School Target Changes
-  const handleSaveBatchTarget = async () => {
-    const edited = targetSchools.filter(s => s._edited);
-    if (edited.length === 0) return;
-    setTargetSaving(true);
-    try {
-      const res = await apiClient.setting.updateTargetObservasiBatch(
-        edited.map(s => ({ sekolah_id: s.id, target: s.target_observasi }))
-      );
-      if (res?.success) {
-        notifyToast({ type: 'success', title: 'Berhasil', message: res.message });
-        setTargetSchools(prev => prev.map(s => ({ ...s, _edited: false })));
-      } else {
-        notifyToast({ type: 'error', title: 'Gagal', message: res?.message || 'Gagal menyimpan.' });
-      }
-    } catch (err: any) {
-      notifyToast({ type: 'error', title: 'Error', message: err.message || 'Gagal menyimpan.' });
-    } finally {
-      setTargetSaving(false);
-    }
-  };
-
-  // Filter target schools by search
-  const filteredTargetSchools = targetSearch
-    ? targetSchools.filter(s =>
-        s.nama.toLowerCase().includes(targetSearch.toLowerCase()) ||
-        s.npsn.includes(targetSearch) ||
-        s.kecamatan.toLowerCase().includes(targetSearch.toLowerCase()) ||
-        s.kabupaten.toLowerCase().includes(targetSearch.toLowerCase())
-      )
-    : targetSchools;
-
-  if (isLoading) {
+  if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[400px] space-y-3">
-        <RefreshCw className="h-8 w-8 text-primary animate-spin" />
-        <p className="text-xs text-text-secondary font-medium">Memuat Pengaturan Akun...</p>
+      <div className="flex flex-col items-center justify-center min-h-[360px] gap-3">
+        <Loader2 className="h-7 w-7 text-primary animate-spin" />
+        <p className="text-xs text-text-secondary">Memuat pengaturan akun…</p>
       </div>
     );
   }
 
+  const initials = (profile.nama || profile.email || '?').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+
   return (
-    <div className="space-y-6 animate-fade-in pb-12">
-      {/* Top Header Card */}
-      <div className="rounded-2xl bg-surface p-6 shadow-card border border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold font-display text-text-primary flex items-center gap-2">
-            <User className="h-5 w-5 text-primary" />
-            <span>Pengaturan Akun & Profil Stakeholder</span>
-          </h2>
-          <p className="text-xs text-text-secondary mt-0.5">
-            Kelola profil identitas, keamanan akun via OTP email, dan preferensi dasbor sistem.
-          </p>
+    <div className="space-y-5 pb-10 animate-fade-in">
+      {/* Kartu akun */}
+      <div className="rounded-2xl bg-surface border border-border shadow-card p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center gap-4">
+        <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-2xl bg-gradient-to-br from-primary to-accent text-white flex items-center justify-center text-xl font-bold font-display shrink-0">
+          {initials}
         </div>
-
-        <div className="flex items-center space-x-2">
-          <span className="px-3 py-1 rounded-full text-xs font-bold bg-primary/10 text-primary border border-primary/20 capitalize flex items-center gap-1.5">
-            <BadgeCheck className="h-3.5 w-3.5 text-primary" />
-            <span>Peran: {userRole}</span>
-          </span>
-          <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span>Terverifikasi</span>
-          </span>
+        <div className="min-w-0 flex-1">
+          <h1 className="text-lg sm:text-xl font-bold font-display text-text-primary truncate">{profile.nama || 'Pengguna'}</h1>
+          <p className="text-xs text-text-secondary truncate">{profile.email}</p>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-primary/10 text-primary">{ROLE_LABEL[role] || role}</span>
+            {account?.sekolah_nama && <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-bg border border-border text-text-secondary">{account.sekolah_nama}</span>}
+            {account?.last_login && (
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-bg border border-border text-text-secondary inline-flex items-center gap-1">
+                <Clock className="h-3 w-3" /> Login terakhir {new Date(account.last_login).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Main Layout Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-
-        {/* Left Navigation Tabs */}
-        <div className="lg:col-span-4 xl:col-span-3 rounded-2xl bg-surface p-3 shadow-card border border-border space-y-1 h-fit">
-          {[
-            { id: 'profile', label: 'Profil Pengguna', icon: User, desc: 'Identitas & Peran' },
-            { id: 'security', label: 'Keamanan & Sandi (OTP)', icon: Shield, desc: 'Verifikasi Email OTP' },
-            { id: 'notif', label: 'Kanal Notifikasi', icon: Bell, desc: 'Email Alert & Laporan' },
-            { id: 'pref', label: 'Preferensi Dasbor', icon: Globe, desc: 'Bahasa & Autotimer' },
-            ...(userRole === 'admin' ? [
-              { id: 'target', label: 'Target Observasi', icon: Target, desc: 'Atur Target per Sekolah' },
-            ] : []),
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id as SettingTabType)}
-                className={`w-full flex items-center space-x-3 p-3 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                  isActive
-                    ? 'bg-primary text-white shadow-md shadow-primary/20 scale-[1.01]'
-                    : 'text-text-secondary hover:bg-bg hover:text-text-primary'
-                }`}
-              >
-                <div className={`p-2 rounded-lg ${isActive ? 'bg-white/20 text-white' : 'bg-bg text-text-secondary'}`}>
-                  <Icon className="h-4 w-4" />
-                </div>
-                <div className="text-left">
-                  <p className="font-bold leading-none">{tab.label}</p>
-                  <p className={`text-[10px] mt-1 ${isActive ? 'text-white/80' : 'text-text-secondary/70'}`}>
-                    {tab.desc}
-                  </p>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Right Tab Content Card */}
-        <div className="lg:col-span-8 xl:col-span-9 rounded-2xl bg-surface p-6 shadow-card border border-border">
-
-          {/* ═══════════════════════════════════════════════════════════════
-              TAB 1: PROFIL PENGGUNA
-             ═══════════════════════════════════════════════════════════════ */}
-          {activeTab === 'profile' && (
-            <form onSubmit={handleSaveProfile} className="space-y-6 text-xs animate-fade-in">
-              <div className="flex items-center justify-between border-b border-border pb-3">
-                <h3 className="font-bold text-sm text-text-primary font-display flex items-center space-x-2">
-                  <User className="h-4 w-4 text-primary" />
-                  <span>Informasi Identitas Diri</span>
-                </h3>
-                <span className="text-[10px] text-text-secondary">Terhubung ke Database</span>
-              </div>
-
-              {/* Profile Card Header */}
-              <div className="p-4 rounded-2xl bg-bg/60 border border-border flex flex-col sm:flex-row items-center space-y-3 sm:space-y-0 sm:space-x-4">
-                <div className="h-16 w-16 rounded-2xl bg-primary/10 text-primary flex items-center justify-center font-black text-xl border-2 border-primary/20 shadow-xs shrink-0">
-                  {profile.nama ? profile.nama.substring(0, 2).toUpperCase() : 'US'}
-                </div>
-                <div className="space-y-1 text-center sm:text-left flex-1">
-                  <h4 className="font-bold text-sm text-text-primary">{profile.nama || 'Pengguna Survasi'}</h4>
-                  <p className="text-xs text-text-secondary">{profile.jabatan || 'Stakeholder System'}</p>
-                  <div className="flex flex-wrap gap-2 pt-1 justify-center sm:justify-start">
-                    <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-primary/10 text-primary border border-primary/20 uppercase">
-                      {userRole}
-                    </span>
-                    <span className="px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-surface text-text-secondary border border-border">
-                      {profile.instansi || 'Instansi Terdaftar'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Form Inputs */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="font-bold text-text-secondary uppercase text-[10px]">Nama Lengkap Pengguna *</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      required
-                      value={profile.nama}
-                      onChange={(e) => setProfile({ ...profile, nama: e.target.value })}
-                      className="w-full rounded-xl border border-border bg-bg pl-9 pr-3 py-2.5 text-xs text-text-primary focus:border-primary focus:outline-none"
-                    />
-                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-secondary" />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-text-secondary uppercase text-[10px]">Alamat Email (Akun Login)</label>
-                  <div className="relative">
-                    <input
-                      type="email"
-                      disabled
-                      value={profile.email}
-                      className="w-full rounded-xl border border-border bg-border/30 pl-9 pr-3 py-2.5 text-xs text-text-secondary cursor-not-allowed font-medium"
-                    />
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-secondary" />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-text-secondary uppercase text-[10px]">NIP / NUPTK / Identitas</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={profile.nip}
-                      onChange={(e) => setProfile({ ...profile, nip: e.target.value })}
-                      placeholder="Masukkan NIP jika ada"
-                      className="w-full rounded-xl border border-border bg-bg pl-9 pr-3 py-2.5 text-xs text-text-primary focus:border-primary focus:outline-none"
-                    />
-                    <FileText className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-secondary" />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-text-secondary uppercase text-[10px]">Nomor Telepon / WhatsApp</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={profile.phone}
-                      onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
-                      placeholder="0812xxxxxxx"
-                      className="w-full rounded-xl border border-border bg-bg pl-9 pr-3 py-2.5 text-xs text-text-primary focus:border-primary focus:outline-none"
-                    />
-                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-secondary" />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-text-secondary uppercase text-[10px]">Jabatan / Peran Dinas</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={profile.jabatan}
-                      onChange={(e) => setProfile({ ...profile, jabatan: e.target.value })}
-                      placeholder="Misal: Kepala Sekolah / Pengawas Pembina"
-                      className="w-full rounded-xl border border-border bg-bg pl-9 pr-3 py-2.5 text-xs text-text-primary focus:border-primary focus:outline-none"
-                    />
-                    <BadgeCheck className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-secondary" />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-text-secondary uppercase text-[10px]">Instansi / Sekolah</label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={profile.instansi}
-                      onChange={(e) => setProfile({ ...profile, instansi: e.target.value })}
-                      placeholder="Nama Instansi"
-                      className="w-full rounded-xl border border-border bg-bg pl-9 pr-3 py-2.5 text-xs text-text-primary focus:border-primary focus:outline-none"
-                    />
-                    <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-secondary" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Submit Button Footer */}
-              <div className="flex items-center justify-between pt-4 border-t border-border">
-                <span className="text-[10px] text-text-secondary font-medium">
-                  Perubahan akan diperbarui langsung di database.
-                </span>
-                <button
-                  type="submit"
-                  disabled={isSaving}
-                  className="flex items-center space-x-2 rounded-2xl bg-primary hover:bg-primary-dark disabled:bg-primary/70 text-white px-6 py-2.5 font-bold shadow-lg shadow-primary/20 transition-all cursor-pointer hover:scale-[1.01]"
-                >
-                  {isSaving ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      <span>Menyimpan...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Save className="h-4 w-4" />
-                      <span>Simpan Profil</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          )}
-
-          {/* ═══════════════════════════════════════════════════════════════
-              TAB 2: KEAMANAN & SANDI (VERIFIKASI KODE OTP EMAIL)
-             ═══════════════════════════════════════════════════════════════ */}
-          {activeTab === 'security' && (
-            <div className="space-y-6 text-xs animate-fade-in">
-              <div className="flex items-center justify-between border-b border-border pb-3">
-                <h3 className="font-bold text-sm text-text-primary font-display flex items-center space-x-2">
-                  <Shield className="h-4 w-4 text-primary" />
-                  <span>Perubahan Kata Sandi Berbasis Verifikasi OTP Email</span>
-                </h3>
-                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-primary/10 text-primary border border-primary/20">
-                  Brevo Mailer Protected
-                </span>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-primary/5 border border-primary/20 space-y-1 text-text-primary">
-                <p className="font-bold text-xs flex items-center gap-1.5 text-primary">
-                  <Mail className="h-4 w-4" />
-                  <span>Keamanan Verifikasi Email 2-Langkah</span>
-                </p>
-                <p className="text-[11px] text-text-secondary leading-relaxed">
-                  Demi keamanan akun Anda, perubahan kata sandi membutuhkan verifikasi <strong>Kode OTP 6-Digit</strong> yang akan dikirimkan langsung ke alamat email terdaftar: <strong>{profile.email}</strong>.
-                </p>
-              </div>
-
-              {/* STEP 1: FORM INPUT KATA SANDI BARU & TOMBOL KIRIM OTP */}
-              {securityStep === 'input_pass' && (
-                <form onSubmit={handleRequestPasswordOtp} className="space-y-4 max-w-md animate-fade-in">
-                  <div className="space-y-1">
-                    <label className="font-bold text-text-secondary uppercase text-[10px]">Email Terdaftar Akun</label>
-                    <input
-                      type="email"
-                      disabled
-                      value={profile.email}
-                      className="w-full rounded-xl border border-border bg-border/30 px-3 py-2.5 text-xs text-text-secondary font-medium cursor-not-allowed"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="font-bold text-text-secondary uppercase text-[10px]">Kata Sandi Baru *</label>
-                    <div className="relative">
-                      <input
-                        type={showPass.new ? 'text' : 'password'}
-                        required
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        placeholder="Minimal 6 karakter"
-                        className="w-full rounded-xl border border-border bg-bg pl-3 pr-10 py-2.5 text-xs text-text-primary focus:border-primary focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPass({ ...showPass, new: !showPass.new })}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
-                      >
-                        {showPass.new ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-
-                    {newPassword && (
-                      <div className="pt-2 space-y-1 animate-fade-in">
-                        <div className="flex justify-between items-center text-[10px] font-bold">
-                          <span className="text-text-secondary uppercase">Kekuatan Sandi:</span>
-                          <span className="text-text-primary">{pwdStrength.label}</span>
-                        </div>
-                        <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
-                          <div
-                            className={`h-full ${pwdStrength.color} transition-all duration-300`}
-                            style={{ width: `${pwdStrength.score}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="font-bold text-text-secondary uppercase text-[10px]">Konfirmasi Kata Sandi Baru *</label>
-                    <div className="relative">
-                      <input
-                        type={showPass.confirm ? 'text' : 'password'}
-                        required
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        placeholder="Ulangi kata sandi baru"
-                        className="w-full rounded-xl border border-border bg-bg pl-3 pr-10 py-2.5 text-xs text-text-primary focus:border-primary focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPass({ ...showPass, confirm: !showPass.confirm })}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
-                      >
-                        {showPass.confirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="pt-2">
-                    <button
-                      type="submit"
-                      disabled={isSendingOtp}
-                      className="w-full flex items-center justify-center space-x-2 rounded-2xl bg-primary hover:bg-primary-dark disabled:bg-primary/70 text-white py-3 font-bold shadow-lg shadow-primary/20 transition-all cursor-pointer hover:scale-[1.01]"
-                    >
-                      {isSendingOtp ? (
-                        <>
-                          <RefreshCw className="h-4 w-4 animate-spin" />
-                          <span>Mengirim Kode OTP ke Email...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Send className="h-4 w-4" />
-                          <span>Kirim Kode OTP Verifikasi Ke Email</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {/* STEP 2: VERIFIKASI KODE OTP 6-DIGIT */}
-              {securityStep === 'verify_otp' && (
-                <form onSubmit={handleVerifyOtpAndChangePassword} className="space-y-4 max-w-md animate-fade-in">
-                  <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-950 space-y-1">
-                    <p className="font-bold text-xs flex items-center gap-1.5 text-emerald-700">
-                      <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                      <span>Kode OTP 6-Digit Telah Dikirim!</span>
-                    </p>
-                    <p className="text-[11px] text-emerald-900 leading-relaxed">
-                      Silakan buka email <strong>{profile.email}</strong> dan masukkan 6-digit kode OTP di bawah ini untuk mengonfirmasi perubahan kata sandi baru Anda.
-                    </p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="font-bold text-text-secondary uppercase text-[10px]">Kode OTP 6-Digit Verifikasi *</label>
-                    <input
-                      type="text"
-                      required
-                      maxLength={6}
-                      value={otpCode}
-                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ''))}
-                      placeholder="Contoh: 849201"
-                      className="w-full text-center tracking-[8px] font-mono text-lg font-black rounded-xl border border-border bg-bg py-2.5 text-text-primary focus:border-primary focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between text-[11px] pt-1">
-                    <button
-                      type="button"
-                      onClick={() => setSecurityStep('input_pass')}
-                      className="text-text-secondary hover:text-text-primary font-medium flex items-center gap-1 cursor-pointer"
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      <span>Ubah kata sandi baru</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={resendTimer > 0 || isSendingOtp}
-                      onClick={handleRequestPasswordOtp}
-                      className="text-primary hover:underline font-bold disabled:text-text-secondary disabled:no-underline cursor-pointer"
-                    >
-                      {resendTimer > 0 ? `Kirim ulang OTP (${resendTimer}s)` : 'Kirim ulang OTP'}
-                    </button>
-                  </div>
-
-                  <div className="pt-2 flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSecurityStep('input_pass');
-                        setOtpCode('');
-                      }}
-                      className="flex-1 py-2.5 rounded-2xl border border-border text-text-secondary hover:bg-bg font-bold cursor-pointer transition"
-                    >
-                      Batal
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isVerifyingOtp}
-                      className="flex-2 flex items-center justify-center space-x-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-600/70 text-white py-2.5 font-bold shadow-lg shadow-emerald-600/20 transition-all cursor-pointer hover:scale-[1.01]"
-                    >
-                      {isVerifyingOtp ? (
-                        <>
-                          <RefreshCw className="h-4 w-4 animate-spin" />
-                          <span>Memverifikasi...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Key className="h-4 w-4" />
-                          <span>Verifikasi & Simpan Sandi</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {/* Active Session Card */}
-              <div className="space-y-2 pt-4 border-t border-border">
-                <h4 className="font-bold text-xs text-text-primary uppercase tracking-wider">Perangkat & Sesi Aktif</h4>
-                <div className="p-3.5 rounded-xl bg-bg/40 border border-border flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <Laptop className="h-5 w-5 text-primary shrink-0" />
-                    <div>
-                      <p className="font-bold text-text-primary text-xs">Sesi Login Perangkat Saat Ini</p>
-                      <p className="text-[10px] text-text-secondary">Terautentikasi via Token JWT • Terproteksi Brevo OTP</p>
-                    </div>
-                  </div>
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                    Aktif
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        {/* Navigasi: pill horizontal di mobile, sidebar di desktop */}
+        <nav className="lg:col-span-3">
+          <div className="flex lg:flex-col gap-2 overflow-x-auto custom-scrollbar pb-1 lg:pb-0 lg:rounded-2xl lg:bg-surface lg:border lg:border-border lg:shadow-card lg:p-2">
+            {tabs.map(t => {
+              const Icon = t.icon;
+              const active = tab === t.id;
+              return (
+                <button key={t.id} onClick={() => setTab(t.id)}
+                  className={`shrink-0 flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-left transition cursor-pointer border lg:border-0 ${
+                    active ? 'bg-primary text-white border-primary shadow-sm' : 'bg-surface lg:bg-transparent text-text-secondary border-border hover:bg-bg hover:text-text-primary'
+                  }`}>
+                  <Icon className="h-4 w-4 shrink-0" />
+                  <span>
+                    <span className="block text-xs font-bold whitespace-nowrap">{t.label}</span>
+                    <span className={`hidden lg:block text-[10px] ${active ? 'text-white/80' : 'text-text-secondary'}`}>{t.desc}</span>
                   </span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ═══════════════════════════════════════════════════════════════
-              TAB 3: KANAL NOTIFIKASI
-             ═══════════════════════════════════════════════════════════════ */}
-          {activeTab === 'notif' && (
-            <div className="space-y-6 text-xs animate-fade-in">
-              <div className="flex items-center justify-between border-b border-border pb-3">
-                <h3 className="font-bold text-sm text-text-primary font-display flex items-center space-x-2">
-                  <Bell className="h-4 w-4 text-primary" />
-                  <span>Kanal Notifikasi Email & System Alert</span>
-                </h3>
-              </div>
-
-              <div className="space-y-3">
-                {[
-                  {
-                    key: 'weeklyReport',
-                    title: 'Rekapitulasi Mingguan Progres BSAN',
-                    desc: 'Kirimkan laporan rangkuman mingguan pengisian survei secara berkala.',
-                  },
-                  {
-                    key: 'instantAlert',
-                    title: 'Notifikasi Instan Observasi SEL',
-                    desc: 'Notifikasi instan saat pengawas menyelesaikan sesi observasi lapangan SEL.',
-                  },
-                  {
-                    key: 'reminderEmail',
-                    title: 'Pengingat Otomatis Sekolah Belum Mengisi',
-                    desc: 'Kirimkan email pengingat otomatis ke sekolah yang belum melengkapi kuisioner.',
-                  },
-                  {
-                    key: 'systemUpdate',
-                    title: 'Pengumuman Update & Pemeliharaan Sistem',
-                    desc: 'Berita pembaruan fitur dashboard dan jadwal pemeliharaan server.',
-                  },
-                ].map((item) => (
-                  <label
-                    key={item.key}
-                    className="flex items-start space-x-3 cursor-pointer p-3.5 rounded-xl bg-bg/40 border border-border/60 hover:border-border hover:bg-bg transition"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={(notif as any)[item.key]}
-                      onChange={(e) => setNotif({ ...notif, [item.key]: e.target.checked })}
-                      className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary/20 cursor-pointer"
-                    />
-                    <div>
-                      <p className="font-bold text-text-primary">{item.title}</p>
-                      <p className="text-[10px] text-text-secondary mt-0.5">{item.desc}</p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-
-              {/* Save Button */}
-              <div className="flex items-center justify-end pt-4 border-t border-border">
-                <button
-                  type="button"
-                  onClick={handleSavePreferences}
-                  disabled={isSaving}
-                  className="flex items-center space-x-2 rounded-2xl bg-primary hover:bg-primary-dark disabled:bg-primary/70 text-white px-6 py-2.5 font-bold shadow-lg shadow-primary/20 transition-all cursor-pointer hover:scale-[1.01]"
-                >
-                  {isSaving ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      <span>Menyimpan...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Save className="h-4 w-4" />
-                      <span>Simpan Notifikasi</span>
-                    </>
-                  )}
                 </button>
-              </div>
-            </div>
-          )}
+              );
+            })}
+          </div>
+        </nav>
 
-          {/* ═══════════════════════════════════════════════════════════════
-              TAB 4: PREFERENSI DASBOR
-             ═══════════════════════════════════════════════════════════════ */}
-          {activeTab === 'pref' && (
-            <div className="space-y-6 text-xs animate-fade-in">
-              <div className="flex items-center justify-between border-b border-border pb-3">
-                <h3 className="font-bold text-sm text-text-primary font-display flex items-center space-x-2">
-                  <Globe className="h-4 w-4 text-primary" />
-                  <span>Tampilan Dasbor & Preferensi Penggunaan</span>
-                </h3>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="font-bold text-text-secondary uppercase text-[10px]">Bahasa Antarmuka</label>
-                  <CustomSelect
-                    value={pref.language}
-                    onChange={(val) => setPref({ ...pref, language: val })}
-                    options={[
-                      { value: 'id', label: 'Bahasa Indonesia (Default)' },
-                      { value: 'en', label: 'English (US)' },
-                    ]}
-                    placeholder="Pilih Bahasa"
-                    size="md"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-bold text-text-secondary uppercase text-[10px]">Tema Dasbor</label>
-                  <CustomSelect
-                    value={pref.theme}
-                    onChange={(val) => setPref({ ...pref, theme: val })}
-                    options={[
-                      { value: 'light', label: 'Terang (Light Theme)' },
-                      { value: 'dark', label: 'Gelap (Dark Theme)' },
-                    ]}
-                    placeholder="Pilih Tema"
-                    size="md"
-                  />
-                </div>
-
-                <div className="sm:col-span-2 space-y-2 p-4 bg-bg/50 rounded-2xl border border-border">
-                  <div className="flex justify-between items-center">
-                    <span className="font-bold text-text-primary text-xs">Interval Simpan Draft Otomatis</span>
-                    <span className="font-extrabold text-primary text-xs bg-primary/10 px-2.5 py-0.5 rounded-full border border-primary/20">
-                      {pref.autoSaveInterval} Detik
-                    </span>
+        <div className="lg:col-span-9">
+          {tab === 'profile' && (
+            <Panel title="Profil Pengguna" desc="Informasi ini tampil di laporan dan sebagai nama pengisi/observer.">
+              <form onSubmit={saveProfile} className="space-y-5">
+                {role === 'sekolah' && account?.sekolah_nama && (
+                  <div className="rounded-xl bg-bg border border-border p-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <ReadItem icon={<Building2 className="h-4 w-4" />} label="Sekolah terdaftar" value={account.sekolah_nama} />
+                    <ReadItem icon={<KeyRound className="h-4 w-4" />} label="NPSN" value={account.npsn || '-'} />
+                    <ReadItem icon={<MapPin className="h-4 w-4" />} label="Wilayah" value={`${account.kecamatan_nama || '-'}, ${account.kabupaten_nama || '-'}`} />
+                    <p className="sm:col-span-3 text-[11px] text-text-secondary flex items-center gap-1.5">
+                      <Lock className="h-3 w-3" /> Data sekolah terkunci pada akun ini dan otomatis dipakai di form survei. Hubungi admin bila ada kekeliruan.
+                    </p>
                   </div>
-                  <input
-                    type="range"
-                    min="10"
-                    max="120"
-                    step="5"
-                    value={pref.autoSaveInterval}
-                    onChange={(e) => setPref({ ...pref, autoSaveInterval: parseInt(e.target.value) })}
-                    className="w-full h-1.5 bg-border rounded-lg appearance-none cursor-pointer accent-primary"
-                  />
-                  <p className="text-[10px] text-text-secondary">
-                    Interval simpan otomatis saat menginputkan survei & observasi SEL.
-                  </p>
-                </div>
-              </div>
-
-              {/* Save Button */}
-              <div className="flex items-center justify-end pt-4 border-t border-border">
-                <button
-                  type="button"
-                  onClick={handleSavePreferences}
-                  disabled={isSaving}
-                  className="flex items-center space-x-2 rounded-2xl bg-primary hover:bg-primary-dark disabled:bg-primary/70 text-white px-6 py-2.5 font-bold shadow-lg shadow-primary/20 transition-all cursor-pointer hover:scale-[1.01]"
-                >
-                  {isSaving ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      <span>Menyimpan...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Save className="h-4 w-4" />
-                      <span>Simpan Preferensi</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* ═══════════════════════════════════════════════════════════════
-              TAB 5: TARGET OBSERVASI (ADMIN ONLY)
-             ═══════════════════════════════════════════════════════════════ */}
-          {activeTab === 'target' && userRole === 'admin' && (
-            <div className="space-y-6 text-xs animate-fade-in">
-              <div className="flex items-center justify-between border-b border-border pb-3">
-                <h3 className="font-bold text-sm text-text-primary font-display flex items-center space-x-2">
-                  <Target className="h-4 w-4 text-primary" />
-                  <span>Pengaturan Target Observasi SEL per Sekolah</span>
-                </h3>
-                <button
-                  type="button"
-                  onClick={fetchTargetData}
-                  disabled={targetLoading}
-                  className="px-3 py-1.5 rounded-lg text-[10px] font-bold bg-bg border border-border hover:border-primary text-text-secondary hover:text-primary transition cursor-pointer flex items-center gap-1"
-                >
-                  <RefreshCw className={`h-3 w-3 ${targetLoading ? 'animate-spin' : ''}`} />
-                  <span>Muat Ulang</span>
-                </button>
-              </div>
-
-              {/* Global Default Setting */}
-              <div className="p-4 rounded-2xl bg-primary/5 border border-primary/20 space-y-3">
-                <p className="font-bold text-xs text-primary flex items-center gap-1.5">
-                  <Target className="h-4 w-4" />
-                  <span>Target Default Observasi Global</span>
-                </p>
-                <p className="text-[11px] text-text-secondary leading-relaxed">
-                  Tentukan berapa kali <strong>minimum observasi SEL</strong> yang harus dilakukan per sekolah.
-                  Setiap sekolah bisa di-override secara individual di tabel bawah.
-                </p>
-                <div className="flex flex-wrap items-end gap-3">
-                  <div className="space-y-1">
-                    <label className="font-bold text-text-secondary uppercase text-[10px]">Default Target</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min={1}
-                        max={20}
-                        value={targetDefault}
-                        onChange={e => setTargetDefault(Math.max(1, Math.min(20, parseInt(e.target.value) || 1)))}
-                        className="w-20 rounded-xl border border-border bg-bg px-3 py-2.5 text-xs text-text-primary focus:border-primary focus:outline-none text-center font-bold"
-                      />
-                      <span className="text-text-secondary font-medium">kali observasi</span>
-                    </div>
-                  </div>
-
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={applyToAll}
-                      onChange={e => setApplyToAll(e.target.checked)}
-                      className="h-4 w-4 rounded border-border text-primary focus:ring-primary/20 cursor-pointer"
-                    />
-                    <span className="text-[11px] text-text-primary font-medium">Terapkan ke semua sekolah</span>
-                  </label>
-
-                  <button
-                    type="button"
-                    disabled={targetSaving}
-                    onClick={handleSaveGlobalTarget}
-                    className="flex items-center gap-1.5 rounded-xl bg-primary hover:bg-primary-dark disabled:bg-primary/70 text-white px-4 py-2.5 font-bold shadow-md shadow-primary/20 transition-all cursor-pointer text-[11px]"
-                  >
-                    {targetSaving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                    <span>Simpan Default</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Per-School Table */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-xs text-text-primary uppercase tracking-wider">Target per Sekolah</h4>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      placeholder="Cari sekolah..."
-                      value={targetSearch}
-                      onChange={e => setTargetSearch(e.target.value)}
-                      className="w-56 rounded-xl border border-border bg-bg pl-8 pr-3 py-2 text-[11px] text-text-primary focus:border-primary focus:outline-none"
-                    />
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-text-secondary" />
-                  </div>
-                </div>
-
-                {targetLoading ? (
-                  <div className="flex flex-col items-center justify-center py-12 space-y-2">
-                    <RefreshCw className="h-6 w-6 text-primary animate-spin" />
-                    <p className="text-[11px] text-text-secondary">Memuat data target...</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="rounded-xl border border-border overflow-hidden">
-                      <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
-                        <table className="w-full text-[11px]">
-                          <thead className="bg-bg/80 sticky top-0 z-10">
-                            <tr className="text-left text-text-secondary uppercase font-bold tracking-wider">
-                              <th className="px-3 py-2.5">Sekolah</th>
-                              <th className="px-3 py-2.5">Kecamatan</th>
-                              <th className="px-3 py-2.5">Kabupaten</th>
-                              <th className="px-3 py-2.5 text-center">Terisi</th>
-                              <th className="px-3 py-2.5 text-center">Target</th>
-                              <th className="px-3 py-2.5">Progress</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-border/60">
-                            {filteredTargetSchools.map((s) => {
-                              const pct = s.target_observasi > 0 ? Math.min(100, Math.round((s.observasi_count / s.target_observasi) * 100)) : 0;
-                              const isOver = s.observasi_count > s.target_observasi;
-                              const isDone = s.observasi_count >= s.target_observasi;
-                              return (
-                                <tr key={s.id} className={`hover:bg-bg/40 transition ${s._edited ? 'bg-amber-50/40' : ''}`}>
-                                  <td className="px-3 py-2">
-                                    <p className="font-bold text-text-primary">{s.nama}</p>
-                                    <p className="text-[10px] text-text-secondary">{s.npsn}</p>
-                                  </td>
-                                  <td className="px-3 py-2 text-text-secondary">{s.kecamatan}</td>
-                                  <td className="px-3 py-2 text-text-secondary">{s.kabupaten}</td>
-                                  <td className="px-3 py-2 text-center">
-                                    <span className={`font-extrabold ${isOver ? 'text-amber-600' : isDone ? 'text-emerald-600' : 'text-text-primary'}`}>
-                                      {s.observasi_count}
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-2">
-                                    <input
-                                      type="number"
-                                      min={1}
-                                      max={20}
-                                      value={s.target_observasi}
-                                      onChange={e => {
-                                        const val = Math.max(1, Math.min(20, parseInt(e.target.value) || 1));
-                                        setTargetSchools(prev => prev.map(sc => sc.id === s.id ? { ...sc, target_observasi: val, _edited: true } : sc));
-                                      }}
-                                      className="w-14 rounded-lg border border-border bg-bg px-2 py-1.5 text-center font-bold text-text-primary focus:border-primary focus:outline-none"
-                                    />
-                                  </td>
-                                  <td className="px-3 py-2">
-                                    <div className="flex items-center gap-2">
-                                      <div className="flex-1 h-1.5 bg-border rounded-full overflow-hidden min-w-[60px]">
-                                        <div
-                                          className={`h-full rounded-full transition-all ${isOver ? 'bg-amber-500' : isDone ? 'bg-emerald-500' : 'bg-primary'}`}
-                                          style={{ width: `${pct}%` }}
-                                        />
-                                      </div>
-                                      <span className={`text-[10px] font-bold whitespace-nowrap ${isOver ? 'text-amber-600' : isDone ? 'text-emerald-600' : 'text-text-secondary'}`}>
-                                        {s.observasi_count}/{s.target_observasi}
-                                      </span>
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                            {filteredTargetSchools.length === 0 && (
-                              <tr>
-                                <td colSpan={6} className="px-3 py-8 text-center text-text-secondary">
-                                  {targetSearch ? 'Tidak ada sekolah yang cocok.' : 'Belum ada data sekolah.'}
-                                </td>
-                              </tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-
-                    {/* Batch Save */}
-                    {targetSchools.some(s => s._edited) && (
-                      <div className="flex items-center justify-between p-3 rounded-xl bg-amber-50 border border-amber-200">
-                        <p className="text-[11px] text-amber-800 font-medium">
-                          <strong>{targetSchools.filter(s => s._edited).length}</strong> sekolah dengan perubahan target belum disimpan.
-                        </p>
-                        <button
-                          type="button"
-                          disabled={targetSaving}
-                          onClick={handleSaveBatchTarget}
-                          className="flex items-center gap-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:bg-amber-600/70 text-white px-4 py-2 font-bold shadow-md transition-all cursor-pointer text-[11px]"
-                        >
-                          {targetSaving ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                          <span>Simpan Perubahan</span>
-                        </button>
-                      </div>
-                    )}
-                  </>
                 )}
-              </div>
-            </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Field label="Nama lengkap" icon={<User className="h-4 w-4" />} required>
+                    <input value={profile.nama} onChange={e => setProfile({ ...profile, nama: e.target.value })} className={inputCls} placeholder="Nama lengkap" />
+                  </Field>
+                  <Field label="Email (login)" icon={<Mail className="h-4 w-4" />} hint="Email tidak dapat diubah">
+                    <input value={profile.email} disabled className={`${inputCls} bg-bg text-text-secondary cursor-not-allowed`} />
+                  </Field>
+                  <Field label="No. WhatsApp" icon={<Phone className="h-4 w-4" />}>
+                    <input value={profile.phone} inputMode="tel" onChange={e => setProfile({ ...profile, phone: e.target.value.replace(/[^\d+\s-]/g, '') })} className={inputCls} placeholder="08xxxxxxxxxx" />
+                  </Field>
+                  <Field label="Jabatan" icon={<Briefcase className="h-4 w-4" />}>
+                    <input value={profile.jabatan} onChange={e => setProfile({ ...profile, jabatan: e.target.value })} className={inputCls} placeholder={role === 'sekolah' ? 'Operator / Kepala Sekolah' : 'Jabatan'} />
+                  </Field>
+                  {role !== 'sekolah' && (
+                    <Field label="Instansi" icon={<Building2 className="h-4 w-4" />} className="md:col-span-2">
+                      <input value={profile.instansi} onChange={e => setProfile({ ...profile, instansi: e.target.value })} className={inputCls} placeholder="Nama instansi" />
+                    </Field>
+                  )}
+                </div>
+                <SaveBar saving={saving} label="Simpan Profil" submit />
+              </form>
+            </Panel>
           )}
 
+          {tab === 'security' && <SecurityPanel email={profile.email} />}
 
+          {tab === 'notif' && (
+            <Panel title="Notifikasi" desc="Pilih pemberitahuan yang ingin Anda terima.">
+              <div className="divide-y divide-border/60">
+                <Toggle checked={notif.instantAlert} onChange={v => setNotif({ ...notif, instantAlert: v })}
+                  title="Notifikasi instan" desc={role === 'admin' ? 'Saat sekolah selesai mengirim survei atau observasi baru masuk.' : 'Pemberitahuan langsung dari dinas di dalam aplikasi.'} />
+                <Toggle checked={notif.reminderEmail} onChange={v => setNotif({ ...notif, reminderEmail: v })}
+                  title="Email pengingat" desc={role === 'sekolah' ? 'Pengingat bila survei sekolah belum selesai.' : 'Pengingat tindak lanjut untuk sekolah yang belum mengisi.'} />
+                <Toggle checked={notif.weeklyReport} onChange={v => setNotif({ ...notif, weeklyReport: v })}
+                  title="Rekap mingguan" desc="Ringkasan progres pengisian & observasi setiap minggu via email." />
+                <Toggle checked={notif.systemUpdate} onChange={v => setNotif({ ...notif, systemUpdate: v })}
+                  title="Pembaruan sistem" desc="Informasi fitur baru dan pemeliharaan aplikasi." />
+              </div>
+              <SaveBar saving={saving} label="Simpan Notifikasi" onClick={() => savePreferences('Notifikasi')} />
+            </Panel>
+          )}
+
+          {tab === 'pref' && (
+            <Panel title="Preferensi" desc="Atur tampilan dan perilaku penyimpanan draft.">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <CustomSelect label="Bahasa" value={pref.language} onChange={v => setPref({ ...pref, language: v })}
+                  options={[{ value: 'id', label: 'Bahasa Indonesia' }, { value: 'en', label: 'English' }]} />
+                <CustomSelect label="Tema" value={pref.theme} onChange={v => setPref({ ...pref, theme: v })}
+                  options={[{ value: 'light', label: 'Terang' }, { value: 'dark', label: 'Gelap' }]} />
+                <div className="md:col-span-2 rounded-xl bg-bg border border-border p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold text-text-primary">Interval simpan draft otomatis</p>
+                      <p className="text-[11px] text-text-secondary">Seberapa sering draft form disimpan ke server (10–120 detik).</p>
+                    </div>
+                    <span className="text-lg font-black font-display text-primary tabular-nums">{pref.autoSaveInterval}s</span>
+                  </div>
+                  <input type="range" min={10} max={120} step={5} value={pref.autoSaveInterval}
+                    onChange={e => setPref({ ...pref, autoSaveInterval: Number(e.target.value) })}
+                    className="w-full mt-3 accent-[var(--color-primary)]" />
+                </div>
+              </div>
+              <SaveBar saving={saving} label="Simpan Preferensi" onClick={() => savePreferences('Preferensi')} />
+            </Panel>
+          )}
+
+          {tab === 'target' && role === 'admin' && <TargetPanel />}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Building blocks ─────────────────────────────────────────────────────────
+
+const inputCls = 'w-full h-11 rounded-xl border border-border bg-surface pl-10 pr-3 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary';
+
+function Panel({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-2xl bg-surface border border-border shadow-card p-5 sm:p-6 animate-fade-in">
+      <div className="mb-5 pb-4 border-b border-border">
+        <h2 className="text-base font-bold font-display text-text-primary">{title}</h2>
+        {desc && <p className="text-xs text-text-secondary mt-0.5">{desc}</p>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Field({ label, icon, children, hint, required, className = '' }: { label: string; icon: React.ReactNode; children: React.ReactNode; hint?: string; required?: boolean; className?: string }) {
+  return (
+    <label className={`block ${className}`}>
+      <span className="block text-xs font-semibold text-text-primary mb-1.5">{label}{required && <span className="text-status-belum ml-0.5">*</span>}</span>
+      <span className="relative block">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary pointer-events-none">{icon}</span>
+        {children}
+      </span>
+      {hint && <span className="block text-[10px] text-text-secondary mt-1">{hint}</span>}
+    </label>
+  );
+}
+
+function ReadItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-start gap-2 min-w-0">
+      <span className="p-1.5 rounded-lg bg-primary/10 text-primary shrink-0">{icon}</span>
+      <div className="min-w-0">
+        <p className="text-[10px] uppercase tracking-wide text-text-secondary font-semibold">{label}</p>
+        <p className="text-xs font-bold text-text-primary truncate">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+function SaveBar({ saving, label, onClick, submit }: { saving: boolean; label: string; onClick?: () => void; submit?: boolean }) {
+  return (
+    <div className="flex justify-end pt-5 mt-5 border-t border-border">
+      <button type={submit ? 'submit' : 'button'} onClick={onClick} disabled={saving}
+        className="w-full sm:w-auto inline-flex items-center justify-center gap-2 h-11 px-6 rounded-xl bg-primary hover:bg-primary-dark text-white text-sm font-bold shadow-sm disabled:opacity-60 cursor-pointer">
+        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} {label}
+      </button>
+    </div>
+  );
+}
+
+function Toggle({ checked, onChange, title, desc }: { checked: boolean; onChange: (v: boolean) => void; title: string; desc: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-4 first:pt-0">
+      <div>
+        <p className="text-sm font-semibold text-text-primary">{title}</p>
+        <p className="text-[11px] text-text-secondary mt-0.5 leading-relaxed">{desc}</p>
+      </div>
+      <button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition cursor-pointer ${checked ? 'bg-primary' : 'bg-border'}`}>
+        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${checked ? 'left-[22px]' : 'left-0.5'}`} />
+      </button>
+    </div>
+  );
+}
+
+// ─── Keamanan: ganti sandi via OTP email ────────────────────────────────────
+
+function strength(pwd: string) {
+  let s = 0;
+  if (pwd.length >= 6) s++;
+  if (pwd.length >= 10) s++;
+  if (/[A-Z]/.test(pwd)) s++;
+  if (/[0-9!@#$%^&*]/.test(pwd)) s++;
+  return [
+    { label: 'Kosong', color: 'bg-border', w: '0%' },
+    { label: 'Lemah', color: 'bg-status-belum', w: '25%' },
+    { label: 'Sedang', color: 'bg-status-sebagian', w: '50%' },
+    { label: 'Bagus', color: 'bg-indigo-500', w: '75%' },
+    { label: 'Sangat kuat', color: 'bg-status-sudah', w: '100%' },
+  ][pwd ? Math.max(s, 1) : 0];
+}
+
+function SecurityPanel({ email }: { email: string }) {
+  const [step, setStep] = useState<'input' | 'otp'>('input');
+  const [pwd, setPwd] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [otp, setOtp] = useState('');
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [timer, setTimer] = useState(0);
+  const st = strength(pwd);
+
+  useEffect(() => {
+    if (timer <= 0) return;
+    const t = setTimeout(() => setTimer(timer - 1), 1000);
+    return () => clearTimeout(t);
+  }, [timer]);
+
+  const requestOtp = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (pwd.length < 6) return notifyToast({ type: 'warning', title: 'Sandi terlalu pendek', message: 'Minimal 6 karakter.' });
+    if (pwd !== confirm) return notifyToast({ type: 'error', title: 'Tidak cocok', message: 'Konfirmasi kata sandi tidak sama.' });
+    setBusy(true);
+    try {
+      const res = await apiClient.auth.forgotPassword({ email });
+      if (!res?.success) throw new Error(res?.message);
+      setStep('otp');
+      setTimer(30);
+      notifyToast({ type: 'info', title: 'Kode OTP dikirim', message: `Cek inbox/spam ${email}.` });
+    } catch (err: any) {
+      notifyToast({ type: 'error', title: 'Gagal mengirim OTP', message: err?.message || 'Coba lagi beberapa saat.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (otp.trim().length < 6) return notifyToast({ type: 'warning', title: 'Kode belum lengkap', message: 'Masukkan 6 digit kode OTP.' });
+    setBusy(true);
+    try {
+      const res = await apiClient.auth.resetPassword({ email, otp_code: otp.trim(), new_password: pwd });
+      if (!res?.success) throw new Error(res?.message);
+      setStep('input'); setPwd(''); setConfirm(''); setOtp('');
+      notifyToast({ type: 'success', title: 'Kata sandi diperbarui', message: 'Gunakan sandi baru saat login berikutnya.' });
+    } catch (err: any) {
+      notifyToast({ type: 'error', title: 'Verifikasi gagal', message: err?.message || 'Kode OTP salah atau kedaluwarsa.' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Panel title="Keamanan Akun" desc="Kata sandi diganti setelah verifikasi kode OTP yang dikirim ke email akun Anda.">
+      <ol className="flex items-center gap-2 mb-6 text-[11px] font-bold">
+        {['Buat sandi baru', 'Verifikasi OTP'].map((l, i) => {
+          const active = (i === 0 && step === 'input') || (i === 1 && step === 'otp');
+          const done = i === 0 && step === 'otp';
+          return (
+            <li key={l} className="flex items-center gap-2">
+              <span className={`h-6 w-6 rounded-full flex items-center justify-center ${done ? 'bg-status-sudah text-white' : active ? 'bg-primary text-white' : 'bg-bg border border-border text-text-secondary'}`}>
+                {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : i + 1}
+              </span>
+              <span className={active || done ? 'text-text-primary' : 'text-text-secondary'}>{l}</span>
+              {i === 0 && <span className="w-8 h-px bg-border" />}
+            </li>
+          );
+        })}
+      </ol>
+
+      {step === 'input' ? (
+        <form onSubmit={requestOtp} className="space-y-4 max-w-md">
+          <Field label="Kata sandi baru" icon={<Lock className="h-4 w-4" />} required>
+            <input type={show ? 'text' : 'password'} value={pwd} onChange={e => setPwd(e.target.value)} className={`${inputCls} pr-10`} placeholder="Minimal 6 karakter" />
+            <button type="button" onClick={() => setShow(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary cursor-pointer">
+              {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </Field>
+          <div>
+            <div className="h-1.5 rounded-full bg-border/60 overflow-hidden"><div className={`h-full ${st.color} transition-all`} style={{ width: st.w }} /></div>
+            <p className="text-[10px] text-text-secondary mt-1">Kekuatan: <strong>{st.label}</strong> — gunakan huruf besar, angka/simbol, dan ≥10 karakter.</p>
+          </div>
+          <Field label="Ulangi kata sandi" icon={<Lock className="h-4 w-4" />} required>
+            <input type={show ? 'text' : 'password'} value={confirm} onChange={e => setConfirm(e.target.value)} className={inputCls} placeholder="Ketik ulang" />
+          </Field>
+          {confirm && pwd !== confirm && <p className="text-[11px] text-status-belum font-semibold">Konfirmasi belum sama.</p>}
+          <button type="submit" disabled={busy} className="w-full sm:w-auto inline-flex items-center justify-center gap-2 h-11 px-6 rounded-xl bg-primary text-white text-sm font-bold hover:bg-primary-dark disabled:opacity-60 cursor-pointer">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Kirim kode OTP ke email
+          </button>
+        </form>
+      ) : (
+        <form onSubmit={verify} className="space-y-4 max-w-md">
+          <p className="text-xs text-text-secondary">Kode 6 digit dikirim ke <strong className="text-text-primary">{email}</strong>.</p>
+          <input value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" autoFocus
+            className="w-full h-14 rounded-xl border border-border bg-surface text-center text-2xl font-black tracking-[0.6em] text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="••••••" />
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button type="submit" disabled={busy} className="flex-1 inline-flex items-center justify-center gap-2 h-11 rounded-xl bg-primary text-white text-sm font-bold hover:bg-primary-dark disabled:opacity-60 cursor-pointer">
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />} Verifikasi & simpan sandi
+            </button>
+            <button type="button" disabled={timer > 0 || busy} onClick={() => requestOtp()} className="h-11 px-4 rounded-xl bg-bg border border-border text-xs font-bold text-text-primary disabled:opacity-50 cursor-pointer">
+              {timer > 0 ? `Kirim ulang (${timer}s)` : 'Kirim ulang kode'}
+            </button>
+          </div>
+          <button type="button" onClick={() => setStep('input')} className="text-xs font-semibold text-text-secondary hover:text-text-primary inline-flex items-center gap-1 cursor-pointer">
+            <ArrowLeft className="h-3.5 w-3.5" /> Ubah kata sandi
+          </button>
+        </form>
+      )}
+    </Panel>
+  );
+}
+
+// ─── Target observasi (admin) ────────────────────────────────────────────────
+
+function TargetPanel() {
+  const [def, setDef] = useState(2);
+  const [applyAll, setApplyAll] = useState(false);
+  const [schools, setSchools] = useState<TargetSchool[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [q, setQ] = useState('');
+  const [page, setPage] = useState(1);
+  const perPage = 15;
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await apiClient.setting.getTargetObservasi();
+        setDef(res.data?.default_target || 2);
+        setSchools((res.data?.schools || []).map((s: any) => ({
+          id: s.id, npsn: s.npsn || '', nama: s.nama || '', target_observasi: Number(s.target_observasi || 2),
+          kecamatan: s.kecamatan || '', kabupaten: s.kabupaten || '', observasi_count: Number(s.observasi_count || 0),
+        })));
+      } catch (err: any) {
+        notifyToast({ type: 'error', title: 'Gagal memuat', message: err?.message || 'Data target tidak dapat dimuat.' });
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const filtered = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    return t ? schools.filter(s => s.nama.toLowerCase().includes(t) || s.npsn.includes(t) || s.kecamatan.toLowerCase().includes(t) || s.kabupaten.toLowerCase().includes(t)) : schools;
+  }, [schools, q]);
+  const pages = Math.max(1, Math.ceil(filtered.length / perPage));
+  const rows = filtered.slice((page - 1) * perPage, page * perPage);
+  const edited = schools.filter(s => s._edited);
+  const tercapai = schools.filter(s => s.observasi_count >= s.target_observasi).length;
+
+  const setTarget = (id: number, v: number) => setSchools(prev => prev.map(s => s.id === id ? { ...s, target_observasi: Math.min(Math.max(v, 1), 20), _edited: true } : s));
+
+  const saveDefault = async () => {
+    setSaving(true);
+    try {
+      const res = await apiClient.setting.updateTargetObservasi({ default_target: def, apply_to_all: applyAll });
+      if (!res?.success) throw new Error(res?.message);
+      if (applyAll) setSchools(prev => prev.map(s => ({ ...s, target_observasi: def, _edited: false })));
+      notifyToast({ type: 'success', title: 'Target default disimpan', message: res.message });
+    } catch (err: any) {
+      notifyToast({ type: 'error', title: 'Gagal', message: err?.message || 'Target gagal disimpan.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveBatch = async () => {
+    if (!edited.length) return;
+    setSaving(true);
+    try {
+      const res = await apiClient.setting.updateTargetObservasiBatch(edited.map(s => ({ sekolah_id: s.id, target: s.target_observasi })));
+      if (!res?.success) throw new Error(res?.message);
+      setSchools(prev => prev.map(s => ({ ...s, _edited: false })));
+      notifyToast({ type: 'success', title: 'Perubahan disimpan', message: res.message });
+    } catch (err: any) {
+      notifyToast({ type: 'error', title: 'Gagal', message: err?.message || 'Perubahan gagal disimpan.' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Panel title="Target Observasi SEL" desc="Jumlah sesi observasi yang ditargetkan untuk setiap sekolah.">
+      {loading ? <div className="py-10 flex justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div> : (
+        <div className="space-y-5">
+          <div className="grid grid-cols-3 gap-3">
+            <Mini label="Sekolah" value={schools.length} />
+            <Mini label="Target tercapai" value={tercapai} />
+            <Mini label="Belum tercapai" value={schools.length - tercapai} />
+          </div>
+
+          <div className="rounded-xl bg-bg border border-border p-4 flex flex-col md:flex-row md:items-center gap-4">
+            <div className="flex-1">
+              <p className="text-sm font-bold text-text-primary">Target default</p>
+              <p className="text-[11px] text-text-secondary">Dipakai untuk sekolah baru. Centang untuk menerapkan ke seluruh sekolah.</p>
+              <label className="mt-2 inline-flex items-center gap-2 text-xs text-text-primary cursor-pointer">
+                <input type="checkbox" checked={applyAll} onChange={e => setApplyAll(e.target.checked)} className="h-4 w-4 accent-[var(--color-primary)]" />
+                Terapkan ke semua sekolah
+              </label>
+            </div>
+            <div className="flex items-center gap-3">
+              <Stepper value={def} onChange={setDef} />
+              <button onClick={saveDefault} disabled={saving} className="h-10 px-4 rounded-xl bg-primary text-white text-xs font-bold hover:bg-primary-dark disabled:opacity-60 cursor-pointer">Simpan</button>
+            </div>
+          </div>
+
+          <div className="relative">
+            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
+            <input value={q} onChange={e => { setQ(e.target.value); setPage(1); }} placeholder="Cari sekolah, NPSN, kecamatan…"
+              className="w-full h-11 pl-10 pr-3 rounded-xl border border-border bg-surface text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+          </div>
+
+          <ul className="divide-y divide-border/60 rounded-xl border border-border">
+            {rows.map(s => {
+              const done = s.observasi_count >= s.target_observasi;
+              return (
+                <li key={s.id} className={`flex flex-col sm:flex-row sm:items-center gap-3 p-3 ${s._edited ? 'bg-primary/5' : ''}`}>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-text-primary truncate">{s.nama}</p>
+                    <p className="text-[10px] text-text-secondary">NPSN {s.npsn} • {s.kecamatan}, {s.kabupaten}</p>
+                  </div>
+                  <div className="flex items-center justify-between sm:justify-end gap-3">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${done ? 'bg-status-sudah/10 text-status-sudah' : 'bg-status-sebagian/10 text-status-sebagian'}`}>
+                      {s.observasi_count}/{s.target_observasi} sesi
+                    </span>
+                    <Stepper value={s.target_observasi} onChange={v => setTarget(s.id, v)} small />
+                  </div>
+                </li>
+              );
+            })}
+            {rows.length === 0 && <li className="p-6 text-center text-xs text-text-secondary">Tidak ada sekolah yang cocok.</li>}
+          </ul>
+
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-xs text-text-secondary">
+              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="h-8 px-3 rounded-lg border border-border disabled:opacity-40 cursor-pointer">Sebelumnya</button>
+              <span>{page} / {pages}</span>
+              <button onClick={() => setPage(p => Math.min(pages, p + 1))} disabled={page === pages} className="h-8 px-3 rounded-lg border border-border disabled:opacity-40 cursor-pointer">Berikutnya</button>
+            </div>
+            <button onClick={saveBatch} disabled={saving || !edited.length}
+              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 h-11 px-6 rounded-xl bg-primary text-white text-sm font-bold hover:bg-primary-dark disabled:opacity-50 cursor-pointer">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Simpan {edited.length ? `${edited.length} perubahan` : 'perubahan'}
+            </button>
+          </div>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function Mini({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl bg-bg border border-border p-3 text-center">
+      <p className="text-lg font-black font-display text-text-primary">{value.toLocaleString('id-ID')}</p>
+      <p className="text-[10px] text-text-secondary">{label}</p>
+    </div>
+  );
+}
+
+function Stepper({ value, onChange, small }: { value: number; onChange: (v: number) => void; small?: boolean }) {
+  const h = small ? 'h-8 w-8' : 'h-10 w-10';
+  return (
+    <div className="inline-flex items-center rounded-xl border border-border bg-surface overflow-hidden">
+      <button type="button" onClick={() => onChange(Math.max(1, value - 1))} className={`${h} flex items-center justify-center hover:bg-bg cursor-pointer`}><Minus className="h-3.5 w-3.5" /></button>
+      <span className={`${small ? 'w-8 text-xs' : 'w-10 text-sm'} text-center font-bold tabular-nums`}>{value}</span>
+      <button type="button" onClick={() => onChange(Math.min(20, value + 1))} className={`${h} flex items-center justify-center hover:bg-bg cursor-pointer`}><Plus className="h-3.5 w-3.5" /></button>
     </div>
   );
 }
