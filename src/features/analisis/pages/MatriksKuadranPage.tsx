@@ -8,12 +8,14 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { database, KABUPATEN_LIST, schoolsData } from '../../../shared/data/data-source';
+import { database, KABUPATEN_LIST, KABUPATEN_NAME_TO_ID } from '../../../shared/data/data-source';
 import type { MatrixPoint } from '../../../shared/data/data-source';
 import { ScatterChart, Scatter, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ZAxis } from 'recharts';
-import { Grid3X3, Building2, X, Search, Download } from 'lucide-react';
+import { Grid3X3, Building2, X, Search } from 'lucide-react';
 import AnimatedCounter from '../../../shared/components/AnimatedCounter';
-import { buildBsanCsvHeader, buildCsvRow, triggerDownload, safeFilename, dateStamp } from '../../../shared/utils/exportCSV';
+import ExportMenu from '../../../shared/components/ExportMenu';
+import { exportTable } from '../../../shared/utils/tableExport';
+import { buildMatriks } from '../../../shared/utils/reportBuilders';
 
 import CustomSelect from '../../../shared/components/CustomSelect';
 import ThreeDotsLoader from '../../../shared/components/ThreeDotsLoader';
@@ -101,52 +103,17 @@ export default function MatriksKuadran({ activeKecamatan }: MatriksKuadranProps)
               />
             </div>
 
-            <button
-              onClick={() => {
-                if (!matrixData.length) return;
-
-                const npsn = (nama: string): string => {
-                  const found = schoolsData.find(
-                    s => s.nama.toLowerCase().trim() === nama.toLowerCase().trim()
-                  );
-                  return found?.npsn || '';
-                };
-
-                const getKuadran = (p: MatrixPoint): string =>
-                  p.implementation >= 60 && p.readiness >= 60 ? 'Kuadran I — Mandiri'
-                  : p.implementation < 60 && p.readiness >= 60 ? 'Kuadran II — Potensial'
-                  : p.implementation >= 60 && p.readiness < 60 ? 'Kuadran III — Perlu Sarana'
-                  : 'Kuadran IV — Intervensi';
-
-                let csv = buildBsanCsvHeader({
-                  title: 'MATRIKS EVALUASI 4 KUADRAN BSAN',
-                  wilayah: selectedKab || 'Semua Wilayah',
-                  totalInfo: `Total Data: ${matrixData.length}`,
-                });
-
-                csv += buildCsvRow([
-                  'Timestamp', 'No.', 'NPSN', 'Nama Sekolah / Kecamatan',
-                  'Tingkat Kesiapan (%)', 'Tingkat Implementasi (%)',
-                  'Status', 'Kuadran',
-                ]) + '\n';
-                matrixData.forEach((p, i) => {
-                  const ts = new Date().toISOString().replace('T', ' ').substring(0, 19);
-                  csv += buildCsvRow([
-                    ts, i + 1, npsn(p.name), p.name,
-                    p.readiness, p.implementation,
-                    p.status, getKuadran(p),
-                  ]) + '\n';
-                });
-
-                const kab = safeFilename(selectedKab || 'SemuaWilayah');
-                triggerDownload(csv, `MatriksKuadran_BSAN_${kab}_${dateStamp()}.csv`);
-              }}
+            <ExportMenu
               disabled={isLoading || matrixData.length === 0}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap"
-            >
-              <Download className="h-4 w-4" />
-              <span>Ekspor CSV</span>
-            </button>
+              onExport={async (format) => {
+                const payload = await buildMatriks({
+                  kabupaten_id: selectedKab ? KABUPATEN_NAME_TO_ID[selectedKab] : undefined,
+                  kabupaten_nama: selectedKab || undefined,
+                  kecamatan: activeKecamatan || undefined,
+                });
+                exportTable(payload, format);
+              }}
+            />
           </div>
         </div>
       </div>

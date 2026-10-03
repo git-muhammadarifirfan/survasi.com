@@ -71,6 +71,19 @@ async function fetchJson<T>(endpoint: string, options?: RequestInit): Promise<T>
   return data as T;
 }
 
+/**
+ * Gabungkan endpoint dengan query string, mengabaikan nilai kosong.
+ * @example withQuery('/analisis/funnel', { kabupaten_id: 2, kecamatan: undefined }) → '/analisis/funnel?kabupaten_id=2'
+ */
+export function withQuery(endpoint: string, params?: Record<string, string | number | boolean | null | undefined>): string {
+  const qs = new URLSearchParams(
+    Object.entries(params || {})
+      .filter(([, v]) => v !== undefined && v !== null && v !== '')
+      .map(([k, v]) => [k, String(v)])
+  ).toString();
+  return qs ? `${endpoint}?${qs}` : endpoint;
+}
+
 type ApiResponse<T> = { success: boolean; data: T; message?: string };
 type ListResponse<T> = { success: boolean; data: T[]; total: number; page: number; limit: number };
 
@@ -426,7 +439,7 @@ export const apiClient = {
     getHistory: () =>
       fetchJson<ApiResponse<any[]>>('/laporan/history'),
 
-    generate: (options: { tipe: 'pdf' | 'excel' | 'docx'; filter?: any }) =>
+    generate: (options: { tipe: 'pdf' | 'excel' | 'docx' | 'csv'; filter?: any; nama_file?: string }) =>
       fetchJson<{ success: boolean; downloadUrl: string; reportId: number }>('/laporan/generate', {
         method: 'POST',
         body: JSON.stringify(options),
