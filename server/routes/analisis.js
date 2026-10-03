@@ -1,107 +1,63 @@
 'use strict';
 /**
  * @file routes/analisis.js
- * @description Analisis API endpoints (semua halaman chart/analitik)
+ * @description Analisis API endpoints (semua halaman chart/analitik).
+ *   Seluruh angka dihitung realtime dari database (responden_survey, jawaban_survey,
+ *   pertanyaan_survey, satuan_pendidikan, sel_*). Tidak ada nilai dummy/default.
+ *   Semua endpoint mendukung filter ?kabupaten_id= & ?kecamatan= / ?kecamatan_id=.
  *
- * GET /api/analisis/modul-progress   → Modul BSAN ring chart (base_rate + impl_rate + SEL score)
- * GET /api/analisis/modul-detail     → Detail dimensi SEL per modul
- * GET /api/analisis/proporsi         → Proporsi penerima modul (pie, stacked bar, dll)
- * GET /api/analisis/funnel           → Gap Funnel 5 tahap
+ * GET /api/analisis/modul-progress   → Progres capaian per modul (dari jawaban evaluatif)
+ * GET /api/analisis/modul-detail     → Skor dimensi SEL (observasi) per dimensi
+ * GET /api/analisis/proporsi         → Seluruh data halaman Proporsi Modul
+ * GET /api/analisis/funnel           → Gap Funnel 6 tahap + rincian per kecamatan
  * GET /api/analisis/matriks          → Matriks 4 kuadran per kecamatan
- * GET /api/analisis/tantangan        → Top tantangan implementasi
- * GET /api/analisis/timeseries       → Trend pengisian (time series)
+ * GET /api/analisis/tantangan        → Tantangan implementasi + narasi
+ * GET /api/analisis/frameworks       → 3 framework + progres modul di dalamnya
+ * GET /api/analisis/modul-breakdown  → Distribusi jawaban per pertanyaan per modul
  */
 
 const router = require('express').Router();
-const pool   = require('../db/pool');
+const pool = require('../db/pool');
 const { authMiddleware } = require('../middleware/auth');
+const {
+  parseFilter, wilayahWhere, loadResponses, computeModulBreakdown, computeProporsi,
+  narrativesForRole,
+} = require('../utils/analytics');
 
 router.use(authMiddleware);
+
+const fail = (res, tag, err) => {
+  console.error(`[Analisis] ${tag} error:`, err);
+  return res.status(500).json({ success: false, message: 'Gagal mengolah data analisis.' });
+};
 
 // ─── GET /api/analisis/modul-progress ────────────────────────────────────────
 router.get('/modul-progress', async (req, res) => {
   try {
-    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
-
-    // Base rate & impl rate
-    const [rateRows] = await pool.execute(`
-      SELECT
-        COUNT(*) AS total_responden,
-        ROUND(SUM(CASE WHEN rs.penerima_modul = 'Ya' THEN 1 ELSE 0 END) / COUNT(*) * 100, 1) AS base_rate,
-        ROUND(
-          (SUM(CASE WHEN rs.status_implementasi = 'sudah' THEN 1 ELSE 0 END) +
-           SUM(CASE WHEN rs.status_implementasi = 'sebagian' THEN 0.5 ELSE 0 END))
-          / COUNT(*) * 100, 1
-        ) AS impl_rate,
-        SUM(CASE WHEN rs.status_implementasi IN ('sudah','sebagian') THEN 1 ELSE 0 END) AS sudah_mengisi
-      FROM responden_survey rs
-      JOIN kabupaten kb ON rs.kabupaten_id = kb.id
-      WHERE (? IS NULL OR kb.id = ?)
-    `, [kabupatenId, kabupatenId]);
-
-    // SEL score per modul
-    const [selRows] = await pool.execute(`
-      SELECT
-        sd.modul_bsan_kode AS modul_kode,
-        mb.nama AS modul_nama,
-        mb.urutan,
-        ROUND(AVG(sjo.skor) / 4 * 100, 1) AS sel_score_persen
-      FROM sel_jawaban_observasi sjo
-      JOIN sel_indikator si ON sjo.indikator_id = si.id
-      JOIN sel_dimensi sd ON si.dimensi_id = sd.id
-      JOIN modul_bsan mb ON mb.kode = sd.modul_bsan_kode
-      JOIN sel_sesi_observasi sso ON sjo.sesi_id = sso.id
-      JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
-      JOIN kecamatan k ON sp.kecamatan_id = k.id
-      WHERE sjo.skor IS NOT NULL
-        AND (? IS NULL OR k.kabupaten_id = ?)
-      GROUP BY sd.modul_bsan_kode, mb.nama, mb.urutan
-      ORDER BY mb.urutan
-    `, [kabupatenId, kabupatenId]);
-
-    const { total_responden, base_rate, impl_rate, sudah_mengisi } = rateRows[0];
-
-    // Ambil semua modul BSAN sebagai fallback jika belum ada data SEL
-    const [modulRows] = await pool.execute(`SELECT kode, nama, urutan FROM modul_bsan WHERE is_active = 1 ORDER BY urutan`);
-
-    const selMap = {};
-    selRows.forEach(r => { selMap[r.modul_kode] = r.sel_score_persen || 0; });
-
-    const progress = modulRows.map(m => {
-      const selScore = selMap[m.kode] || 0;
-      // Formula: 40% base_rate + 30% impl_rate + 30% SEL score
-      const weight   = m.urutan === 1 ? { b: 0.40, i: 0.30, s: 0.30 }
-                     : m.urutan === 2 ? { b: 0.38, i: 0.32, s: 0.30 }
-                     : { b: 0.35, i: 0.35, s: 0.30 };
-      const progres  = Math.min(100, Math.round(
-        (base_rate || 0) * weight.b +
-        (impl_rate || 0) * weight.i +
-        selScore * weight.s
-      ));
-      return {
-        id:              m.kode,
-        nama:            m.nama,
-        progres,
-        totalPertanyaan: total_responden || 0,
-        terisi:          sudah_mengisi || 0,
-        selScore,
-        base_rate:       base_rate || 0,
-        impl_rate:       impl_rate || 0,
-      };
+    const { modules, totalResponden } = await computeModulBreakdown(parseFilter(req.query));
+    return res.json({
+      success: true,
+      data: modules.map(m => ({
+        id: m.kode,
+        modul_id: m.modul_id,
+        framework_key: m.framework_key,
+        nama: m.title,
+        progres: m.progres,
+        totalPertanyaan: m.questions.length,
+        terisi: m.total_responden,
+        totalResponden,
+      })),
     });
-
-    return res.json({ success: true, data: progress });
   } catch (err) {
-    console.error('[Analisis] modul-progress error:', err);
-    return res.status(500).json({ success: false, message: 'Server error.' });
+    return fail(res, 'modul-progress', err);
   }
 });
 
-// ─── GET /api/analisis/modul-detail ──────────────────────────────────────────
+// ─── GET /api/analisis/modul-detail (skor SEL per dimensi) ───────────────────
 router.get('/modul-detail', async (req, res) => {
   try {
-    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
-
+    const f = parseFilter(req.query);
+    const w = wilayahWhere(f);
     const [rows] = await pool.execute(`
       SELECT
         sd.kode AS dimensi_kode, sd.nama AS dimensi_nama, sd.modul_bsan_kode,
@@ -115,211 +71,203 @@ router.get('/modul-detail', async (req, res) => {
       JOIN sel_sesi_observasi sso ON sjo.sesi_id = sso.id
       JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
       JOIN kecamatan k ON sp.kecamatan_id = k.id
-      WHERE sjo.skor IS NOT NULL
-        AND (? IS NULL OR k.kabupaten_id = ?)
+      JOIN kabupaten kb ON k.kabupaten_id = kb.id
+      WHERE sjo.skor IS NOT NULL AND sso.deleted_at IS NULL ${w.sql}
       GROUP BY sd.id, sd.kode, sd.nama, sd.modul_bsan_kode
       ORDER BY sd.urutan
-    `, [kabupatenId, kabupatenId]);
-
+    `, w.params);
     return res.json({ success: true, data: rows });
   } catch (err) {
-    return res.status(500).json({ success: false, message: 'Server error.' });
+    return fail(res, 'modul-detail', err);
   }
 });
 
 // ─── GET /api/analisis/proporsi ──────────────────────────────────────────────
 router.get('/proporsi', async (req, res) => {
   try {
-    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
-
-    const [pieRows] = await pool.execute(`
-      SELECT penerima_modul, COUNT(*) AS jumlah,
-        ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 1) AS persen
-      FROM responden_survey rs
-      WHERE (? IS NULL OR rs.kabupaten_id = ?)
-      GROUP BY penerima_modul
-    `, [kabupatenId, kabupatenId]);
-
-    const [distribusiRows] = await pool.execute(`
-      SELECT k.nama AS kecamatan, COUNT(*) AS total,
-        ROUND(SUM(CASE WHEN rs.penerima_modul = 'Ya' THEN 1 ELSE 0 END) / COUNT(*) * 100, 0) AS ya_persen,
-        ROUND(SUM(CASE WHEN rs.penerima_modul = 'Tidak' THEN 1 ELSE 0 END) / COUNT(*) * 100, 0) AS tidak_persen
-      FROM responden_survey rs
-      JOIN kecamatan k ON rs.kecamatan_id = k.id
-      WHERE (? IS NULL OR rs.kabupaten_id = ?)
-      GROUP BY k.id, k.nama ORDER BY ya_persen DESC
-    `, [kabupatenId, kabupatenId]);
-
-    const [posisiRows] = await pool.execute(`
-      SELECT rs.posisi, COUNT(*) AS total,
-        ROUND(SUM(CASE WHEN rs.penerima_modul = 'Tidak' THEN 1 ELSE 0 END) / COUNT(*) * 100, 0) AS belum_menerima,
-        ROUND(SUM(CASE WHEN rs.status_implementasi IS NULL AND rs.penerima_modul = 'Ya' THEN 1 ELSE 0 END) / COUNT(*) * 100, 0) AS tidak_menerapkan,
-        ROUND(SUM(CASE WHEN rs.status_implementasi = 'sebagian' THEN 1 ELSE 0 END) / COUNT(*) * 100, 0) AS sebagian,
-        ROUND(SUM(CASE WHEN rs.status_implementasi = 'sudah' THEN 1 ELSE 0 END) / COUNT(*) * 100, 0) AS sudah
-      FROM responden_survey rs
-      WHERE (? IS NULL OR rs.kabupaten_id = ?)
-      GROUP BY rs.posisi ORDER BY sudah DESC
-    `, [kabupatenId, kabupatenId]);
-
-    const [kecamatanRows] = await pool.execute(`
-      SELECT k.nama AS kecamatan, COUNT(*) AS total,
-        ROUND(SUM(CASE WHEN rs.penerima_modul = 'Tidak' THEN 1 ELSE 0 END) / COUNT(*) * 100, 0) AS belum_menerima,
-        ROUND(SUM(CASE WHEN rs.status_implementasi IS NULL AND rs.penerima_modul = 'Ya' THEN 1 ELSE 0 END) / COUNT(*) * 100, 0) AS tidak_menerapkan,
-        ROUND(SUM(CASE WHEN rs.status_implementasi = 'sebagian' THEN 1 ELSE 0 END) / COUNT(*) * 100, 0) AS sebagian,
-        ROUND(SUM(CASE WHEN rs.status_implementasi = 'sudah' THEN 1 ELSE 0 END) / COUNT(*) * 100, 0) AS sudah
-      FROM responden_survey rs
-      JOIN kecamatan k ON rs.kecamatan_id = k.id
-      WHERE (? IS NULL OR rs.kabupaten_id = ?)
-      GROUP BY k.id, k.nama ORDER BY sudah DESC
-    `, [kabupatenId, kabupatenId]);
-
-    return res.json({
-      success: true,
-      data: {
-        proporsiPenerima:           pieRows,
-        distribusiPerKecamatan:     distribusiRows,
-        statusImplementasiPosisi:   posisiRows,
-        statusImplementasiKecamatan: kecamatanRows,
-      }
-    });
+    const data = await computeProporsi(parseFilter(req.query));
+    return res.json({ success: true, data });
   } catch (err) {
-    console.error('[Analisis] proporsi error:', err);
-    return res.status(500).json({ success: false, message: 'Server error.' });
+    return fail(res, 'proporsi', err);
   }
 });
 
 // ─── GET /api/analisis/funnel ─────────────────────────────────────────────────
 router.get('/funnel', async (req, res) => {
   try {
-    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
+    const f = parseFilter(req.query);
+    const w = wilayahWhere(f);
 
+    // Satu baris per sekolah sasaran dengan indikator tiap tahap funnel
     const [rows] = await pool.execute(`
       SELECT
-        COUNT(*) AS total_sasaran,
-        SUM(CASE WHEN sp.status_pengisian IN ('sudah', 'sebagian') THEN 1 ELSE 0 END) AS mengisi,
-        (SELECT COUNT(DISTINCT rs.sekolah_id) FROM responden_survey rs
-          JOIN kecamatan k2 ON rs.kecamatan_id = k2.id
-          WHERE rs.penerima_modul = 'Ya' AND (? IS NULL OR k2.kabupaten_id = ?)
-        ) AS menerima_modul,
-        (SELECT COUNT(DISTINCT rs.sekolah_id) FROM responden_survey rs
-          JOIN kecamatan k3 ON rs.kecamatan_id = k3.id
-          WHERE rs.status_implementasi IN ('sudah', 'sebagian') AND (? IS NULL OR k3.kabupaten_id = ?)
-        ) AS implementasi,
-        (SELECT COUNT(DISTINCT rs.sekolah_id) FROM responden_survey rs
-          JOIN kecamatan k4 ON rs.kecamatan_id = k4.id
-          WHERE rs.status_implementasi = 'sudah' AND (? IS NULL OR k4.kabupaten_id = ?)
-        ) AS implementasi_penuh
+        sp.id, k.nama AS kecamatan, kb.nama AS kabupaten,
+        sp.status_pengisian IN ('sebagian','sudah') AS mulai,
+        (sp.status_pengisian = 'sudah' OR COUNT(rs.id) > 0) AS selesai,
+        MAX(rs.penerima_modul = 'Ya') AS menerima,
+        MAX(rs.penerima_modul = 'Ya' AND rs.status_implementasi IN ('sudah','sebagian')) AS implementasi,
+        MAX(rs.penerima_modul = 'Ya' AND rs.status_implementasi = 'sudah') AS penuh
       FROM satuan_pendidikan sp
       JOIN kecamatan k ON sp.kecamatan_id = k.id
-      WHERE (? IS NULL OR k.kabupaten_id = ?)
-    `, [kabupatenId, kabupatenId, kabupatenId, kabupatenId, kabupatenId, kabupatenId, kabupatenId, kabupatenId]);
+      JOIN kabupaten kb ON k.kabupaten_id = kb.id
+      LEFT JOIN responden_survey rs ON rs.sekolah_id = sp.id AND rs.deleted_at IS NULL
+      WHERE sp.deleted_at IS NULL ${w.sql}
+      GROUP BY sp.id, k.nama, kb.nama, sp.status_pengisian
+    `, w.params);
 
-    const r = rows[0];
-    const total = r.total_sasaran || 0;
-    const pct   = (n) => total > 0 ? Math.round(n / total * 100) : 0;
-
-    const funnel = [
-      { name: 'Total Sasaran Sekolah',       schools: total,                 percentage: 100 },
-      { name: 'Mengisi Survei (Aktif)',       schools: r.mengisi,             percentage: pct(r.mengisi) },
-      { name: 'Menerima Modul BSAN',          schools: r.menerima_modul,      percentage: pct(r.menerima_modul) },
-      { name: 'Mengimplementasikan (Sebagian/Penuh)', schools: r.implementasi,percentage: pct(r.implementasi) },
-      { name: 'Implementasi Penuh',           schools: r.implementasi_penuh,  percentage: pct(r.implementasi_penuh) },
+    const STAGES = [
+      { key: 'total', name: 'Total Sekolah Sasaran' },
+      { key: 'mulai', name: 'Mulai Mengisi (Proses + Selesai)' },
+      { key: 'selesai', name: 'Selesai Mengirim Survei' },
+      { key: 'menerima', name: 'Menerima Modul BSAN' },
+      { key: 'implementasi', name: 'Mengimplementasikan (Sebagian/Penuh)' },
+      { key: 'penuh', name: 'Implementasi Penuh' },
     ];
+    const count = (list, key) => key === 'total' ? list.length : list.filter(r => Number(r[key]) === 1).length;
 
-    return res.json({ success: true, data: funnel });
+    const total = rows.length;
+    const funnel = STAGES.map((s, i) => {
+      const n = count(rows, s.key);
+      const prev = i > 0 ? count(rows, STAGES[i - 1].key) : n;
+      return {
+        key: s.key,
+        name: s.name,
+        schools: n,
+        percentage: total ? Math.round((n / total) * 1000) / 10 : 0,
+        dropOff: i > 0 && prev > 0 ? Math.round(((prev - n) / prev) * 1000) / 10 : 0,
+      };
+    });
+
+    const byKec = new Map();
+    for (const r of rows) {
+      if (!byKec.has(r.kecamatan)) byKec.set(r.kecamatan, { kecamatan: r.kecamatan, kabupaten: r.kabupaten, rows: [] });
+      byKec.get(r.kecamatan).rows.push(r);
+    }
+    const perKecamatan = [...byKec.values()].map(g => {
+      const o = { kecamatan: g.kecamatan, kabupaten: g.kabupaten };
+      STAGES.forEach(s => { o[s.key] = count(g.rows, s.key); });
+      o.konversi = o.total ? Math.round((o.selesai / o.total) * 1000) / 10 : 0;
+      return o;
+    }).sort((a, b) => a.konversi - b.konversi || b.total - a.total);
+
+    return res.json({ success: true, data: funnel, perKecamatan, totalSasaran: total });
   } catch (err) {
-    console.error('[Analisis] funnel error:', err);
-    return res.status(500).json({ success: false, message: 'Server error.' });
+    return fail(res, 'funnel', err);
   }
 });
 
 // ─── GET /api/analisis/matriks ────────────────────────────────────────────────
 router.get('/matriks', async (req, res) => {
   try {
-    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
-
+    const f = parseFilter(req.query);
+    const w = wilayahWhere(f);
     const [rows] = await pool.execute(`
       SELECT
         k.nama AS kecamatan, kb.nama AS kabupaten,
         COUNT(*) AS total_responden,
-        ROUND(SUM(CASE WHEN rs.penerima_modul = 'Ya' THEN 1 ELSE 0 END) / COUNT(*) * 100, 1) AS penerimaan_persen,
-        ROUND(
-          (SUM(CASE WHEN rs.status_implementasi = 'sudah' THEN 1 ELSE 0 END) +
-           SUM(CASE WHEN rs.status_implementasi = 'sebagian' THEN 0.5 ELSE 0 END))
-          / NULLIF(SUM(CASE WHEN rs.penerima_modul = 'Ya' THEN 1 ELSE 0 END), 0) * 100, 1
-        ) AS implementasi_persen,
+        ROUND(SUM(rs.penerima_modul = 'Ya') / COUNT(*) * 100, 1) AS penerimaan_persen,
+        COALESCE(ROUND(
+          (SUM(rs.penerima_modul = 'Ya' AND rs.status_implementasi = 'sudah') +
+           SUM(rs.penerima_modul = 'Ya' AND rs.status_implementasi = 'sebagian') * 0.5)
+          / NULLIF(SUM(rs.penerima_modul = 'Ya'), 0) * 100, 1
+        ), 0) AS implementasi_persen,
         COUNT(DISTINCT rs.sekolah_id) AS jumlah_sekolah
       FROM responden_survey rs
-      JOIN kecamatan k ON rs.kecamatan_id = k.id
-      JOIN kabupaten kb ON rs.kabupaten_id = kb.id
-      WHERE (? IS NULL OR kb.id = ?)
+      JOIN satuan_pendidikan sp ON rs.sekolah_id = sp.id
+      JOIN kecamatan k ON sp.kecamatan_id = k.id
+      JOIN kabupaten kb ON k.kabupaten_id = kb.id
+      WHERE rs.deleted_at IS NULL AND sp.deleted_at IS NULL ${w.sql}
       GROUP BY k.id, k.nama, kb.nama
-      HAVING total_responden > 0
       ORDER BY penerimaan_persen DESC
-    `, [kabupatenId, kabupatenId]);
-
+    `, w.params);
     return res.json({ success: true, data: rows });
   } catch (err) {
-    console.error('[Analisis] matriks error:', err);
-    return res.status(500).json({ success: false, message: 'Server error.' });
+    return fail(res, 'matriks', err);
   }
 });
 
 // ─── GET /api/analisis/tantangan ─────────────────────────────────────────────
 router.get('/tantangan', async (req, res) => {
   try {
-    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
-
+    const f = parseFilter(req.query);
+    const w = wilayahWhere(f);
     const [rows] = await pool.execute(`
-      SELECT
-        ti.kategori,
-        COUNT(*) AS jumlah,
+      SELECT ti.kategori, COUNT(*) AS jumlah,
         ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 1) AS persen
       FROM tantangan_implementasi ti
       JOIN satuan_pendidikan sp ON ti.sekolah_id = sp.id
       JOIN kecamatan k ON sp.kecamatan_id = k.id
-      WHERE (? IS NULL OR k.kabupaten_id = ?)
+      JOIN kabupaten kb ON k.kabupaten_id = kb.id
+      WHERE ti.deleted_at IS NULL AND sp.deleted_at IS NULL ${w.sql}
       GROUP BY ti.kategori
       ORDER BY jumlah DESC
-    `, [kabupatenId, kabupatenId]);
+    `, w.params);
 
-    // Fallback: jika tabel tantangan_implementasi kosong, gunakan data dari jawaban_survey Q34
-    if (rows.length === 0) {
-      const [narrativeRows] = await pool.execute(`
-        SELECT
-          rs.nama AS responden, sp.nama AS sekolah,
-          k.nama AS kecamatan, js.jawaban_bebas AS narasi_tantangan
-        FROM jawaban_survey js
-        JOIN pertanyaan_survey ps ON js.pertanyaan_id = ps.id
-        JOIN responden_survey rs ON js.responden_id = rs.id
-        JOIN satuan_pendidikan sp ON rs.sekolah_id = sp.id
-        JOIN kecamatan k ON rs.kecamatan_id = k.id
-        WHERE ps.kode_pertanyaan = 'Q34'
-          AND js.jawaban_bebas IS NOT NULL
-          AND TRIM(js.jawaban_bebas) != ''
-          AND (? IS NULL OR k.kabupaten_id = ?)
-        ORDER BY k.nama, sp.nama
-        LIMIT 50
-      `, [kabupatenId, kabupatenId]);
-      return res.json({ success: true, data: rows, narratives: narrativeRows });
-    }
-
-    // Narasi Q34
-    const [narrativeRows] = await pool.execute(`
-      SELECT rs.nama AS responden, sp.nama AS sekolah, k.nama AS kecamatan, js.jawaban_bebas AS narasi_tantangan
-      FROM jawaban_survey js JOIN pertanyaan_survey ps ON js.pertanyaan_id = ps.id
-      JOIN responden_survey rs ON js.responden_id = rs.id
-      JOIN satuan_pendidikan sp ON rs.sekolah_id = sp.id
-      JOIN kecamatan k ON rs.kecamatan_id = k.id
-      WHERE ps.kode_pertanyaan = 'Q34' AND js.jawaban_bebas IS NOT NULL AND TRIM(js.jawaban_bebas) != ''
-        AND (? IS NULL OR k.kabupaten_id = ?)
-      ORDER BY k.nama, sp.nama LIMIT 50
-    `, [kabupatenId, kabupatenId]);
-
-    return res.json({ success: true, data: rows, narratives: narrativeRows });
+    const data = await loadResponses(f);
+    const narratives = narrativesForRole(data, 'tantangan', 100).map(n => ({
+      responden: n.responden, sekolah: n.sekolah, kecamatan: n.kecamatan, narasi_tantangan: n.teks,
+    }));
+    return res.json({ success: true, data: rows, narratives });
   } catch (err) {
-    console.error('[Analisis] tantangan error:', err);
-    return res.status(500).json({ success: false, message: 'Server error.' });
+    return fail(res, 'tantangan', err);
+  }
+});
+
+// ─── GET /api/analisis/frameworks ─────────────────────────────────────────────
+router.get('/frameworks', async (req, res) => {
+  try {
+    const [frameworkRows] = await pool.execute(
+      `SELECT id, framework_key, nama, nama_id, subtitle, subtitle_id, deskripsi, warna, ikon, urutan
+       FROM bsan_frameworks WHERE is_active = 1 ORDER BY urutan ASC`
+    );
+    const [modulMeta] = await pool.execute(
+      `SELECT id, nama_en, subtitle, subtitle_en, warna, ikon FROM modul_bsan WHERE is_active = 1`
+    );
+    const metaById = new Map(modulMeta.map(m => [m.id, m]));
+    const { modules, totalResponden } = await computeModulBreakdown(parseFilter(req.query));
+
+    const data = frameworkRows.map(fw => {
+      const mods = modules.filter(m => m.framework_key === fw.framework_key);
+      // Progres framework = rata-rata tertimbang jumlah jawaban evaluatif tiap modul
+      const weight = mods.reduce((s, m) => s + m.jumlah_jawaban_evaluatif, 0);
+      const progres = weight
+        ? Math.round(mods.reduce((s, m) => s + m.progres * m.jumlah_jawaban_evaluatif, 0) / weight)
+        : 0;
+      return {
+        ...fw,
+        progres,
+        total_responden: totalResponden,
+        modules: mods.map(m => ({
+          id: m.modul_id, kode: m.kode, nama: m.title, framework_key: m.framework_key,
+          progres: m.progres, total_responden: m.total_responden,
+          ...(metaById.get(m.modul_id) || {}),
+        })),
+      };
+    });
+    return res.json({ success: true, data });
+  } catch (err) {
+    return fail(res, 'frameworks', err);
+  }
+});
+
+// ─── GET /api/analisis/modul-breakdown ───────────────────────────────────────
+router.get('/modul-breakdown', async (req, res) => {
+  try {
+    const targetModulId = req.query.modul_id ? parseInt(req.query.modul_id, 10) : null;
+    const { modules, totalResponden } = await computeModulBreakdown(parseFilter(req.query));
+
+    const result = {};
+    modules
+      .filter(m => !targetModulId || m.modul_id === targetModulId)
+      .forEach(m => {
+        const obj = { ...m, progres: `${m.progres}%`, progres_num: m.progres };
+        result[m.modul_id] = obj;
+        result[m.kode] = obj;
+      });
+
+    return res.json({ success: true, data: result, totalResponden });
+  } catch (err) {
+    return fail(res, 'modul-breakdown', err);
   }
 });
 

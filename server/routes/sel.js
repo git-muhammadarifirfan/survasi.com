@@ -16,8 +16,10 @@
  */
 
 const router = require('express').Router();
-const pool   = require('../db/pool');
+const pool = require('../db/pool');
 const { authMiddleware, adminOnly } = require('../middleware/auth');
+const { computeSchoolScores } = require('../utils/analytics');
+const { submitLimiter } = require('../middleware/rateLimiter');
 
 router.use(authMiddleware);
 
@@ -26,7 +28,7 @@ router.get('/indikator', async (req, res) => {
   try {
     const [rows] = await pool.execute(`
       SELECT
-        si.id, si.kode, si.deskripsi, si.subjek,
+        si.id, si.kode, si.teks, si.subjek, si.konteks, si.catatan,
         sd.id AS dimensi_id, sd.kode AS dimensi_kode,
         sd.nama AS dimensi_nama, sd.modul_bsan_kode,
         si.urutan, si.is_active
@@ -41,13 +43,153 @@ router.get('/indikator', async (req, res) => {
   }
 });
 
+// ─── GET /api/sel/konteks (Fetch options per kategori or all) ─────────────────
+router.get('/konteks', async (req, res) => {
+  try {
+    const { kategori, all } = req.query;
+    let sql = `SELECT * FROM sel_konteks_options WHERE 1=1`;
+    const params = [];
+
+    if (all !== 'true') {
+      sql += ` AND is_active = 1`;
+    }
+    if (kategori) {
+      sql += ` AND kategori = ?`;
+      params.push(kategori);
+    }
+    sql += ` ORDER BY kategori, urutan ASC`;
+
+    const [rows] = await pool.execute(sql, params);
+    return res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error('[SEL] fetch konteks options error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── POST /api/sel/konteks (Admin: Tambah Opsi Konteks) ──────────────────────
+router.post('/konteks', adminOnly, async (req, res) => {
+  try {
+    const { kategori, label, value_code, urutan } = req.body;
+    if (!kategori || !label) {
+      return res.status(400).json({ success: false, message: 'Kategori dan label wajib diisi.' });
+    }
+    const valCode = value_code || label;
+    const [result] = await pool.execute(
+      `INSERT INTO sel_konteks_options (kategori, label, value_code, urutan, is_active) VALUES (?, ?, ?, ?, 1)`,
+      [kategori, label, valCode, urutan || 99]
+    );
+    return res.status(201).json({ success: true, message: 'Opsi konteks berhasil ditambahkan.', id: result.insertId });
+  } catch (err) {
+    console.error('[SEL] add konteks error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── PUT /api/sel/konteks/:id (Admin: Edit Opsi Konteks) ──────────────────────
+router.put('/konteks/:id', adminOnly, async (req, res) => {
+  try {
+    const { kategori, label, value_code, urutan, is_active } = req.body;
+    await pool.execute(
+      `UPDATE sel_konteks_options 
+       SET kategori = COALESCE(?, kategori), 
+           label = COALESCE(?, label), 
+           value_code = COALESCE(?, value_code), 
+           urutan = COALESCE(?, urutan), 
+           is_active = COALESCE(?, is_active) 
+       WHERE id = ?`,
+      [
+        kategori || null,
+        label || null,
+        value_code || null,
+        urutan !== undefined ? urutan : null,
+        is_active !== undefined ? is_active : null,
+        req.params.id
+      ]
+    );
+    return res.json({ success: true, message: 'Opsi konteks berhasil diperbarui.' });
+  } catch (err) {
+    console.error('[SEL] update konteks error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── PUT /api/sel/konteks/reorder (Admin: Reorder Opsi Konteks) ───────────────
+router.put('/konteks/reorder', adminOnly, async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    const { items } = req.body; // array of { id: number, urutan: number }
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ success: false, message: 'Format data reorder tidak valid.' });
+    }
+
+    await conn.beginTransaction();
+    for (const item of items) {
+      await conn.execute(
+        `UPDATE sel_konteks_options SET urutan = ? WHERE id = ?`,
+        [item.urutan, item.id]
+      );
+    }
+    await conn.commit();
+    return res.json({ success: true, message: 'Urutan opsi konteks berhasil disimpan.' });
+  } catch (err) {
+    await conn.rollback();
+    console.error('[SEL] reorder konteks error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal mengubah urutan opsi konteks.' });
+  } finally {
+    conn.release();
+  }
+});
+
+// ─── DELETE /api/sel/konteks/:id (Admin: Hapus Opsi Konteks) ──────────────────
+router.delete('/konteks/:id', adminOnly, async (req, res) => {
+  try {
+    await pool.execute(`DELETE FROM sel_konteks_options WHERE id = ?`, [req.params.id]);
+    return res.json({ success: true, message: 'Opsi konteks berhasil dihapus.' });
+  } catch (err) {
+    console.error('[SEL] delete konteks error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── GET /api/sel/dimensi (List all dimensions) ──────────────────────────────
+router.get('/dimensi', async (req, res) => {
+  try {
+    const [rows] = await pool.execute(`SELECT * FROM sel_dimensi ORDER BY urutan, id ASC`);
+    return res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error('[SEL] fetch dimensi error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── POST /api/sel/dimensi (Tambah Dimensi SEL Baru - Admin Only) ────────────
+router.post('/dimensi', adminOnly, async (req, res) => {
+  try {
+    const { kode, nama, modul_bsan_kode, urutan } = req.body;
+    if (!nama) {
+      return res.status(400).json({ success: false, message: 'Nama dimensi wajib diisi.' });
+    }
+    const dimKode = kode || nama.toLowerCase().replace(/\s+/g, '_');
+    const [result] = await pool.execute(
+      `INSERT INTO sel_dimensi (kode, nama, modul_bsan_kode, urutan) VALUES (?, ?, ?, ?)`,
+      [dimKode, nama, modul_bsan_kode || 'with_myself', urutan || 99]
+    );
+    return res.status(201).json({ success: true, message: 'Dimensi SEL berhasil disimpan.', id: result.insertId, kode: dimKode });
+  } catch (err) {
+    console.error('[SEL] add dimensi error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal menambah dimensi SEL ke MySQL.' });
+  }
+});
+
 // ─── POST /api/sel/indikator ─────────────────────────────────────────────────
 router.post('/indikator', adminOnly, async (req, res) => {
   try {
-    const { kode, deskripsi, subjek, dimensi_id, urutan } = req.body;
+    const { kode, deskripsi, teks, subjek, konteks, catatan, dimensi_id, urutan } = req.body;
+    const teksVal = deskripsi || teks;
     const [result] = await pool.execute(
-      `INSERT INTO sel_indikator (kode, deskripsi, subjek, dimensi_id, urutan) VALUES (?, ?, ?, ?, ?)`,
-      [kode, deskripsi, subjek, dimensi_id, urutan || 0]
+      `INSERT INTO sel_indikator (kode, teks, subjek, konteks, catatan, dimensi_id, urutan) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [kode, teksVal, subjek, konteks || 'kelas', catatan || null, dimensi_id || 1, urutan || 0]
     );
     return res.status(201).json({ success: true, id: result.insertId });
   } catch (err) {
@@ -56,84 +198,242 @@ router.post('/indikator', adminOnly, async (req, res) => {
   }
 });
 
+// ─── PUT /api/sel/indikator/reorder ──────────────────────────────────────────
+router.put('/indikator/reorder', adminOnly, async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    const { items } = req.body; // array of { id: number | string, urutan: number }
+    if (!Array.isArray(items)) {
+      return res.status(400).json({ success: false, message: 'Format data reorder tidak valid.' });
+    }
+
+    await conn.beginTransaction();
+    for (const item of items) {
+      await conn.execute(
+        `UPDATE sel_indikator SET urutan = ? WHERE id = ?`,
+        [item.urutan, item.id]
+      );
+    }
+    await conn.commit();
+    return res.json({ success: true, message: 'Urutan indikator SEL berhasil disimpan.' });
+  } catch (err) {
+    await conn.rollback();
+    console.error('[SEL] reorder error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal mengubah urutan indikator.' });
+  } finally {
+    conn.release();
+  }
+});
+
 // ─── PUT /api/sel/indikator/:id ──────────────────────────────────────────────
 router.put('/indikator/:id', adminOnly, async (req, res) => {
   try {
-    const { kode, deskripsi, subjek, dimensi_id, urutan, is_active } = req.body;
+    const { kode, deskripsi, teks, subjek, konteks, catatan, dimensi_id, urutan, is_active } = req.body;
+    const teksVal = deskripsi || teks;
     await pool.execute(
-      `UPDATE sel_indikator SET kode=?, deskripsi=?, subjek=?, dimensi_id=?, urutan=?, is_active=? WHERE id=?`,
-      [kode, deskripsi, subjek, dimensi_id, urutan, is_active !== undefined ? is_active : 1, req.params.id]
+      `UPDATE sel_indikator 
+       SET kode = COALESCE(?, kode), 
+           teks = COALESCE(?, teks), 
+           subjek = COALESCE(?, subjek), 
+           konteks = COALESCE(?, konteks), 
+           catatan = ?, 
+           dimensi_id = COALESCE(?, dimensi_id), 
+           urutan = CASE WHEN ? IS NOT NULL AND ? > 0 THEN ? ELSE urutan END, 
+           is_active = COALESCE(?, is_active) 
+       WHERE id = ?`,
+      [
+        kode || null,
+        teksVal || null,
+        subjek || null,
+        konteks || null,
+        catatan || null,
+        dimensi_id || null,
+        urutan !== undefined ? urutan : null,
+        urutan !== undefined ? urutan : null,
+        urutan !== undefined ? urutan : null,
+        is_active !== undefined ? is_active : null,
+        req.params.id
+      ]
     );
     return res.json({ success: true });
+  } catch (err) {
+    console.error('[SEL] update error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── DELETE /api/sel/indikator/:id (Soft Delete) ───────────────────────────
+router.delete('/indikator/:id', adminOnly, async (req, res) => {
+  try {
+    // Soft delete: set is_active = 0 and deleted_at = CURRENT_TIMESTAMP
+    await pool.execute(`UPDATE sel_indikator SET is_active = 0, deleted_at = CURRENT_TIMESTAMP WHERE id = ?`, [req.params.id]);
+    return res.json({ success: true, message: 'Indikator SEL berhasil dihapus (soft delete).' });
   } catch (err) {
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
 
-// ─── DELETE /api/sel/indikator/:id ───────────────────────────────────────────
-router.delete('/indikator/:id', adminOnly, async (req, res) => {
+// ─── POST /api/sel/indikator/:id/restore (Restore Indikator) ─────────────────
+router.post('/indikator/:id/restore', adminOnly, async (req, res) => {
   try {
-    // Soft delete: set is_active = 0
-    await pool.execute(`UPDATE sel_indikator SET is_active = 0 WHERE id = ?`, [req.params.id]);
-    return res.json({ success: true });
+    await pool.execute(`UPDATE sel_indikator SET is_active = 1, deleted_at = NULL WHERE id = ?`, [req.params.id]);
+    return res.json({ success: true, message: 'Indikator SEL berhasil dipulihkan (restore).' });
   } catch (err) {
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
 
 // ─── POST /api/sel/sesi ───────────────────────────────────────────────────────
-router.post('/sesi', async (req, res) => {
+router.post('/sesi', submitLimiter, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
 
     const {
-      sekolah_id, tanggal_observasi, observer_nama,
+      sekolah_id, sekolah_nama, kecamatan, kabupaten, tanggal, tanggal_observasi, observer_nama,
       lokasi_diamati, waktu_pengamatan,
       jumlah_siswa_l, jumlah_siswa_p,
       siswa_disabilitas_l, siswa_disabilitas_p,
-      jangkauan_siswa, kelas_diamati,
-      nama_guru_inisial, jenis_kelamin_guru,
+      jangkauan_siswa, jumlah_siswa_sebagian_kecil, kelas_diamati,
+      guru_inisial, nama_guru_inisial,
+      guru_jk, jenis_kelamin_guru,
       mata_pelajaran, jawaban,
     } = req.body;
+
+    let sekolahId = sekolah_id ? parseInt(sekolah_id) : (req.user?.sekolah_id || null);
+
+    if (!sekolahId && sekolah_nama) {
+      const cleanSch = sekolah_nama.trim();
+      const cleanKec = kecamatan ? kecamatan.replace(/^Kec\.\s*/i, '').trim() : '';
+      const [schRows] = await conn.execute(`
+        SELECT sp.id FROM satuan_pendidikan sp
+        LEFT JOIN kecamatan k ON sp.kecamatan_id = k.id
+        WHERE sp.nama LIKE ? OR (sp.nama LIKE ? AND k.nama LIKE ?)
+        LIMIT 1
+      `, [`%${cleanSch}%`, `%${cleanSch}%`, `%${cleanKec}%`]);
+
+      if (schRows.length > 0) {
+        sekolahId = schRows[0].id;
+      }
+    }
+
+    if (!sekolahId) {
+      await conn.rollback();
+      return res.status(400).json({ success: false, message: 'Sekolah yang diobservasi tidak ditemukan. Pilih sekolah dari daftar.' });
+    }
+
+    const tanggalVal = tanggal || tanggal_observasi || new Date().toISOString().slice(0, 10);
+    const guruInisialVal = guru_inisial || nama_guru_inisial || 'GR';
+    const guruJkVal = guru_jk || jenis_kelamin_guru || 'P';
+    const jangkauanVal = Number(jangkauan_siswa || 2);
+    const jumlahSebagianKecilVal = (jangkauanVal === 4 && jumlah_siswa_sebagian_kecil) ? parseInt(jumlah_siswa_sebagian_kecil, 10) : null;
 
     // Insert sesi
     const [sesiResult] = await conn.execute(`
       INSERT INTO sel_sesi_observasi (
-        sekolah_id, observer_id, tanggal_observasi, observer_nama,
+        sekolah_id, observer_user_id, tanggal, observer_nama,
         lokasi_diamati, waktu_pengamatan,
         jumlah_siswa_l, jumlah_siswa_p,
         siswa_disabilitas_l, siswa_disabilitas_p,
-        jangkauan_siswa, kelas_diamati,
-        nama_guru_inisial, jenis_kelamin_guru, mata_pelajaran,
-        status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted')
+        jangkauan_siswa, jumlah_siswa_sebagian_kecil, kelas_diamati,
+        guru_inisial, guru_jk, mata_pelajaran,
+        status, submitted_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', NOW())
     `, [
-      sekolah_id, req.user.id, tanggal_observasi, observer_nama,
-      JSON.stringify(lokasi_diamati), JSON.stringify(waktu_pengamatan),
-      jumlah_siswa_l, jumlah_siswa_p,
+      sekolahId, req.user?.id || null, tanggalVal, observer_nama || req.user?.nama || 'Observer Pengawas',
+      Array.isArray(lokasi_diamati) ? JSON.stringify(lokasi_diamati) : (lokasi_diamati ? JSON.stringify([lokasi_diamati]) : JSON.stringify(['Ruang Kelas'])),
+      Array.isArray(waktu_pengamatan) ? JSON.stringify(waktu_pengamatan) : (waktu_pengamatan ? JSON.stringify([waktu_pengamatan]) : JSON.stringify(['Jam Pelajaran'])),
+      jumlah_siswa_l || 0, jumlah_siswa_p || 0,
       siswa_disabilitas_l || 0, siswa_disabilitas_p || 0,
-      jangkauan_siswa, kelas_diamati,
-      nama_guru_inisial, jenis_kelamin_guru, mata_pelajaran,
+      jangkauanVal, jumlahSebagianKecilVal, kelas_diamati || '4A',
+      guruInisialVal, guruJkVal, mata_pelajaran || 'Tematik',
     ]);
 
     const sesiId = sesiResult.insertId;
 
-    // Insert jawaban (batch)
-    if (jawaban && jawaban.length > 0) {
-      const values = jawaban.map(j => [sesiId, j.indikator_id, j.skor, j.catatan || null]);
-      await conn.query(
-        `INSERT INTO sel_jawaban_observasi (sesi_id, indikator_id, skor, catatan) VALUES ?`,
-        [values]
-      );
+    // Fetch active indikators to map kode/id
+    let [indRows] = await conn.execute(`SELECT id, kode FROM sel_indikator`);
+    if (indRows.length === 0) {
+      const defaultInds = [
+        ['ind_kd_1', 'Guru menunjukkan kesadaran emosi', 'guru', 'kelas', 1, 1],
+        ['ind_re_1', 'Guru mengelola emosi', 'guru', 'kelas', 2, 1],
+        ['ind_ks_1', 'Guru menunjukkan kepedulian', 'guru', 'kelas', 3, 1],
+        ['ind_kr_1', 'Guru membangun komunikasi positif', 'guru', 'kelas', 4, 1],
+        ['ind_tj_1', 'Guru mengambil keputusan bertanggung jawab', 'guru', 'kelas', 5, 1],
+      ];
+      for (const ind of defaultInds) {
+        await conn.execute(`INSERT INTO sel_indikator (kode, teks, subjek, konteks, dimensi_id, urutan) VALUES (?, ?, ?, ?, ?, ?)`, ind);
+      }
+      const [reloaded] = await conn.execute(`SELECT id, kode FROM sel_indikator`);
+      indRows = reloaded;
+    }
+
+    const kodeToIdMap = new Map();
+    indRows.forEach(r => {
+      if (r.kode) kodeToIdMap.set(String(r.kode).trim(), r.id);
+      if (r.id) kodeToIdMap.set(String(r.id), r.id);
+    });
+
+    if (jawaban && Array.isArray(jawaban) && jawaban.length > 0) {
+      const values = [];
+      for (let idx = 0; idx < jawaban.length; idx++) {
+        const j = jawaban[idx];
+        const rawCode = j.indikator_kode || j.indikatorId || j.kode;
+        const rawNumId = j.indikator_id;
+
+        let resolvedId = null;
+        if (rawCode && kodeToIdMap.has(String(rawCode).trim())) {
+          resolvedId = kodeToIdMap.get(String(rawCode).trim());
+        } else if (rawNumId && kodeToIdMap.has(String(rawNumId))) {
+          resolvedId = kodeToIdMap.get(String(rawNumId));
+        } else if (typeof rawNumId === 'number' && rawNumId > 0) {
+          resolvedId = rawNumId;
+        } else if (indRows[idx]) {
+          resolvedId = indRows[idx].id;
+        }
+
+        if (resolvedId && j.skor !== null && j.skor !== undefined) {
+          values.push([sesiId, resolvedId, j.skor, j.catatan || null]);
+        }
+      }
+      if (values.length > 0) {
+        await conn.query(
+          `INSERT INTO sel_jawaban_observasi (sesi_id, indikator_id, skor, catatan) VALUES ?`,
+          [values]
+        );
+      }
     }
 
     await conn.commit();
-    return res.status(201).json({ success: true, sesi_id: sesiId });
+
+    // Check target observasi warning
+    let warning = null;
+    try {
+      const [targetRows] = await pool.execute(`
+        SELECT sp.target_observasi,
+          (SELECT COUNT(*) FROM sel_sesi_observasi sso2 WHERE sso2.sekolah_id = sp.id AND sso2.deleted_at IS NULL) AS observasi_count
+        FROM satuan_pendidikan sp WHERE sp.id = ?
+      `, [sekolahId]);
+      if (targetRows.length > 0) {
+        const { target_observasi, observasi_count } = targetRows[0];
+        if (observasi_count > target_observasi) {
+          warning = `Sekolah ini sudah melebihi target observasi (${observasi_count}/${target_observasi} sesi). Data tetap tersimpan dan dihitung dalam analisis.`;
+        } else if (observasi_count === target_observasi) {
+          warning = `Target observasi sekolah ini telah tercapai (${observasi_count}/${target_observasi} sesi).`;
+        }
+      }
+    } catch (_) { /* ignore target check error */ }
+
+    return res.status(201).json({
+      success: true,
+      sesi_id: sesiId,
+      message: 'Sesi observasi SEL berhasil disimpan!',
+      warning,
+    });
   } catch (err) {
     await conn.rollback();
     console.error('[SEL] submit sesi error:', err);
-    return res.status(500).json({ success: false, message: 'Gagal menyimpan sesi observasi.' });
+    return res.status(500).json({ success: false, message: 'Gagal menyimpan sesi observasi: ' + (err.message || 'Server Error') });
   } finally {
     conn.release();
   }
@@ -153,8 +453,12 @@ router.get('/sesi', async (req, res) => {
 
     const [rows] = await pool.execute(`
       SELECT
-        sso.id, sso.tanggal_observasi, sso.observer_nama, sso.status,
-        sso.kelas_diamati, sso.mata_pelajaran, sso.jangkauan_siswa,
+        sso.id, sso.sekolah_id, sso.tanggal, sso.observer_nama, sso.status,
+        sso.lokasi_diamati, sso.waktu_pengamatan,
+        sso.jumlah_siswa_l, sso.jumlah_siswa_p,
+        sso.siswa_disabilitas_l, sso.siswa_disabilitas_p,
+        sso.kelas_diamati, sso.guru_inisial, sso.guru_jk,
+        sso.mata_pelajaran, sso.jangkauan_siswa, sso.jumlah_siswa_sebagian_kecil,
         sp.nama AS sekolah_nama, sp.npsn,
         k.nama  AS kecamatan,
         kb.nama AS kabupaten
@@ -162,15 +466,152 @@ router.get('/sesi', async (req, res) => {
       JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
       JOIN kecamatan k ON sp.kecamatan_id = k.id
       JOIN kabupaten kb ON k.kabupaten_id = kb.id
-      WHERE (? IS NULL OR kb.id = ?)
+      WHERE sso.deleted_at IS NULL
+        AND (? IS NULL OR kb.id = ?)
         ${extraWhere}
-      ORDER BY sso.tanggal_observasi DESC
+      ORDER BY sso.tanggal DESC, sso.id DESC
       LIMIT 200
     `, [kabupatenId, kabupatenId, ...extraParams]);
 
-    return res.json({ success: true, data: rows });
+    if (rows.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+
+    // Fetch all answers for these sessions
+    const sesiIds = rows.map(r => r.id);
+    const [jawabanRows] = await pool.query(`
+      SELECT sjo.sesi_id, sjo.indikator_id, si.kode AS indikator_kode, si.teks AS indikator_teks, sjo.skor, sjo.catatan
+      FROM sel_jawaban_observasi sjo
+      LEFT JOIN sel_indikator si ON sjo.indikator_id = si.id
+      WHERE sjo.sesi_id IN (?)
+    `, [sesiIds]);
+
+    const jawabanBySesi = {};
+    for (const j of jawabanRows) {
+      if (!jawabanBySesi[j.sesi_id]) jawabanBySesi[j.sesi_id] = [];
+      jawabanBySesi[j.sesi_id].push({
+        indikatorId: j.indikator_kode || String(j.indikator_id),
+        indikator_id: j.indikator_id,
+        indikator_kode: j.indikator_kode,
+        indikator_teks: j.indikator_teks,
+        skor: j.skor,
+        catatan: j.catatan,
+      });
+    }
+
+    const data = rows.map(r => ({
+      ...r,
+      jawaban: jawabanBySesi[r.id] || [],
+    }));
+
+    return res.json({ success: true, data });
   } catch (err) {
+    console.error('[SEL] fetch sesi list error:', err);
     return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── GET /api/sel/export-full ───────────────────────────────────────────────
+router.get('/export-full', async (req, res) => {
+  try {
+    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
+
+    // 1. Ambil data sesi
+    const [rows] = await pool.execute(`
+      SELECT
+        sso.id, sso.sekolah_id, sso.tanggal, sso.observer_nama, sso.status,
+        sso.lokasi_diamati, sso.waktu_pengamatan,
+        sso.jumlah_siswa_l, sso.jumlah_siswa_p,
+        sso.siswa_disabilitas_l, sso.siswa_disabilitas_p,
+        sso.kelas_diamati, sso.guru_inisial, sso.guru_jk,
+        sso.mata_pelajaran, sso.jangkauan_siswa, sso.jumlah_siswa_sebagian_kecil,
+        sp.nama AS sekolah_nama, sp.npsn,
+        k.nama  AS kecamatan,
+        kb.nama AS kabupaten,
+        
+        -- Additional Scores computed on the fly
+        ROUND((SELECT AVG(skor) FROM sel_jawaban_observasi WHERE sesi_id = sso.id), 2) AS total_rata,
+        ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id WHERE sjo.sesi_id = sso.id AND si.subjek = 'guru'), 2) AS guru_total,
+        ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id WHERE sjo.sesi_id = sso.id AND si.subjek = 'murid'), 2) AS murid_total,
+        ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id JOIN sel_dimensi sd ON si.dimensi_id = sd.id WHERE sjo.sesi_id = sso.id AND sd.kode = 'kesadaran_diri'), 2) AS kesadaran_diri,
+        ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id JOIN sel_dimensi sd ON si.dimensi_id = sd.id WHERE sjo.sesi_id = sso.id AND sd.kode = 'regulasi_emosi'), 2) AS regulasi_emosi,
+        ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id JOIN sel_dimensi sd ON si.dimensi_id = sd.id WHERE sjo.sesi_id = sso.id AND sd.kode = 'kesadaran_sosial'), 2) AS kesadaran_sosial,
+        ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id JOIN sel_dimensi sd ON si.dimensi_id = sd.id WHERE sjo.sesi_id = sso.id AND sd.kode = 'keterampilan_relasi'), 2) AS keterampilan_relasi,
+        ROUND((SELECT AVG(sjo.skor) FROM sel_jawaban_observasi sjo JOIN sel_indikator si ON sjo.indikator_id = si.id JOIN sel_dimensi sd ON si.dimensi_id = sd.id WHERE sjo.sesi_id = sso.id AND sd.kode = 'tanggung_jawab'), 2) AS tanggung_jawab,
+        sso.observer_user_id, sso.submitted_at,
+        u.email AS observer_email
+      FROM sel_sesi_observasi sso
+      JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
+      JOIN kecamatan k ON sp.kecamatan_id = k.id
+      JOIN kabupaten kb ON k.kabupaten_id = kb.id
+      LEFT JOIN users u ON sso.observer_user_id = u.id
+      WHERE sso.deleted_at IS NULL
+        AND (? IS NULL OR kb.id = ?)
+      ORDER BY sso.tanggal DESC, sso.id DESC
+    `, [kabupatenId, kabupatenId]);
+
+    const schoolScores = await computeSchoolScores({ kabupatenId });
+    rows.forEach(r => { r.kuisioner_score = schoolScores.has(r.sekolah_id) ? schoolScores.get(r.sekolah_id) : null; });
+
+    // 2. Ambil semua pertanyaan (indikator)
+    const [questions] = await pool.execute(`
+      SELECT si.id, si.kode, si.teks, si.subjek, sd.nama AS dimensi_nama 
+      FROM sel_indikator si 
+      JOIN sel_dimensi sd ON si.dimensi_id = sd.id 
+      WHERE si.deleted_at IS NULL
+      ORDER BY sd.urutan, si.subjek, si.urutan
+    `);
+
+    // 3. Ambil jawaban
+    const ansMap = {};
+    if (rows.length > 0) {
+      const sesiIds = rows.map(r => r.id);
+      const placeholders = sesiIds.map(() => '?').join(',');
+      const [answers] = await pool.execute(`
+        SELECT sesi_id, indikator_id, skor, catatan
+        FROM sel_jawaban_observasi
+        WHERE sesi_id IN (${placeholders})
+      `, sesiIds);
+
+      answers.forEach(a => {
+        if (!ansMap[a.sesi_id]) ansMap[a.sesi_id] = {};
+        ansMap[a.sesi_id][a.indikator_id] = { skor: a.skor, catatan: a.catatan };
+      });
+    }
+
+    return res.json({ 
+      success: true, 
+      data: {
+        sessions: rows,
+        questions: questions,
+        answers: ansMap
+      } 
+    });
+  } catch (err) {
+    console.error('[SEL] export-full error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── DELETE /api/sel/sesi/:id (Soft Delete Sesi Observasi) ────────────────────
+router.delete('/sesi/:id', async (req, res) => {
+  try {
+    await pool.execute('UPDATE sel_sesi_observasi SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?', [req.params.id]);
+    return res.json({ success: true, message: 'Sesi observasi SEL berhasil dihapus (soft delete).' });
+  } catch (err) {
+    console.error('[SEL] delete sesi error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal menghapus sesi observasi.' });
+  }
+});
+
+// ─── POST /api/sel/sesi/:id/restore (Restore Sesi Observasi) ──────────────────
+router.post('/sesi/:id/restore', async (req, res) => {
+  try {
+    await pool.execute('UPDATE sel_sesi_observasi SET deleted_at = NULL WHERE id = ?', [req.params.id]);
+    return res.json({ success: true, message: 'Sesi observasi SEL berhasil dipulihkan (restore).' });
+  } catch (err) {
+    console.error('[SEL] restore sesi error:', err);
+    return res.status(500).json({ success: false, message: 'Gagal memulihkan sesi observasi.' });
   }
 });
 
@@ -196,7 +637,7 @@ router.get('/analisis/heatmap', async (req, res) => {
       JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
       JOIN kecamatan k ON sp.kecamatan_id = k.id
       JOIN kabupaten kb ON k.kabupaten_id = kb.id
-      WHERE sjo.skor IS NOT NULL
+      WHERE sjo.skor IS NOT NULL AND sso.deleted_at IS NULL
         AND (? IS NULL OR kb.id = ?)
       GROUP BY k.id, k.nama, kb.nama
       ORDER BY rata_rata DESC
@@ -224,7 +665,7 @@ router.get('/analisis/radar/:sekolahId', async (req, res) => {
       JOIN sel_indikator si ON sjo.indikator_id = si.id
       JOIN sel_dimensi sd ON si.dimensi_id = sd.id
       JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
-      WHERE sjo.skor IS NOT NULL
+      WHERE sjo.skor IS NOT NULL AND sso.deleted_at IS NULL
         AND sp.kecamatan_id = (SELECT kecamatan_id FROM satuan_pendidikan WHERE id = ?)
       GROUP BY sd.id, sd.nama
       ORDER BY sd.urutan
@@ -239,25 +680,47 @@ router.get('/analisis/radar/:sekolahId', async (req, res) => {
 // ─── GET /api/sel/analisis/summary ───────────────────────────────────────────
 router.get('/analisis/summary', async (req, res) => {
   try {
+    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
+
     const [rows] = await pool.execute(`
       SELECT
         COUNT(DISTINCT sso.id) AS total_sesi,
+        COUNT(DISTINCT sso.sekolah_id) AS total_sekolah,
         ROUND(AVG(CASE WHEN si.subjek = 'guru'  THEN sjo.skor END), 2) AS rata_guru,
         ROUND(AVG(CASE WHEN si.subjek = 'murid' THEN sjo.skor END), 2) AS rata_murid,
-        (SELECT COUNT(DISTINCT sub_sso.sekolah_id)
+        COALESCE((
+          SELECT COUNT(DISTINCT sub_sso.sekolah_id)
           FROM sel_sesi_observasi sub_sso
           JOIN sel_jawaban_observasi sub_sjo ON sub_sjo.sesi_id = sub_sso.id
-          WHERE sub_sjo.skor IS NOT NULL
+          JOIN satuan_pendidikan sub_sp ON sub_sso.sekolah_id = sub_sp.id
+          JOIN kecamatan sub_k ON sub_sp.kecamatan_id = sub_k.id
+          WHERE sub_sjo.skor IS NOT NULL AND sub_sso.deleted_at IS NULL
+            AND (? IS NULL OR sub_k.kabupaten_id = ?)
           GROUP BY sub_sso.sekolah_id
           HAVING AVG(sub_sjo.skor) < 2.5
-        ) AS butuh_intervensi
+        ), 0) AS butuh_intervensi
       FROM sel_sesi_observasi sso
       JOIN sel_jawaban_observasi sjo ON sjo.sesi_id = sso.id
       JOIN sel_indikator si ON sjo.indikator_id = si.id
-      WHERE sjo.skor IS NOT NULL
-    `);
-    return res.json({ success: true, data: rows[0] });
+      JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
+      JOIN kecamatan k ON sp.kecamatan_id = k.id
+      WHERE sjo.skor IS NOT NULL AND sso.deleted_at IS NULL
+        AND (? IS NULL OR k.kabupaten_id = ?)
+    `, [kabupatenId, kabupatenId, kabupatenId, kabupatenId]);
+
+    const result = rows[0] || {};
+    return res.json({
+      success: true,
+      data: {
+        total_sesi: result.total_sesi || 0,
+        total_sekolah: result.total_sekolah || 0,
+        rata_guru: parseFloat(result.rata_guru || '0'),
+        rata_murid: parseFloat(result.rata_murid || '0'),
+        butuh_intervensi: result.butuh_intervensi || 0,
+      }
+    });
   } catch (err) {
+    console.error('[SEL] summary error:', err);
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -269,24 +732,280 @@ router.get('/analisis/matriks', async (req, res) => {
 
     const [rows] = await pool.execute(`
       SELECT
-        sp.id AS sekolah_id, sp.nama AS sekolah,
-        k.nama AS kecamatan, sp.status_pengisian,
+        sp.id AS sekolah_id,
+        sp.nama AS sekolah,
+        k.nama AS kecamatan,
+        kb.nama AS kabupaten,
+        sp.status_pengisian,
         ROUND(AVG(sjo.skor), 2) AS sel_score,
         ROUND(AVG(CASE WHEN si.subjek = 'guru'  THEN sjo.skor END), 2) AS guru_score,
-        ROUND(AVG(CASE WHEN si.subjek = 'murid' THEN sjo.skor END), 2) AS murid_score
+        ROUND(AVG(CASE WHEN si.subjek = 'murid' THEN sjo.skor END), 2) AS murid_score,
+        sp.npsn
+      FROM sel_sesi_observasi sso
+      JOIN sel_jawaban_observasi sjo ON sjo.sesi_id = sso.id
+      JOIN sel_indikator si ON sjo.indikator_id = si.id
+      JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
+      JOIN kecamatan k ON sp.kecamatan_id = k.id
+      JOIN kabupaten kb ON k.kabupaten_id = kb.id
+      WHERE sjo.skor IS NOT NULL AND sso.deleted_at IS NULL
+        AND (? IS NULL OR kb.id = ?)
+      GROUP BY sp.id, sp.nama, sp.npsn, k.nama, kb.nama, sp.status_pengisian
+      ORDER BY sel_score DESC
+    `, [kabupatenId, kabupatenId]);
+
+    // Skor kuesioner real per sekolah (null = sekolah belum punya jawaban evaluatif)
+    const schoolScores = await computeSchoolScores({ kabupatenId });
+    return res.json({
+      success: true,
+      data: rows.map(r => ({ ...r, kuisioner_score: schoolScores.has(r.sekolah_id) ? schoolScores.get(r.sekolah_id) : null })),
+    });
+  } catch (err) {
+    console.error('[SEL] matriks error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── GET /api/sel/analisis/scores (Per school scores list for SEL) ───────────
+router.get('/analisis/scores', async (req, res) => {
+  try {
+    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
+
+    const [rows] = await pool.execute(`
+      SELECT
+        sp.id AS sekolah_id,
+        sp.nama AS sekolah_nama,
+        k.nama AS kecamatan,
+        kb.nama AS kabupaten,
+        DATE_FORMAT(MAX(sso.tanggal), '%d %b %Y') AS tanggal,
+        ROUND(AVG(CASE WHEN si.subjek = 'guru' THEN sjo.skor END), 2) AS guru_total,
+        ROUND(AVG(CASE WHEN si.subjek = 'murid' THEN sjo.skor END), 2) AS murid_total,
+        ROUND(AVG(sjo.skor), 2) AS total_rata,
+
+        -- Kesadaran Diri
+        ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_diri' AND si.subjek = 'guru' THEN sjo.skor END), 2) AS kd_guru,
+        ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_diri' AND si.subjek = 'murid' THEN sjo.skor END), 2) AS kd_murid,
+        ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_diri' AND si.konteks = 'kelas' THEN sjo.skor END), 2) AS kd_kelas,
+        ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_diri' AND si.konteks = 'lingkungan' THEN sjo.skor END), 2) AS kd_lingkungan,
+        ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_diri' THEN sjo.skor END), 2) AS kd_rata,
+
+        -- Regulasi Emosi
+        ROUND(AVG(CASE WHEN sd.kode = 'regulasi_emosi' AND si.subjek = 'guru' THEN sjo.skor END), 2) AS re_guru,
+        ROUND(AVG(CASE WHEN sd.kode = 'regulasi_emosi' AND si.subjek = 'murid' THEN sjo.skor END), 2) AS re_murid,
+        ROUND(AVG(CASE WHEN sd.kode = 'regulasi_emosi' AND si.konteks = 'kelas' THEN sjo.skor END), 2) AS re_kelas,
+        ROUND(AVG(CASE WHEN sd.kode = 'regulasi_emosi' AND si.konteks = 'lingkungan' THEN sjo.skor END), 2) AS re_lingkungan,
+        ROUND(AVG(CASE WHEN sd.kode = 'regulasi_emosi' THEN sjo.skor END), 2) AS re_rata,
+
+        -- Kesadaran Sosial
+        ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_sosial' AND si.subjek = 'guru' THEN sjo.skor END), 2) AS ks_guru,
+        ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_sosial' AND si.subjek = 'murid' THEN sjo.skor END), 2) AS ks_murid,
+        ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_sosial' AND si.konteks = 'kelas' THEN sjo.skor END), 2) AS ks_kelas,
+        ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_sosial' AND si.konteks = 'lingkungan' THEN sjo.skor END), 2) AS ks_lingkungan,
+        ROUND(AVG(CASE WHEN sd.kode = 'kesadaran_sosial' THEN sjo.skor END), 2) AS ks_rata,
+
+        -- Keterampilan Relasi
+        ROUND(AVG(CASE WHEN sd.kode = 'keterampilan_relasi' AND si.subjek = 'guru' THEN sjo.skor END), 2) AS kr_guru,
+        ROUND(AVG(CASE WHEN sd.kode = 'keterampilan_relasi' AND si.subjek = 'murid' THEN sjo.skor END), 2) AS kr_murid,
+        ROUND(AVG(CASE WHEN sd.kode = 'keterampilan_relasi' AND si.konteks = 'kelas' THEN sjo.skor END), 2) AS kr_kelas,
+        ROUND(AVG(CASE WHEN sd.kode = 'keterampilan_relasi' AND si.konteks = 'lingkungan' THEN sjo.skor END), 2) AS kr_lingkungan,
+        ROUND(AVG(CASE WHEN sd.kode = 'keterampilan_relasi' THEN sjo.skor END), 2) AS kr_rata,
+
+        -- Tanggung Jawab
+        ROUND(AVG(CASE WHEN sd.kode = 'tanggung_jawab' AND si.subjek = 'guru' THEN sjo.skor END), 2) AS tj_guru,
+        ROUND(AVG(CASE WHEN sd.kode = 'tanggung_jawab' AND si.subjek = 'murid' THEN sjo.skor END), 2) AS tj_murid,
+        ROUND(AVG(CASE WHEN sd.kode = 'tanggung_jawab' AND si.konteks = 'kelas' THEN sjo.skor END), 2) AS tj_kelas,
+        ROUND(AVG(CASE WHEN sd.kode = 'tanggung_jawab' AND si.konteks = 'lingkungan' THEN sjo.skor END), 2) AS tj_lingkungan,
+        ROUND(AVG(CASE WHEN sd.kode = 'tanggung_jawab' THEN sjo.skor END), 2) AS tj_rata,
+        sp.npsn,
+        COUNT(DISTINCT sso.id) AS jumlah_sesi
+
+      FROM sel_sesi_observasi sso
+      JOIN sel_jawaban_observasi sjo ON sjo.sesi_id = sso.id
+      JOIN sel_indikator si ON sjo.indikator_id = si.id
+      JOIN sel_dimensi sd ON si.dimensi_id = sd.id
+      JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
+      JOIN kecamatan k ON sp.kecamatan_id = k.id
+      JOIN kabupaten kb ON k.kabupaten_id = kb.id
+      WHERE sjo.skor IS NOT NULL AND sso.deleted_at IS NULL
+        AND (? IS NULL OR kb.id = ?)
+      GROUP BY sp.id, sp.nama, sp.npsn, k.nama, kb.nama, sp.status_pengisian
+      ORDER BY total_rata DESC
+    `, [kabupatenId, kabupatenId]);
+
+    const schoolScores = await computeSchoolScores({ kabupatenId });
+
+    const formatted = rows.map(r => ({
+      sekolahId: String(r.sekolah_id),
+      sekolahNama: r.sekolah_nama,
+      kecamatan: r.kecamatan,
+      kabupaten: r.kabupaten,
+      tanggal: r.tanggal || '',
+      guruTotal: parseFloat(r.guru_total || '0'),
+      muridTotal: parseFloat(r.murid_total || '0'),
+      totalRata: parseFloat(r.total_rata || '0'),
+      npsn: r.npsn || '',
+      jumlahSesi: Number(r.jumlah_sesi || 0),
+      kuisionerScore: schoolScores.has(r.sekolah_id) ? schoolScores.get(r.sekolah_id) : null,
+      dimensi: [
+        {
+          dimensi: 'kesadaran_diri',
+          label: 'Kesadaran Diri',
+          guruSkor: r.kd_guru != null ? parseFloat(r.kd_guru) : 0,
+          muridSkor: r.kd_murid != null ? parseFloat(r.kd_murid) : 0,
+          kelasSkor: r.kd_kelas != null ? parseFloat(r.kd_kelas) : null,
+          lingkunganSkor: r.kd_lingkungan != null ? parseFloat(r.kd_lingkungan) : null,
+          rataRata: r.kd_rata != null ? parseFloat(r.kd_rata) : 0,
+        },
+        {
+          dimensi: 'regulasi_emosi',
+          label: 'Regulasi Emosi',
+          guruSkor: r.re_guru != null ? parseFloat(r.re_guru) : 0,
+          muridSkor: r.re_murid != null ? parseFloat(r.re_murid) : 0,
+          kelasSkor: r.re_kelas != null ? parseFloat(r.re_kelas) : null,
+          lingkunganSkor: r.re_lingkungan != null ? parseFloat(r.re_lingkungan) : null,
+          rataRata: r.re_rata != null ? parseFloat(r.re_rata) : 0,
+        },
+        {
+          dimensi: 'kesadaran_sosial',
+          label: 'Kesadaran Sosial',
+          guruSkor: r.ks_guru != null ? parseFloat(r.ks_guru) : 0,
+          muridSkor: r.ks_murid != null ? parseFloat(r.ks_murid) : 0,
+          kelasSkor: r.ks_kelas != null ? parseFloat(r.ks_kelas) : null,
+          lingkunganSkor: r.ks_lingkungan != null ? parseFloat(r.ks_lingkungan) : null,
+          rataRata: r.ks_rata != null ? parseFloat(r.ks_rata) : 0,
+        },
+        {
+          dimensi: 'keterampilan_relasi',
+          label: 'Keterampilan Relasi',
+          guruSkor: r.kr_guru != null ? parseFloat(r.kr_guru) : 0,
+          muridSkor: r.kr_murid != null ? parseFloat(r.kr_murid) : 0,
+          kelasSkor: r.kr_kelas != null ? parseFloat(r.kr_kelas) : null,
+          lingkunganSkor: r.kr_lingkungan != null ? parseFloat(r.kr_lingkungan) : null,
+          rataRata: r.kr_rata != null ? parseFloat(r.kr_rata) : 0,
+        },
+        {
+          dimensi: 'tanggung_jawab',
+          label: 'Tanggung Jawab',
+          guruSkor: r.tj_guru != null ? parseFloat(r.tj_guru) : 0,
+          muridSkor: r.tj_murid != null ? parseFloat(r.tj_murid) : 0,
+          kelasSkor: r.tj_kelas != null ? parseFloat(r.tj_kelas) : null,
+          lingkunganSkor: r.tj_lingkungan != null ? parseFloat(r.tj_lingkungan) : null,
+          rataRata: r.tj_rata != null ? parseFloat(r.tj_rata) : 0,
+        },
+      ]
+    }));
+
+    return res.json({ success: true, data: formatted });
+  } catch (err) {
+    console.error('[SEL] scores error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── GET /api/sel/analisis/jangkauan-distribution ─────────────────────────────
+router.get('/analisis/jangkauan-distribution', async (req, res) => {
+  try {
+    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
+
+    const [rows] = await pool.execute(`
+      SELECT 
+        sso.jangkauan_siswa AS code,
+        COALESCE(sko.label, 
+          CASE sso.jangkauan_siswa
+            WHEN 1 THEN 'Menjangkau seluruh siswa'
+            WHEN 2 THEN 'Menjangkau lebih dari separuh siswa'
+            WHEN 3 THEN 'Menjangkau kurang separuh siswa'
+            WHEN 4 THEN 'Hanya sebagian kecil siswa (jika memungkinkan sertakan jumlah, jika memilih ini)'
+            ELSE 'Lainnya'
+          END
+        ) AS jangkauan_label,
+        COUNT(DISTINCT sso.id) AS jumlah_sesi,
+        ROUND(AVG(sjo.skor), 2) AS rata_skor,
+        SUM(sso.jumlah_siswa_sebagian_kecil) AS total_siswa_sebagian_kecil,
+        ROUND(AVG(sso.jumlah_siswa_sebagian_kecil), 1) AS avg_siswa_sebagian_kecil
+      FROM sel_sesi_observasi sso
+      LEFT JOIN sel_konteks_options sko ON sko.kategori = 'jangkauan' AND sko.urutan = sso.jangkauan_siswa
+      LEFT JOIN sel_jawaban_observasi sjo ON sjo.sesi_id = sso.id
+      JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
+      JOIN kecamatan k ON sp.kecamatan_id = k.id
+      WHERE sso.deleted_at IS NULL
+        AND (? IS NULL OR k.kabupaten_id = ?)
+      GROUP BY sso.jangkauan_siswa, sko.label
+      ORDER BY sso.jangkauan_siswa ASC
+    `, [kabupatenId, kabupatenId]);
+
+    return res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error('[SEL] jangkauan distribution error:', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ─── GET /api/sel/summary-stats (Dashboard SEL Insight Banner) ────────────────
+router.get('/summary-stats', async (req, res) => {
+  try {
+    const kabupatenId = req.query.kabupaten_id ? parseInt(req.query.kabupaten_id) : null;
+
+    const [rows] = await pool.execute(`
+      SELECT
+        COUNT(DISTINCT sso.sekolah_id) AS totalDiobservasi,
+        ROUND(AVG(CASE WHEN si.subjek = 'guru'  THEN sjo.skor END), 2) AS rataGuruAll,
+        ROUND(AVG(CASE WHEN si.subjek = 'murid' THEN sjo.skor END), 2) AS rataMuridAll,
+        COUNT(DISTINCT sso.id) AS totalSesi
       FROM sel_sesi_observasi sso
       JOIN sel_jawaban_observasi sjo ON sjo.sesi_id = sso.id
       JOIN sel_indikator si ON sjo.indikator_id = si.id
       JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
       JOIN kecamatan k ON sp.kecamatan_id = k.id
       WHERE sjo.skor IS NOT NULL
+        AND sso.deleted_at IS NULL
         AND (? IS NULL OR k.kabupaten_id = ?)
-      GROUP BY sp.id, sp.nama, k.nama, sp.status_pengisian
-      ORDER BY sel_score DESC
     `, [kabupatenId, kabupatenId]);
 
-    return res.json({ success: true, data: rows });
+    // Count schools needing intervention (avg score < 2.5)
+    const [interventionRows] = await pool.execute(`
+      SELECT COUNT(*) AS butuhIntervensi FROM (
+        SELECT sso.sekolah_id, AVG(sjo.skor) AS avg_skor
+        FROM sel_sesi_observasi sso
+        JOIN sel_jawaban_observasi sjo ON sjo.sesi_id = sso.id
+        JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
+        JOIN kecamatan k ON sp.kecamatan_id = k.id
+        WHERE sjo.skor IS NOT NULL
+          AND sso.deleted_at IS NULL
+          AND (? IS NULL OR k.kabupaten_id = ?)
+        GROUP BY sso.sekolah_id
+        HAVING avg_skor < 2.5
+      ) sub
+    `, [kabupatenId, kabupatenId]);
+
+    // Top school by score
+    const [topRows] = await pool.execute(`
+      SELECT sp.nama AS topSekolah
+      FROM sel_sesi_observasi sso
+      JOIN sel_jawaban_observasi sjo ON sjo.sesi_id = sso.id
+      JOIN satuan_pendidikan sp ON sso.sekolah_id = sp.id
+      JOIN kecamatan k ON sp.kecamatan_id = k.id
+      WHERE sjo.skor IS NOT NULL
+        AND sso.deleted_at IS NULL
+        AND (? IS NULL OR k.kabupaten_id = ?)
+      GROUP BY sso.sekolah_id, sp.nama
+      ORDER BY AVG(sjo.skor) DESC
+      LIMIT 1
+    `, [kabupatenId, kabupatenId]);
+
+    const result = rows[0] || {};
+    return res.json({
+      success: true,
+      data: {
+        totalDiobservasi: result.totalDiobservasi || 0,
+        rataGuruAll: parseFloat(result.rataGuruAll || '0'),
+        rataMuridAll: parseFloat(result.rataMuridAll || '0'),
+        butuhIntervensi: interventionRows[0]?.butuhIntervensi || 0,
+        topSekolah: topRows[0]?.topSekolah || '-',
+        totalSesi: result.totalSesi || 0,
+      }
+    });
   } catch (err) {
+    console.error('[SEL] summary-stats error:', err);
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
