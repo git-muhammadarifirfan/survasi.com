@@ -15,7 +15,7 @@
  */
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
-const TOKEN_KEY    = 'bsan_auth_token';
+const TOKEN_KEY = 'bsan_auth_token';
 
 // ─── HTTP Helpers ─────────────────────────────────────────────────────────────
 
@@ -236,11 +236,7 @@ export const apiClient = {
       fetchJson<{ success: boolean; responden?: any; data: Array<{ id: number; kode: string; pertanyaan: string; section: string; tipe: string; jawaban: string }> }>(`/sekolah/${id}/answers`),
   },
 
-  // ── Responden ──────────────────────────────────────────────────────────────
-  responden: {
-    getExportFull: (kabupatenId?: number) =>
-      fetchJson<ApiResponse<{ respondents: any[]; questions: any[]; answers: any }>>(`/responden/export-full${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
-  },
+
 
   // ── Users Management (Admin) ───────────────────────────────────────────────
   users: {
@@ -280,6 +276,9 @@ export const apiClient = {
 
   // ── Responden ──────────────────────────────────────────────────────────────
   responden: {
+    getExportFull: (kabupatenId?: number) =>
+      fetchJson<ApiResponse<{ respondents: any[]; questions: any[]; answers: any }>>(`/responden/export-full${kabupatenId ? `?kabupaten_id=${kabupatenId}` : ''}`),
+
     getAll: (params?: { kabupaten_id?: number; kecamatan_id?: number; penerima_modul?: string; status_implementasi?: string; search?: string; page?: number; limit?: number }) => {
       const query = new URLSearchParams(
         Object.fromEntries(Object.entries(params || {}).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)]))
