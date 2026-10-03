@@ -1,9 +1,12 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useEffect, useCallback } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
-  Menu, Bell, Search, User, X, Mail, CheckCircle2, AlertCircle,
-  Clock, ShieldCheck, LogOut, ArrowRight, RefreshCw, Sparkles
+  Menu, Bell, Search, User, X,
+  LogOut, Settings, CheckCheck,
 } from 'lucide-react';
+import { apiClient } from '../services/api-client';
+
+export type UserRole = 'admin' | 'pengawas' | 'sekolah';
 
 interface TopbarProps {
   onMenuClick: () => void;
@@ -11,10 +14,11 @@ interface TopbarProps {
   onClearKecamatan: () => void;
   searchTerm: string;
   onSearchChange: (val: string) => void;
-  userRole: 'admin' | 'pengawas';
-  onSwitchRole: (role: 'admin' | 'pengawas') => void;
+  userRole: UserRole;
   onLogout: () => void;
 }
+
+const NOTIF_LIMIT = 5;
 
 export default function Topbar({
   onMenuClick,
@@ -23,23 +27,82 @@ export default function Topbar({
   searchTerm,
   onSearchChange,
   userRole,
-  onSwitchRole,
   onLogout,
 }: TopbarProps) {
+  const navigate = useNavigate();
   const [showNotif, setShowNotif] = useState(false);
-  const [showMessages, setShowMessages] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [userName, setUserName] = useState('');
 
-  const notifications = [
-    { id: 1, title: 'SDN Candi 1 Menyelesaikan Survei', desc: 'Modul 1-3 terverifikasi lengkap', time: '10 min lalu', unread: true },
-    { id: 2, title: 'Reminder Terkirim', desc: 'Surat pengingat terkirim ke 5 sekolah di Kec. Waru', time: '1 jam lalu', unread: true },
-    { id: 3, title: 'Update Master Data', desc: '81 sekolah Kota Batu berhasil diperbarui', time: '3 jam lalu', unread: false },
-  ];
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('bsan_user_profile');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setUserName(parsed.nama || '');
+      }
+    } catch {}
+  }, []);
 
-  const messages = [
-    { id: 1, sender: 'Dinas Pendidikan Sidoarjo', text: 'Batas akhir pengisian survei diperpanjang hingga 10 September 2026.', time: '09:00 WIB' },
-    { id: 2, sender: 'Tim Evaluasi BSAN', text: 'Jadwal bimbingan teknis KKG bulan depan sudah dirilis.', time: 'Kemarin' },
-  ];
+  const fetchNotifications = useCallback(() => {
+    apiClient.notifikasi.getAll()
+      .then((res) => {
+        if (res.success && Array.isArray(res.data)) {
+          setNotifications(res.data);
+          setUnreadCount(res.unread_count || 0);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchNotifications]);
+
+  const markRead = async (id: number) => {
+    const notif = notifications.find(n => n.id === id);
+    if (!notif || notif.is_read) return;
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
+    setUnreadCount(prev => Math.max(0, prev - 1));
+    try { await apiClient.notifikasi.markRead(id); } catch {}
+  };
+
+  const markAllRead = async () => {
+    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+    setUnreadCount(0);
+    try {
+      await apiClient.setting.markAllRead();
+    } catch {}
+  };
+
+  const getRoleBadge = () => {
+    switch (userRole) {
+      case 'admin': return { label: 'Admin Sistem', color: 'bg-teal-500/10 text-teal-700 border-teal-200' };
+      case 'pengawas': return { label: 'Pengawas Sekolah', color: 'bg-emerald-500/10 text-emerald-600 border-emerald-200' };
+      case 'sekolah': return { label: 'Perwakilan Sekolah', color: 'bg-amber-500/10 text-amber-600 border-amber-200' };
+      default: return { label: 'User', color: 'bg-slate-500/10 text-slate-600 border-slate-200' };
+    }
+  };
+
+  const badge = getRoleBadge();
+  const visibleNotifs = notifications.slice(0, NOTIF_LIMIT);
+  const hasMore = notifications.length > NOTIF_LIMIT;
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-topbar-dropdown]')) {
+        setShowNotif(false);
+        setShowProfile(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   return (
     <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-border bg-surface px-5 md:px-8">
@@ -54,6 +117,11 @@ export default function Topbar({
 
         <div className="hidden md:flex items-center text-sm">
           <Link to="/" className="font-semibold text-text-primary hover:text-primary transition-colors">Survei BSAN Jatim</Link>
+          <span className="mx-2 text-text-secondary/40">/</span>
+          <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${badge.color}`}>
+            {badge.label}
+          </span>
+
           {activeKecamatan && (
             <>
               <span className="mx-2 text-text-secondary/50">/</span>
@@ -71,7 +139,7 @@ export default function Topbar({
         </div>
       </div>
 
-      {/* Right: Search, Notifications, Messages, Profile */}
+      {/* Right: Search, Notifications, Profile */}
       <div className="flex items-center space-x-3 relative">
         {/* Search */}
         <div className="relative hidden md:block">
@@ -95,149 +163,135 @@ export default function Topbar({
           )}
         </div>
 
-        {/* Message Icon & Floating Drawer */}
-        <div className="relative">
-          <button
-            onClick={() => {
-              setShowMessages(!showMessages);
-              setShowNotif(false);
-              setShowProfile(false);
-            }}
-            className="relative rounded-xl p-2.5 text-text-secondary hover:bg-bg hover:text-text-primary transition-smooth cursor-pointer"
-            title="Pesan & Pengumuman"
-          >
-            <Mail className="h-[18px] w-[18px]" />
-            <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-status-belum" />
-          </button>
-
-          {showMessages && (
-            <div className="absolute right-0 top-12 z-50 w-80 rounded-2xl bg-surface p-4 shadow-2xl border border-border space-y-3 text-xs">
-              <div className="flex items-center justify-between border-b border-border pb-2">
-                <span className="font-bold text-text-primary text-sm flex items-center space-x-1.5">
-                  <Mail className="h-4 w-4 text-primary" />
-                  <span>Pengumuman & Pesan</span>
-                </span>
-                <button onClick={() => setShowMessages(false)} className="text-text-secondary hover:text-text-primary">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="space-y-2.5 max-h-64 overflow-y-auto">
-                {messages.map(m => (
-                  <div key={m.id} className="p-2.5 rounded-xl bg-bg/60 border border-border/40 space-y-1">
-                    <div className="flex justify-between font-bold text-text-primary">
-                      <span>{m.sender}</span>
-                      <span className="text-[10px] text-text-secondary">{m.time}</span>
-                    </div>
-                    <p className="text-text-secondary leading-relaxed">{m.text}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Notification Icon & Floating Modal */}
-        <div className="relative">
+        {/* Notification Icon */}
+        <div className="relative" data-topbar-dropdown>
           <button
             onClick={() => {
               setShowNotif(!showNotif);
-              setShowMessages(false);
               setShowProfile(false);
             }}
             className="relative rounded-xl p-2.5 text-text-secondary hover:bg-bg hover:text-text-primary transition-smooth cursor-pointer"
-            title="Notifikasi Aktivitas"
+            title="Notifikasi"
           >
             <Bell className="h-[18px] w-[18px]" />
-            <span className="absolute top-2 right-2 h-2 w-2 rounded-full bg-accent" />
+            {unreadCount > 0 && (
+              <span className="absolute top-1.5 right-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent text-[9px] font-bold text-white px-1">
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
           </button>
 
           {showNotif && (
-            <div className="absolute right-0 top-12 z-50 w-80 rounded-2xl bg-surface p-4 shadow-2xl border border-border space-y-3 text-xs">
+            <div className="absolute right-0 top-12 z-50 w-80 sm:w-96 rounded-2xl bg-surface p-4 shadow-2xl border border-border space-y-3 text-xs">
               <div className="flex items-center justify-between border-b border-border pb-2">
                 <span className="font-bold text-text-primary text-sm flex items-center space-x-1.5">
                   <Bell className="h-4 w-4 text-accent" />
-                  <span>Notifikasi Sistem</span>
+                  <span>Notifikasi</span>
+                  {unreadCount > 0 && <span className="ml-1 text-[10px] font-bold text-accent">({unreadCount})</span>}
                 </span>
-                <button onClick={() => setShowNotif(false)} className="text-text-secondary hover:text-text-primary">
-                  <X className="h-4 w-4" />
+                <div className="flex items-center gap-2">
+                  {unreadCount > 0 && (
+                    <button onClick={markAllRead} className="text-[10px] text-primary hover:underline font-bold flex items-center gap-1 cursor-pointer">
+                      <CheckCheck className="h-3 w-3" /> Tandai semua dibaca
+                    </button>
+                  )}
+                  <button onClick={() => setShowNotif(false)} className="text-text-secondary hover:text-text-primary cursor-pointer">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-2 max-h-72 overflow-y-auto custom-scrollbar">
+                {visibleNotifs.length === 0 ? (
+                  <p className="text-center text-text-secondary py-6">Belum ada notifikasi.</p>
+                ) : (
+                  visibleNotifs.map(n => (
+                    <button key={n.id} type="button" onClick={() => markRead(n.id)}
+                      className={`w-full text-left p-2.5 rounded-xl border space-y-1 transition cursor-pointer ${!n.is_read ? 'bg-primary/5 border-primary/20 hover:bg-primary/10' : 'bg-bg/60 border-border/40 hover:bg-bg'}`}>
+                      <div className="flex justify-between items-start gap-2">
+                        <span className="font-bold text-text-primary text-xs leading-snug">{n.judul}</span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {!n.is_read && <span className="h-2 w-2 rounded-full bg-accent" />}
+                          <span className="text-[9px] text-text-secondary whitespace-nowrap">
+                            {n.created_at ? new Date(n.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : ''}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-text-secondary text-[11px] leading-snug line-clamp-2">{n.pesan}</p>
+                    </button>
+                  ))
+                )}
+              </div>
+              {(hasMore || notifications.length > 0) && (
+                <button
+                  onClick={() => { setShowNotif(false); navigate('/setting'); }}
+                  className="w-full text-center text-xs font-bold text-primary hover:underline py-1.5 cursor-pointer"
+                >
+                  Lihat Semua Notifikasi
                 </button>
-              </div>
-              <div className="space-y-2.5 max-h-64 overflow-y-auto">
-                {notifications.map(n => (
-                  <div key={n.id} className={`p-2.5 rounded-xl border space-y-1 ${n.unread ? 'bg-primary/5 border-primary/20' : 'bg-bg/60 border-border/40'}`}>
-                    <div className="flex justify-between font-bold text-text-primary">
-                      <span>{n.title}</span>
-                      <span className="text-[10px] text-text-secondary">{n.time}</span>
-                    </div>
-                    <p className="text-text-secondary">{n.desc}</p>
-                  </div>
-                ))}
-              </div>
+              )}
             </div>
           )}
         </div>
 
         <div className="h-8 w-px bg-border mx-1" />
 
-        {/* Profile Card & Role Switcher Dropdown */}
-        <div className="relative">
+        {/* Profile Card */}
+        <div className="relative" data-topbar-dropdown>
           <button
             onClick={() => {
               setShowProfile(!showProfile);
               setShowNotif(false);
-              setShowMessages(false);
             }}
             className="flex items-center space-x-3 cursor-pointer rounded-xl px-2 py-1.5 hover:bg-bg transition-smooth"
           >
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-primary to-accent text-white text-xs font-bold shadow-sm">
-              <User className="h-4 w-4" />
+              {userName ? userName.substring(0, 1).toUpperCase() : <User className="h-4 w-4" />}
             </div>
             <div className="hidden lg:block text-left leading-tight">
-              <p className="text-[13px] font-semibold text-text-primary">
-                {userRole === 'admin' ? 'Admin CRUD & Analisa' : 'Pengawas Sekolah'}
+              <p className="text-[13px] font-semibold text-text-primary truncate max-w-[140px]">
+                {userName || badge.label}
               </p>
-              <p className="text-[10px] text-text-secondary">
-                {userRole === 'admin' ? 'Super Admin' : 'Pengawas Sidoarjo'}
+              <p className="text-[10px] font-medium text-text-secondary capitalize">
+                {badge.label}
               </p>
             </div>
           </button>
 
           {showProfile && (
-            <div className="absolute right-0 top-12 z-50 w-64 rounded-2xl bg-surface p-4 shadow-2xl border border-border space-y-3 text-xs">
-              <div className="border-b border-border pb-2.5 space-y-0.5">
-                <p className="font-bold text-text-primary text-sm">
-                  {userRole === 'admin' ? 'Admin Dinas (CRUD & Analisa)' : 'Pengawas Sekolah (Input/Adjust DB)'}
-                </p>
-                <p className="text-[10px] text-text-secondary">
-                  {userRole === 'admin' ? 'admin@sidoarjo.go.id' : 'pengawas@sch.id'}
-                </p>
+            <div className="absolute right-0 top-12 z-50 w-72 rounded-2xl bg-surface p-4 shadow-2xl border border-border space-y-3 text-xs">
+              <div className="border-b border-border pb-3 space-y-1">
+                <div className="flex items-center space-x-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-primary to-accent text-white text-sm font-bold shadow-sm shrink-0">
+                    {userName ? userName.substring(0, 1).toUpperCase() : <User className="h-4 w-4" />}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-bold text-text-primary text-sm truncate">
+                      {userName || badge.label}
+                    </p>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border ${badge.color} capitalize`}>
+                      {badge.label}
+                    </span>
+                  </div>
+                </div>
               </div>
 
-              {/* Role Switcher Button */}
-              <div className="space-y-1">
-                <p className="text-[10px] font-bold text-text-secondary uppercase">Ganti Peran Stakeholder:</p>
-                <button
-                  onClick={() => {
-                    const newRole = userRole === 'admin' ? 'pengawas' : 'admin';
-                    onSwitchRole(newRole);
-                    setShowProfile(false);
-                  }}
-                  className="w-full flex items-center justify-between p-2.5 rounded-xl bg-primary/8 hover:bg-primary/15 text-primary font-bold border border-primary/20 transition-smooth"
-                >
-                  <span className="flex items-center space-x-1.5">
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    <span>Ganti ke {userRole === 'admin' ? 'Pengawas Sekolah' : 'Admin'}</span>
-                  </span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
+              <button
+                onClick={() => {
+                  setShowProfile(false);
+                  navigate('/setting');
+                }}
+                className="w-full flex items-center space-x-2 p-2.5 rounded-xl text-text-primary hover:bg-bg font-semibold transition-smooth cursor-pointer"
+              >
+                <Settings className="h-4 w-4 text-text-secondary" />
+                <span>Pengaturan Akun</span>
+              </button>
 
               <button
                 onClick={() => {
                   setShowProfile(false);
                   onLogout();
                 }}
-                className="w-full flex items-center space-x-2 p-2 rounded-xl text-status-belum hover:bg-status-belum/8 font-bold transition-smooth"
+                className="w-full flex items-center space-x-2 p-2.5 rounded-xl text-status-belum hover:bg-status-belum/8 font-bold transition-smooth cursor-pointer"
               >
                 <LogOut className="h-4 w-4" />
                 <span>Keluar Akun</span>
